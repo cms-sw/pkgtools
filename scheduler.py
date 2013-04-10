@@ -34,6 +34,9 @@ class Scheduler(object):
   # Post an appropriate build command for all the new jobs which got added.
   # If there are jobs still to be done, post a reschedule job on the command queue
   # if there are no jobs left, post the "kill worker" task.
+  # There is one, special, "final-job" which depends on all the scheduled jobs
+  # either parallel or serial. This job is guaranteed to be executed last and
+  # avoids having deadlocks due to all the queues having been disposed.
   def __init__(self, parallelThreads, logDelegate=None):
     self.workersQueue = Queue()
     self.resultsQueue = Queue()
@@ -47,6 +50,13 @@ class Scheduler(object):
     self.errors = {}
     if not logDelegate:
       self.logDelegate = self.__doLog 
+    # Add a final job, which will depend on any spawned task so that we do not
+    # terminate until we are completely done.
+    self.finalJobDeps = []
+    self.finalJobSpec = [self.doSerial, "final-job", self.finalJobDeps] + [self.__doLog, "Nothing else to be done, exiting."]
+    self.resultsQueue.put((threading.currentThread(), self.finalJobSpec))
+    self.jobs["final-job"] = {"scheduler": "serial", "deps": self.finalJobSpec, "spec": self.finalJobSpec}
+    self.pendingJobs.append("final-job")
 
   def run(self):
     for i in xrange(self.parallelThreads):
@@ -103,6 +113,7 @@ class Scheduler(object):
       self.log("Double task %s" % taskId)
     self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec}
     self.pendingJobs.append(taskId)
+    self.finalJobDeps.append(taskId)
 
   # Does the rescheduling of tasks. Derived class should call it.
   def __rescheduleParallel(self):
@@ -159,6 +170,7 @@ class Scheduler(object):
     self.resultsQueue.put((threading.currentThread(), spec))
     self.jobs[taskId] = {"scheduler": "serial", "deps": deps, "spec": spec}
     self.pendingJobs.append(taskId)
+    self.finalJobDeps.append(taskId)
 
   def doSerial(self, taskId, deps, *commandSpec):
     brokenDeps = [dep for dep in deps if dep in self.brokenJobs]
@@ -235,13 +247,17 @@ if __name__ == "__main__":
   for x in xrange(50):
     scheduler.parallel("test" + str(x), [], dummyTask)
   scheduler.run()
+  # Notice we have 51 jobs because there is always a toplevel one
+  # which depends on all the others.
   assert(len(scheduler.brokenJobs) == 0)
-  assert(len(scheduler.jobs) == 50)
+  assert(len(scheduler.jobs) == 51)
   
   scheduler = Scheduler(1)
   scheduler.parallel("test", [], errorTask)
   scheduler.run()
-  assert(len(scheduler.brokenJobs) == 1)
+  # Again, since the toplevel one always depend on all the others
+  # it is always broken if something else is brokend.
+  assert(len(scheduler.brokenJobs) == 2)
   assert(len(scheduler.runningJobs) == 0)
   assert(len(scheduler.doneJobs) == 0)
   
@@ -250,7 +266,7 @@ if __name__ == "__main__":
   scheduler.parallel("test2", ["test1"], dummyTask)
   scheduler.parallel("test1", [], dummyTaskLong) 
   scheduler.run()
-  assert(scheduler.doneJobs == ["test1", "test2"])
+  assert(scheduler.doneJobs == ["test1", "test2", "final-job"])
 
   # Check dependency actually works.
   scheduler = Scheduler(10)
@@ -259,7 +275,7 @@ if __name__ == "__main__":
   scheduler.parallel("test1", [], dummyTaskLong) 
   scheduler.run()
   assert(scheduler.doneJobs == ["test1"])
-  assert(scheduler.brokenJobs == ["test2", "test3"])
+  assert(scheduler.brokenJobs == ["test2", "test3", "final-job"])
 
   # Check ctrl-C will exit properly.
   scheduler = Scheduler(2)
@@ -287,7 +303,7 @@ if __name__ == "__main__":
   scheduler = Scheduler(2)
   scheduler.serial("test0", [], dummyTask)
   scheduler.run()
-  assert(scheduler.doneJobs == ["test0"])
+  assert(scheduler.doneJobs == ["test0", "final-job"])
 
   # Handle serial execution tasks, one depends from
   # the previous one.
@@ -295,14 +311,14 @@ if __name__ == "__main__":
   scheduler.serial("test0", [], dummyTask)
   scheduler.serial("test1", ["test0"], dummyTask)
   scheduler.run()
-  assert(scheduler.doneJobs == ["test0", "test1"])
+  assert(scheduler.doneJobs == ["test0", "test1", "final-job"])
 
   # Serial tasks depending on one another.
   scheduler = Scheduler(2)
   scheduler.serial("test1", ["test0"], dummyTask)
   scheduler.serial("test0", [], dummyTask)
   scheduler.run()
-  assert(scheduler.doneJobs == ["test0", "test1"])
+  assert(scheduler.doneJobs == ["test0", "test1", "final-job"])
 
   # Serial and parallel tasks being scheduled at the same time.
   scheduler = Scheduler(2)
@@ -312,7 +328,7 @@ if __name__ == "__main__":
   scheduler.parallel("test3", [], dummyTask)
   scheduler.run()
   scheduler.doneJobs.sort()
-  assert(scheduler.doneJobs == ["test0", "test1", "test2", "test3"])
+  assert(scheduler.doneJobs == ["final-job", "test0", "test1", "test2", "test3"])
 
   # Serial and parallel tasks. Parallel depends on serial.
   scheduler = Scheduler(2)
@@ -321,7 +337,7 @@ if __name__ == "__main__":
   scheduler.parallel("test2", ["test1"], dummyTask)
   scheduler.parallel("test3", ["test2"], dummyTask)
   scheduler.run()
-  assert(scheduler.doneJobs == ["test0", "test1", "test2", "test3"])
+  assert(scheduler.doneJobs == ["test0", "test1", "test2", "test3", "final-job"])
 
   # Serial task scheduling two parallel task and another dependent
   # serial task. This is actually what needs to be done for building 
@@ -332,4 +348,4 @@ if __name__ == "__main__":
   scheduler = Scheduler(3)
   scheduler.serial("check-pkg", [], scheduleMore, scheduler)
   scheduler.run()
-  assert(scheduler.doneJobs == ["check-pkg", "download", "build", "install"])
+  assert(scheduler.doneJobs == ["check-pkg", "download", "build", "install", "final-job"])

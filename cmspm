@@ -217,7 +217,7 @@ def getReleasesTags(releases, diff):
     diff = 'true'
   else:
     diff = 'false'
-  packs = getTcData ('py_getReleasesTags?releases=["' + '","'.join(releases) + '"]&diff=' + diff)
+  packs = getTcData ('public/py_getReleasesTags?releases=["' + '","'.join(releases) + '"]&diff=' + diff)
   return parseJSONTags(packs)
   
 # Get return a dictionary with package => tag for the
@@ -225,7 +225,7 @@ def getReleasesTags(releases, diff):
 def getTagSetTags(tagsets):
   extratags = {}
   for tagset in tagsets:
-    packs = getTcData('py_getTagsetTags?tagset=' + tagset)
+    packs = getTcData('public/py_getTagsetTags?tagset=' + tagset)
     extratags.update(dict(parseJSONTags(packs)))
   return extratags
 

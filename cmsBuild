@@ -164,7 +164,7 @@ def parseSvnUrl (url):
     args["export"] = args["module"]
   if "scheme" in args:
     scheme=args["scheme"]
-  if not scheme in ["svn", "http", "https"] and (not scheme.startswith('svn+')):
+  if not scheme in ["svn", "http", "https", "file"] and (not scheme.startswith('svn+')):
     scheme = "svn+" + scheme
   args["svnroot"] = "%(scheme)s://%(root)s" % {"scheme": scheme, "root": root}
   return (scheme, root, args)
@@ -321,7 +321,7 @@ def downloadGit(source, dest, options):
                "gitroot": gitroot, "dest": dest,
                "exportpath": exportpath})
   makedirs(exportpath)
-  command = """cd %(exportpath)s && git init && git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s && git reset --hard %(tag)s && rm -rf .git"""
+  command = """cd %(exportpath)s && git init && git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s && git reset --hard %(tag)s && rm -rf .git .gitattributes .gitignore"""
   error, output = getstatusoutput(command % args)
   if error:
     log("Error while downloading sources from %s using git.\n\n"
@@ -640,7 +640,7 @@ class TagCacheAptImpl (object):
     
     def update (self):
       if hasattr (self.options, "bootstrap") and self.options.bootstrap == True :
-        aptGetUpdateCommand = "apt-get update"
+        aptGetUpdateCommand = "apt-get update -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0"
         error, output = getstatusoutput (aptGetUpdateCommand)
         if error:
           die("Error while executing apt-get update.\n%s" % output)
@@ -2360,13 +2360,6 @@ def parseOptions():
                                     action="store_true",
                                     help="Do not actually build",
                                     default=False)
-    # FIXME: really needed??? Shouldn't this simply be the repository?
-    advancedBuildOptions.add_option("--bootstrap-subdir",
-                                    dest="bootstrapSubdir",
-                                    metavar="PATH",
-                                    help="Location of the bootstrap.sh file relative to the base repository path.",
-                                    default="cms")
-
     advancedBuildOptions.add_option("--server",
                                     dest="server",
                                     metavar="URL",
@@ -2448,6 +2441,7 @@ def parseOptions():
     # FIXME: use an OptionParser callback.
     # FIXME: exclusive --cmsdist and --cmsdist-tag options.
     # FIXME: change site to "variant" and extract it from the architecture.
+    opts.workDir = abspath(opts.workDir)
     opts.site = ""
     if "://" not in opts.cmsdist:
         opts.cmsdist = abspath (opts.cmsdist)
@@ -2459,8 +2453,11 @@ def parseOptions():
       parser.error("Please specify the architecture you want to build for.")
 
     # Check for weird characters in workdir
-    if re.match(".*[\\\+.[*](?!app$).*", opts.workDir):
-      parser.error("Please avoid '+.[*$' in --work-dir path.")
+    if "/." in opts.workDir:
+      parser.error("Hidden directories not allowed as --work-dir path.")
+      
+    if re.match(".*[\\\+[*$].*", opts.workDir):
+      parser.error("Please avoid '\\+[*$' in --work-dir path.")
     
     # The tag will always match the repository (minus the various .pre bits, 
     # like for comp.pre)
@@ -2469,11 +2466,32 @@ def parseOptions():
     setLogLevel (opts)
     if len(args) < 2:
       parser.error("Please build or upload action. Use --help to see additional options.")
+
+    opts.installDir = opts.workDir
+    if (opts.repository == "cms") or opts.repository.startswith("cms."):
+        opts.installDir = "/opt/cmssw"
+
+    opts.tempDirPrefix = "tmp"
+    if opts.workDir.split(sep)[1] == opts.tempDirPrefix:
+        opts.tempDirPrefix += "X"
+
+    if len(args) < 2:
+      fatal("Wrong number of arguments.")
+    
+    if not args[0] in ["build", "upload"]:
+      fatal("Unknown command %s. Alternatives are build, upload." % args[0])
+    
+    if opts.syncBack and args[0] == "build":
+      fatal("--sync-back option is available only when uploading.")
+
+    if "-cache" in opts.repository or "-cache" in opts.uploadTmpRepository:
+      fatal("Repository name cannot contain -cache")
+
     return opts, args
     
 def createDirs (architecture, dest="./"):
     dirs = ["SPECS", join ("RPMS", architecture), 
-            "SRPMS", join ("BUILD", architecture), "SOURCES", "BUILDROOT"]
+            "SRPMS", join ("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB"]
     for d in dirs:
         try:
             makedirs (join (abspath (dest), d))
@@ -3333,10 +3351,25 @@ def checkPackageInCache(pkg, scheduler):
   scheduler.serial("install-%s" % pkgName, installActionDependencies, installPackage, pkg, scheduler)
   scheduler.reschedule()
 
+# Helper to find an unique list 
+def uniq(input):
+  output = []
+  for x in input:
+    if x not in output:
+      output.append(x)
+  return output
+
 # New version using the new scheduler.
-def buildSpecsNew(pkg):
+def buildSpecsNew(topLevelPackages):
   from scheduler import Scheduler
-  packages = filter(lambda p : not isPackageInstalled(p), pkg.fullDependencies + [pkg])
+  packages = []
+  allPackages = {}
+  for pkg in topLevelPackages:
+    for p in pkg.fullDependencies + [pkg]:
+      allPackages[p.name] = p
+  
+  packages = [p for p in allPackages.itervalues() if not isPackageInstalled(p)]
+
   scheduler = Scheduler(pkg.options.workersPoolSize)
 
   for p in packages:
@@ -3410,12 +3443,13 @@ def build(opts, args, factory):
       return
   
   # FIXME: why serializing when we could be building in parallel?
-  for pkg in packages:
+  if opts.newScheduler:
+    rpmCacheUpdate(opts)
+    buildSpecsNew(packages)
+  else:
+    for pkg in packages:
       rpmCacheUpdate(opts)
-      if opts.newScheduler:
-        buildSpecsNew(pkg)
-      else:
-        buildSpecs(pkg)
+      buildSpecs(pkg)
 
 def isPackageInstalled(pkg):
     pkgName = pkg.pkgName ()
@@ -3463,7 +3497,7 @@ def callCmsos (opts):
 # @return the location of the init.sh script to be sourced when building 
 #         or uploading.
 def bootstrap(opts):
-  bootstrapUrl = "%s/%s/bootstrap.sh" % (opts.server, opts.bootstrapSubdir)
+  bootstrapUrl = "%s/%s/bootstrap.sh" % (opts.server, opts.repository)
   try:
     f=urlopen(bootstrapUrl)
     bootstrapContents = f.read()
@@ -3489,6 +3523,8 @@ def bootstrap(opts):
              "-path", opts.workDir,
              "-repository", opts.repository,
              "-assume-yes", "-only-once", "setup"]
+  if logLevel is DEBUG:
+    options.append("-debug")
   bootstrapCommand ="TMPDIR=%s sh -ex %s %s" % (opts.tempdir, bootstrapFilename, " ".join(options)) 
   log("Bootstrapping cmsBuild area.")
   log(bootstrapCommand, DEBUG)
@@ -3525,72 +3561,6 @@ def checkFileOnServer (contactString, filename):
 def upload_help ():
     log ("""cmsBuild upload <package to upload>""")    
 
-class RemoteExecutor (object):
-    def __init__ (self, options):
-        self.options = options
-    def __call__ (self, script):
-        desc, filename = mkstemp (".sh", "cmsBuildExecuted", self.options.tempDirPrefix, True)
-        f = open (filename, "w")
-        f.write (script)
-        f.close ()
-        self.filename = filename
-        cmdUser = self.options.uploadUser
-        cmdServer = self.options.uploadServer
-        cmdPort = self.options.uploadPort
-        command = "ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s 2>/dev/null sh" % locals ()
-        return command
-    def execType (self):
-        return "remote"
-    def cleanup (self):
-        unlink (self.filename)
-
-class LocalExecutor (object):
-    def __init__ (self, options):
-        self.options = options
-    def __call__ (self, script):
-        desc, filename = mkstemp (".sh", "cmsBuildExecuted", self.options.tempDirPrefix, True)
-        f = open (filename, "w")
-        f.write (script)
-        f.close ()
-        self.filename = filename
-        return "sh < %(filename)s" % locals ()
-    def execType (self):
-        return "local"
-    def cleanup (self):
-        unlink (self.filename)
-    
-class Script (object):
-    def __init__ (self, name, pretend, executor):
-        self.commands = []
-        self.name = name
-        self.executor = executor
-        self.pretend = pretend
-        
-    def execute (self):
-        name = self.name
-        stype = self.executor.execType ()
-        script = '\n'.join (["%(command)s " % locals () 
-                              for command in self.commands])
-        log ("""--- cut here : %(name)s (%(stype)s)---
-                %(script)s
-                --- cut here - done --
-                """ % locals (), self.pretend and NORMAL or DEBUG)
-        if self.pretend:
-            return True
-        log ("Really executing!!!", DEBUG)
-        
-        error, output = getstatusoutput (self.executor (script))        
-        self.executor.cleanup ()
-        if output: log (output, DEBUG)
-        if error:
-            log ("Error while executing!")
-            log (output)
-            return False
-        return True
-        
-    def do (self, command):
-        self.commands.append (command)
-
 def check (opts, args, factory):
     """ This method is responsible for checking that a given package was build
         and installed correctly.
@@ -3607,429 +3577,390 @@ def check (opts, args, factory):
         sys.exit (1)
     log ("Everything ok.")    
 
-class Repository (object):
-    def __init__ (self, repositoryName, opts, fullPackageList=[]):
-        """ repositoryName is the name of the repository (usually something 
-            like 'cms.eulisse' or so).
-            opts is the commandline options object.
-        """
-        self.opts = opts
-        self.repositoryDir = join (opts.uploadRootDirectory, repositoryName)
-        self.repositoryName = repositoryName
-        self.subsystems = []
-        self.fullPackageList = fullPackageList
-        if self.fullPackageList:
-            self.subsystems = self.calculateSubsystems (fullPackageList)
-            self.cmsplatf = fullPackageList[0].cmsplatf
+def format(s, **kwds):
+  return s % kwds
 
-    def calculateSubsystems (self, fullPackageList):
-        subsystems = {}
-        for pkg in fullPackageList:
-            subsystems[pkg.pkgName ().split ("+")[0]] = True
-        return subsystems.keys ()
+def statusAndLog(status, s, **kwds):
+  log(s % kwds)
+  return status
 
-    def lockParent (self):
-        parentDir = self.parent.repositoryDir
-        repositoryName = self.repositoryName
-        return """# Locking parent repository.
-test -f %(parentDir)s/lock && echo 'ERROR:locked' && exit 1
-echo %(repositoryName)s > %(parentDir)s/lock
-""" % locals ()
+def upload(opts, args, factory):
+  """New upload method. Updates using this are atomic and it should
+     automatically retry when parallel updates happen.
+     The workflow is the following.
 
-    def unlockParent (self):
-        parentDir = self.parent.repositoryDir
-        return """# Unlocking parent repository.
-rm %(parentDir)s/lock
-""" % locals ()
+     * If it exists as a real directory, migrate old style repository to
+       me in <repository>-cache/<repository>.00..00-00..00.  We add a symlink
+       "<repository>" pointing to it, so that we are compatible with old areas.
+     * If the repository does not exists, create it from scratch with
+       the naming convention used above.
+     * Get the final part of the hash of the repository pointed by the symlink called
+       "<repository>". In case we start from scratch this will be 00..00, for example.
+     * Check consistency of the upload area just like before.
+     * Create locally a delta repository containing all the bits that need to
+       be uploaded.
+     * Upload the local delta repository to a unique temporary directory on server.
+     * rsync the parent repository in a temporary "new area", using --link-dest to minimize
+       disk-space. Notice we do not use --link-dest for files which will have to be rewritten 
+       (e.g. apt md5cache)
+     * rsync the uploaded delta in the same temporary new area, ignoring files
+       already existing. This will avoid any kind of overwriting of past repositories, which are
+       effectively immutable.
+     * calculate the new hash of the temporary area by taking a sha256 sum of
+       the file listing in RPMS/cache. This listing will include, by construction,
+       all the hashes for the packages and will therefore uniquely identify the 
+       repository.
+     * Move the new temporary ara in it's final location 
+       
+       <repository>-cache/<repository>.00..00-XX..XX
 
-    def remove (self):
-        return """# Remove personal repository
-rm -rf %(repositoryDir)s""" % self.__dict__
+       where XX..XX is the hash calculated above.
+     * Create a unique symlink:
+       
+       <repository>.next-XXXXXXX
+       
+       this will uniquely identify this session.
+     * Kill all the other sessions by removing all the symlinks called <repository>.next-* apart from
+       us.
+     * Get the parent hash and check it is still the one when we began.
+     * Swap <repository>.next-XXXXXXX and <repository>. This will happen atomically. This will
+       effectively commit the transaction and <repository> will now point to
+       the updated repository.
+     
+     If at any time there is an error (e.g. a parallel upload succeeded before us), we start again
+     from scratch, including the consistency check.
+     If the consistency check fails, we need to rebuild and therefore we die.
+  """
+  # Make sure we cannot possibly use the cms repository to avoid damage.
+  if opts.repository.startswith("comp"):
+    print "You cannot use this with official repositories, yet. Nothing done."
+    sys.exit(1)
 
-    def create (self):
-        repositoryDir = self.repositoryDir
-        cmsplatf = self.cmsplatf
-        result = """# Create repository.
-mkdir -p %(repositoryDir)s\n""" % locals ()
-        directories = [ "RPMS/cache", "RPMS", "SOURCES/cache", 
-                         "SRPMS/cache", "apt", "md5cache" ]
-        for directory in [ join (tmpDir, cmsplatf)
-                           for tmpDir in directories ]:
-            result += "mkdir -p %(repositoryDir)s/%(directory)s\n" % locals ()
-        
-        for cacheDir in [ "gensrclist", "genpkglist"]:
-            result += "mkdir -p %(repositoryDir)s/md5cache/%(cmsplatf)s/%(cacheDir)s\n" % locals ()
+  if not args:
+    upload_help()
+    return False
+
+  # A few helpers
+  def getResult(s):
+    return [x.replace("RESULT:","") for x in s.split("\n") if x.startswith("RESULT:")][0]
+  
+  def executeScript(dumpedScript, local=True):
+    if local:
+      executionCmd="sh -e %(debug)s %(filename)s"
+    else:
+      executionCmd="ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+    # Run (or print-out) the script
+    if not opts.pretend:
+      fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
+      f = os.fdopen(fd, "w")
+    else:
+      f = sys.stderr
+    f.write(dumpedScript)
+    f.close()
+    if not opts.pretend:
+      script = format(executionCmd,
+                      debug=opts.debug and "-x" or "",
+                      filename=filename,
+                      cmdServer=opts.uploadServer,
+                      cmdUser=opts.uploadUser,
+                      cmdPort=opts.uploadPort)
+      err, out = getstatusoutput(script)
+    if opts.debug:
+      log(out)
+    return (err, out)
+
+  def logAndDieOnError(err, msg, out):
+    if not err:
+      return
+    log(msg)
+    if opts.debug:
+      log(out)
+    sys.exit(1)
+
+  migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
+                       'mkdir -p $CACHE\n'
+                       '# Automatically migrate old style repositories by assigning them the 00..00 hash\n'
+                       '# Notice that we keep <repository>.<user> and <repository> in two separate\n'
+                       '# caches so that temporary uploads do not overlap with production ones and\n'
+                       '# make sure migrated old style repositories do not overlap.\n'
+                       'if [ -x %(uploadDir)s/%(repository)s ] && [ ! -L %(uploadDir)s/%(repository)s ]; then \n'
+                       '  echo "Migrating old style repository"\n'
+                       '  mv %(uploadDir)s/%(repository)s $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000\n'
+                       '  ln -sf $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000 %(uploadDir)s/%(repository)s\n'
+                       'fi\n'
+                       'PARENTDIR="`readlink %(uploadDir)s/%(repository)s || true`"\n'
+                       'if [ "X$PARENTDIR" = X ]; then\n'
+                       '  PARENTDIR="$CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000"\n'
+                       '  mkdir -p $PARENTDIR/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
+                       '  ln -sf $PARENTDIR %(uploadDir)s/%(repository)s\n'
+                       'fi\n'
+                       'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
+                       'echo RESULT:$PARENTHASH',
+                       uploadDir=opts.uploadRootDirectory,
+                       repository=opts.repository)
+  (err, parentHashResult) = executeScript(migrateRepo, False)
+  logAndDieOnError(err, "Error while migrating repository structure.", parentHashResult)
+  parentHash = getResult(parentHashResult)
+
+  pkgs = [factory.createWithSpec(specName) for specName in args]
+  if len(pkgs) !=  len(args):
+    return statusAndLog(False, "ERROR: Error while parsing spec.")
+
+  pkgs = factory.expandSubpackages(pkgs)
+  cmsplatf = pkgs[0].cmsplatf
+  fullPackageList = []
+  fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
+  def checkIfValid (p):
+    return p not in fullPackageList and exists (p.rpmLocation())
+      
+  for pkg in fullPackageList:
+    fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
+    fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
+
+  deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
+  deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
+  deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
+                          "for p in %(deprecableRPMS)s; do\n"
+                          '  realfile=`readlink RPMS/$x`\n'
+                          '  rm -rf RPMS/$x\n'
+                          '  rm $realfile\n'
+                          "done",
+                          architecture=opts.architecture,
+                          deprecableRPMS=deprecableRPMS,
+                          deprecablePackages=deprecablePackages)
+  checkers = [BuildChecker(pkg) for pkg in pkgs]
+  for checker in checkers:
+    if not checker.checkConsistency():
+      result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
+      if opts.debug:
+        sys.exit(1)
+      else:
+        executeScript(deprecateLocal)
         return result
-    
-    def createSubsystems (self):
-        cmsplatf = self.cmsplatf
-        repositoryDir = self.repositoryDir
-        subsystemCreation = "# Creating subsystem repositories.\n"
-        for subsystem in self.subsystems:
-            fullDirPath = "apt/%(cmsplatf)s/RPMS.%(subsystem)s" % locals ()
-            subsystemCreation += "mkdir -p %(repositoryDir)s/%(fullDirPath)s\n" % locals ()
-        return subsystemCreation
-        
-    def clone (self, name, fullPackageList):
-        newRepository = Repository ("%s.%s" % (self.repositoryName, name), 
-                                               self.opts, fullPackageList)
-        newRepository.parent = self
-        return newRepository
+    if not checker.checkIfUploadable():
+      return statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
+                                name=pkg.pkgName())
 
-    def cloneParent (self):
-        sourceDir = self.parent.repositoryDir
-        destDir = self.repositoryDir
-        cloneScript = "# Clone parent repository via symlinks.\n"
-        for directory in [ "RPMS", "SRPMS", "SOURCES", "apt" ]:
-            cloneScript += "lndir -silent %(sourceDir)s/%(directory)s %(destDir)s/%(directory)s\n" % locals ()
-        return cloneScript
-    
-    def checkNotFile (self, filename):
-        f = join (self.repositoryDir, filename)
-        return "test -f %(f)s && echo ERROR: %(f)s exists && exit 1" % locals ()
-    
-    def checkFile (self, filename):
-        f = join (self.repositoryDir, filename)
-        return "test -f %(f)s || (echo ERROR: %(f)s does not exists && exit 1)" % locals ()
-    
-    def createPackageDir (self, pkg):
-        repositoryDir = self.repositoryDir
-        checksum = pkg.checksum
-        cmsplatf = pkg.cmsplatf
-        pkgRel = pkg.pkgrel
-        pkgName = pkg.pkgName ()
-        script = """# Create directories for package %(pkgName)s (%(checksum)s)
-mkdir -p %(repositoryDir)s/RPMS/cache/%(checksum)s/%(cmsplatf)s
-mkdir -p %(repositoryDir)s/SRPMS/cache/%(checksum)s/%(cmsplatf)s
-mkdir -p %(repositoryDir)s/SOURCES/%(pkgRel)s\n""" % locals ()
-        remoteSourceRE = re.compile (".*:.*/.*")
-        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
-                        for source in pkg.sources 
-                        if remoteSourceRE.match (source) ]
-        for sourceFilename, sourceChecksum in sourceFiles:
-            script += "mkdir -p %(repositoryDir)s/SOURCES/cache/%(sourceChecksum)s\n" % locals ()
-        return script
-    
-    def syncFileToParent (self, filename):
-        private = self.repositoryDir
-        official = self.parent.repositoryDir
-        filenamePath = dirname (filename)
-        return """ # Copy file from private to official repository
-mkdir -p %(official)s/%(filenamePath)s
-# If a file is already there we do not change it.
-[ -e %(official)s/%(filename)s ] || cp %(private)s/%(filename)s %(official)s/%(filenamePath)s""" % locals ()
+  log("Ready to upload.")
 
-    def uploadFileToRepository (self, filename, dest):
-        uploadDir = abspath (".")
-        sourceDir = self.repositoryDir
-        destDir = dest.repositoryDir
-        port = dest.opts.uploadPort
-        user = dest.opts.uploadUser
-        server = dest.opts.uploadServer
-        return """# Upload a generic file to a given repository.
-scp -P %(port)s %(sourceDir)s/%(filename)s %(user)s@%(server)s:%(destDir)s/%(filename)s 2>/dev/null
-""" % locals ()
+  packageNames = [pkg.pkgName() for pkg in fullPackageList]
+  pkgChecksums = [p.checksum for p in fullPackageList]
+  tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
+  subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
+  # Create an area locally which has to be merged with the remote repository.
+  createEmptyRepository = format(
+    "set -e\n"
+    "rm -rf %(tmpdir)s\n"
+    "mkdir -p %(tmpdir)s/RPMS/%(architecture)s\n"
+    "mkdir -p %(tmpdir)s/RPMS/cache\n"
+    "mkdir -p %(tmpdir)s/SRPMS\n"
+    "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s\n"
+    "mkdir -p %(tmpdir)s/SOURCES/cache\n"
+    "mkdir -p %(tmpdir)s/apt/%(architecture)s\n"
+    "mkdir -p %(tmpdir)s/TARS\n"
+    "mkdir -p %(tmpdir)s/WEB\n"
+    'for x in %(subsystems)s; do\n'
+    '  mkdir -p %(tmpdir)s/apt/%(architecture)s/RPMS.$x\n'
+    'done\n',
+    architecture=opts.architecture,
+    tmpdir=tmpdir,
+    subsystems=subsystems)
+  # Hard-link packages.
+  hardLinkPackages = format(
+    "rsync -avm --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
+    "rsync -avm --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
+    ,
+    workdir=opts.workDir,
+    tmpdir=tmpdir,
+    includes=" ".join(["--include \"**%s**\"" % x for x in pkgChecksums]),
+    architecture=opts.architecture)
+  # Copy bootstrap.sh, bootstrap-driver.txt, cmsos. Given we can rollback now
+  # there is no risk of screwing up the repository by copying some unwanted
+  # driver / bootstrap.sh / cmsos.
+  # FIXME: copy also some predefined web area, so that we have rollbackable web
+  #        area?
+  copyByProducts = format("cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver.txt | tail -1` %(tmpdir)s/ || true\n"
+                          "cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver-comp.txt | tail -1` %(tmpdir)s/ || true\n"
+                          "cp `ls -rt %(workdir)s/%(architecture)s/external/apt/*/bin/bootstrap.sh | tail -1` %(tmpdir)s/ || true\n"
+                          "cp `ls -rt %(workdir)s/%(architecture)s/cms/cms-common/*/*/common/cmsos | tail -1` %(tmpdir)s/cmsos || true\n",
+                          workdir=opts.workDir,
+                          tmpdir=tmpdir,
+                          architecture=opts.architecture)
+  # Create the needed symlinks.
+  symlinks = ""
+  for pkg in fullPackageList:
+    symlinks += format(
+      "ln -s ../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/RPMS/%(architecture)s/%(packageName)s\n"
+      "ln -s ../../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/apt/%(architecture)s/RPMS.%(subsystem)s/%(packageName)s\n", 
+      checksum=pkg.checksum,
+      tmpdir=tmpdir,
+      architecture=opts.architecture,
+      subsystem=pkg.group,
+      packageName=basename(pkg.rpmfilename))
 
-    def repositoryFiles (self):
-        files = []
-        files.extend (["release." + subsystem
-                            for subsystem in self.subsystems ])
-        files.extend (["srclist." + subsystem
-                            for subsystem in self.subsystems ])
-        files.extend (["srclist.%s.bz2" % subsystem
-                            for subsystem in self.subsystems ])
-        files.extend (["pkglist." + subsystem
-                            for subsystem in self.subsystems ])
-        files.extend (["pkglist.%s.bz2" % subsystem
-                            for subsystem in self.subsystems ])
-        return [ join ("apt", self.cmsplatf, "base", repoFile) 
-                 for repoFile in files ]
+  remoteSourceRE=re.compile (".*:.*/.*")
+  sources = ""
+  for pkg in [pkg for pkg in fullPackageList if exists (pkg.rpmLocation())]:
+    # FIXME: this should really parse the url to determine the output filename
+    #        rather than relying on the fact we always end up urls with
+    #        /some-file.tar.gz
+    sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source))
+                   for source in pkg.sources
+                   if remoteSourceRE.match(source)]
+    for filename, checksum in sourceFiles:
+      sources += format(
+        "mkdir -p %(tmpdir)s/SOURCES/cache/%(checksum)s\n"
+        "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
+        "ln -f %(workdir)s/SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/cache/%(checksum)s/%(filename)s\n"
+        "ln -sf ../../../../../SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
+        workdir=opts.workDir,
+        tmpdir=tmpdir,
+        architecture=opts.architecture,
+        group=pkg.group,
+        name=pkg.name,
+        version=pkg.version,
+        filename=filename,
+        checksum=checksum)
+  
 
-    def generateRepository (self):
-        """ When generating a repository what we do is to remove the old 
-            repository bits and use genbasedir to regenerate them.
-        """
-        repo = self.repositoryDir
-        copyBootstrapDrivers = ""
-        if self.parent:
-            parentRepo = self.parent.repositoryDir
-            copyBootstrapDrivers="""
-cp %(parentRepo)s/cmsos %(repo)s
-cp %(parentRepo)s/bootstrap.sh %(repo)s
-cp %(parentRepo)s/*-driver.txt %(repo)s
-find %(repo)s -name \*-driver.txt -exec chmod 644 {} \;""" % locals ()
-        subsystems = " ".join (self.subsystems)
-        cmsplatf = self.cmsplatf
-        serverAptEnv = self.opts.serverAptEnv
-        result = "# Remove the files that need to be updated.\n"
-        for repoFile in self.repositoryFiles ():        
-            result += """rm -f %(repo)s/%(repoFile)s\n""" % locals ()
-        previousRepoCmd = """`sh -c 'ls %(repo)s/apt/%(cmsplatf)s/base/pkglist.*.bz2 | sed -e "s|.*[.]\\(.*\\)[.]bz2|\\1|"'`""" % locals ()
-        result += """# Generate the apt repository.
-source %(serverAptEnv)s
-genbasedir --cachedir=%(repo)s/md5cache/%(cmsplatf)s --flat %(repo)s/apt/%(cmsplatf)s %(subsystems)s %(previousRepoCmd)s 
-chmod 755 %(repo)s/apt/%(cmsplatf)s
-%(copyBootstrapDrivers)s
-""" % locals ()
-        return result
+  (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
+  logAndDieOnError(err, "Error while creating the local repository.", out)
 
-    def syncCache (self, source):
-        rsync="rsync -e ssh --rsync-path=/usr/bin/rsync"
-        cmsplatf = self.cmsplatf
-        sourceDir = source.repositoryDir
-        destDir = self.repositoryDir
-        cacheDir = join ("md5cache", cmsplatf)
-        aptRepoPath = join ("apt", cmsplatf, "base")
-        result = """# Sync md5sum cache
-mkdir -p %(destDir)s/%(cacheDir)s
-%(rsync)s -av %(sourceDir)s/%(cacheDir)s/ %(destDir)s/%(cacheDir)s
-# Copy repository files from source to dest repository. 
-rm -rf %(destDir)s/%(aptRepoPath)s
-mkdir -p %(destDir)s/%(aptRepoPath)s
-rsync -av %(sourceDir)s/%(aptRepoPath)s/ %(destDir)s/%(aptRepoPath)s
-""" % locals ()
-        return re.sub ("\n+", "\n", result)
-    
-    def createPackageLinks (self, pkg):
-        remoteSourceRE = re.compile (".*:.*/.*")
-        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
-                        for source in pkg.sources 
-                        if remoteSourceRE.match (source) ]
-        repositoryDir = self.repositoryDir
-        result = "# Create links for sources.\n"
-        for srcFilename, srcChecksum in sourceFiles:
-            sourceFilename = join ("SOURCES/cache", srcChecksum, srcFilename)
-            sourceLink = "../../../../../%(sourceFilename)s" % locals ()
-            destPath = join ("SOURCES", pkg.pkgrel)
-            result += """
-mkdir -p %(repositoryDir)s/%(destPath)s
-chmod 644 %(sourceLink)s
-ln -s %(sourceLink)s %(repositoryDir)s/%(destPath)s
-""" % locals ()        
-        rpmfilename = pkg.rpmfilename
-        rpmNameOnly = basename (rpmfilename)    
-        rpmGroup = pkg.group
-        cmsplatf = self.cmsplatf
-        cachedRpmFilename = join ("RPMS/cache", pkg.checksum, rpmfilename)
-        linkCachedRpm = "../../%(cachedRpmFilename)s" % locals ()
-        aptRepositoryPath = "apt/%(cmsplatf)s/RPMS.%(rpmGroup)s" % locals ()
-        result += """# Create links to rpms in the cache
-mkdir -p %(repositoryDir)s/%(aptRepositoryPath)s
-mkdir -p %(repositoryDir)s/RPMS/%(cmsplatf)s
-chmod 755 %(repositoryDir)s/%(aptRepositoryPath)s
-chmod 644 %(repositoryDir)s/%(cachedRpmFilename)s
-ln -s ../../../%(cachedRpmFilename)s %(repositoryDir)s/%(aptRepositoryPath)s/%(rpmNameOnly)s
-ln -s ../../%(cachedRpmFilename)s %(repositoryDir)s/RPMS/%(rpmfilename)s
-""" % locals ()
-        return result
+  repoInfo = {"uploadDir": opts.uploadRootDirectory,
+              "repository": opts.repository,
+              "uploadTmpRepository": opts.uploadTmpRepository,
+              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync",port=opts.uploadPort),
+              "server": opts.uploadServer,
+              "user": opts.uploadUser}
 
-def upload (opts, args, factory):
-    """ The method is responsible for uploading packages to the repository.
-        what it does is the following.
-        1. Check that all the packages that are getting uploaded match the 
-           spec files that are currently in the directory.
-        2. Make sure that the build process would have resulted in stuff to 
-           upload.
-        3. To be written...
-    """
-    if not args:
-        upload_help ()
-        return False
-
-    pkgs = [factory.createWithSpec (specName) for specName in args]
-    if len (pkgs) !=  len (args):
-        log ("ERROR! Error while parsing spec.")
-        return False
-
-    pkgs = factory.expandSubpackages(pkgs)
-    cmsplatf = pkgs[0].cmsplatf
-    fullPackageList = []
-    fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
-    
-    def checkIfValid (p):
-        return p not in fullPackageList and exists (p.rpmLocation())
-        
-    for pkg in fullPackageList:
-      fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
-      fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
-
-    for pkg in pkgs:
-        checker = BuildChecker (pkg)
-        if not checker.checkConsistency ():
-            log ("ERROR: Build area not consistent. Not uploading.")
-            return False
-        if not checker.checkIfUploadable ():
-            log ("Nothing needs to be uploaded for %s." % pkg.pkgName ())
-            return True
-    
-    log ("Ready to upload.")
-    localUser = getuser()
-
-    if localUser is "unknown": 
-        log ("ERROR: Unable to detect user name. Aborting.")
-        return False
-    rules = []
-    try:
-        rulesUrl = "%s/%s" % (opts.server.rstrip ("/"),"UploadRules.txt")
-        uploadRules = urlopen (rulesUrl)
-        for rule in uploadRules.readlines ():
-            rule = rule.strip ("\n").split ("#",1)[0]
-            try:
-                packageMatcher = rule.split (":")[0].strip (" ")
-                users = rule.split (":")[1].split (",")
-                if localUser in users: rules.append (packageMatcher)
-            except IndexError:
-                log ("Malformed configuration file in line:\n%(rule)s") % locals ()
-                return False
-    except URLError, e:
-        if opts.syncBack:
-            log ("ERROR %(rulesUrl)s not found. Cannot decide wether or not you are allowed to upload packages." % locals ())
-            return False
-            
-    def canUploadPackage (package):
-        for rule in rules:
-            if re.match (rule, package):
-                return True
-        return False
-
-    brokenPackages = " ".join ([package.pkgName () 
-                                for package in fullPackageList 
-                                if not canUploadPackage (package)]).strip (" ")
-    userRepository = opts.server.rstrip ("/") + "/%s.%s" % (opts.repository, localUser)
-    repositoryDir = join (opts.uploadRootDirectory, "%s.%s" % (opts.repository, localUser))
-    officialRepositoryDir = join (opts.uploadRootDirectory, opts.repository)
-
-    officialRepo = Repository (opts.repository, opts, fullPackageList)
-    personalRepo = officialRepo.clone (opts.uploadTmpRepository, fullPackageList)
-    localRepo = Repository (abspath ("."), opts, fullPackageList)
-    
-    subsystems = {}
-    for pkg in fullPackageList:
-        subsystems[pkg.pkgName ().split ("+")[0]] = True
-    subsystems = subsystems.keys ()
-    subsystemsString = " ".join (subsystems)
-
-    # FIXME: pick up from commandline
-    rsync="rsync -e ssh --progress --rsync-path=/usr/bin/rsync"
-    uploadUser=opts.uploadUser
-    uploadServer=opts.uploadServer
-    
-    remoteExec = RemoteExecutor (opts)
-    remoteScript = Script (name="Repository creation", 
-                           pretend=opts.pretend, 
-                           executor=remoteExec)
-    syncBackScript = Script (name="Do sync back", pretend=opts.pretend, executor=remoteExec)
-    uploadScript = Script (name="Upload", pretend=opts.pretend, executor=LocalExecutor (opts))
-
-    syncBackScript.do (personalRepo.lockParent ())
-    
-    remoteScript.do (personalRepo.remove ())
-    remoteScript.do (personalRepo.create ())
-    remoteScript.do (personalRepo.createSubsystems ())
-    syncBackScript.do (officialRepo.createSubsystems ())
-    remoteScript.do (personalRepo.cloneParent ())
-    
-    remoteScript.do ("# Check consistency of repository structure.")
-    for pkg in fullPackageList:
-        rpmfilename = pkg.rpmfilename
-        cmsplatf = pkg.cmsplatf
-        # We check that the RPM is not already there in the official repository
-        # (and therefore is there in the private one via symlink). 
-        filename = join ("RPMS", rpmfilename)
-        remoteScript.do (officialRepo.checkNotFile (filename))
-        architecture, subsystem, rest = re.match ("(.*)/([^+]*)(.*)", rpmfilename).groups ()
-        rpmName = subsystem + rest
-        filename = "apt/%(cmsplatf)s/RPMS.%(subsystem)s/%(subsystem)s%(rest)s" % locals ()
-        # FIXME: should check that more files are not there.
-        remoteScript.do (officialRepo.checkNotFile (filename))
-        remoteScript.do (personalRepo.createPackageDir (pkg))
-    log ("Creating temporary repository.")
-    ok = remoteScript.execute ()
-    
-    if not ok: 
-        log ("ERROR: Error while initialising the private repository on server.")
-        return False
-    
-    createLinks = Script (name="Create links", pretend=opts.pretend, executor=remoteExec)
-    checkSB = Script (name="Check syncBack", pretend=opts.pretend, executor=remoteExec)
-    
-    createLinks.do ("# Link real files in cache to their userfrienly path.")
-    uploadScript.do ("# Copy RPMS, SRPMS, SOURCES and patches to the server.")
-    uploadDir = abspath (".")
-    uploadPort = opts.uploadPort
-    remoteSourceRE=re.compile (".*:.*/.*")
-    for pkg in [pkg for pkg in fullPackageList if exists (pkg.rpmLocation())]:
-        checksum = pkg.checksum
-        rpmName = pkg.rpmfilename
-        rpmGroup = pkg.group
-        rpmNameOnly = basename (rpmName)
-        cmsplatf = pkg.cmsplatf
-        pkgRel = pkg.pkgrel
-        cachedRpmFilename = join ("RPMS/cache", checksum, rpmName)
-        cachedSrpmFilename = join ("SRPMS/cache", checksum, rpmName)
-        uploadScript.do (localRepo.checkFile (cachedRpmFilename))
-        uploadScript.do (localRepo.uploadFileToRepository (cachedRpmFilename, personalRepo))
-        checkSB.do (personalRepo.checkFile (cachedRpmFilename))
-        syncBackScript.do (personalRepo.syncFileToParent (cachedRpmFilename))
-        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
-                        for source in pkg.sources 
-                        if remoteSourceRE.match (source) ]
-        for srcFilename, srcChecksum in sourceFiles:
-            cachedFilename = join ("SOURCES/cache", srcChecksum, srcFilename)
-            linkLocation = "../../../../../%(cachedFilename)s" % locals ()
-            fullSourcePath = join ("SOURCES", pkgRel)
-            fullSourceFilename = join (fullSourcePath, srcFilename)
-            fullCachedFilename = join (repositoryDir, cachedFilename)
-            cachedSourceFilename = join ("SOURCES/cache", srcChecksum, srcFilename)
-            uploadScript.do (localRepo.checkFile (cachedFilename))
-            uploadScript.do (localRepo.uploadFileToRepository (cachedFilename, personalRepo))
-            # We do not check cachedSourceFilename because multiple version of a given 
-            # package could use the same source and therefore the file could be already 
-            # there.
-            #checkSB.do (officialRepo.checkNotFile (cachedSourceFilename))
-            checkSB.do (personalRepo.checkFile (cachedSourceFilename))
-            checkSB.do (officialRepo.checkNotFile (fullSourcePath))
-            syncBackScript.do (personalRepo.syncFileToParent (cachedSourceFilename))
-        # Create links to the rpms in RPMS/<cmsplatf>/<cache>/ in apt/<cmsplatf>/RPMS.<group>/
-        # Create also the syncBack action.
-        createLinks.do (personalRepo.createPackageLinks (pkg))
-        rpmLinkPath = "apt/%(cmsplatf)s/RPMS.%(rpmGroup)s" % locals ()
-        checkSB.do (officialRepo.checkNotFile (join (rpmLinkPath, rpmNameOnly)))
-        checkSB.do (officialRepo.checkNotFile (join ("RPMS", pkg.rpmfilename)))
-        syncBackScript.do (officialRepo.createPackageLinks (pkg))
-    
-    log ("Uploading packages.")
-    ok = uploadScript.execute ()
-    if not ok:
-        log ("Error while uploading packages on server.")
-        return False
-    
-    ok = createLinks.execute ()
-    if not ok:
-        log ("Error while creating links.")
-        return False
-    
-    createRepository = Script (name="Create repository", pretend=opts.pretend, executor=remoteExec)
-    createRepository.do (personalRepo.syncCache (officialRepo))
-    createRepository.do (personalRepo.generateRepository ())
-    syncBackScript.do (officialRepo.syncCache (personalRepo))
-    log ("Regenerating apt db.")
-    ok = createRepository.execute ()
-    if not ok:
-        log ("ERROR! Error creating the repository.")
-        return False
-    if not opts.syncBack:
-        return True
-    
-    syncBackScript.do (personalRepo.unlockParent ())
-    checkSB.do ("echo Done")
-    ok = checkSB.execute ()
-    if not ok: return False
-    
-    ok = syncBackScript.execute ()
-    if not ok: return False
-    return True
-    
+  # Create unique repository on server
+  (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
+                                                "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/`", **repoInfo),
+                                         False)
+  logAndDieOnError(err, "Error while creating temporary directory", createUploadTmp)
+  tmpUploadDir = getResult(createUploadTmp)
+  
+  # Upload local repository to a temp area on the server.
+  upload = format("%(rsync)s -av %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/",
+                  tmpdir=tmpdir,
+                  tmpUploadDir=tmpUploadDir,
+                  **repoInfo)
+  (err, msg) = executeScript(upload, True)
+  logAndDieOnError(err, "Error while uploading. No changes to repository.", msg)
+  # Human readable repositories are symlinks to one called:
+  # <prefix>.<parent>-<me>
+  # 
+  # where <prefix> is the --repository option passed on command line, e.g. cms.
+  #       <parent> is the sha256 of the previous repository listing.
+  #       <me> is the sha256 of the current repository listing.
+  # Notice that if the repository is not yet a link we use
+  #       <prefix>.0000000000000000-<me>
+  # where me is the sha256 of the repository listing, and then we symlink it to 
+  # <prefix>.
+  # If the repository does not exists at all, we create a dummy:
+  # <prefix>.00...00-00...00
+  # This allows us to have migrations as well, by tweaking the rsync rule to ignore old
+  # architectures for example.
+  #
+  # We then create a
+  createRepo = format(
+    'CACHE="%(uploadDir)s/%(repository)s-cache"\n'
+    'test -d $CACHE\n'
+    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
+    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
+    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
+    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
+    '  exit 1\n'
+    'fi\n'
+    'UPLOADREPO=%(tmpUploadDir)s\n'
+    'TMPREPO=%(tmpUploadDir)s-target\n'
+    'mkdir -p $TMPREPO/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
+    '# First copy / link the old repository.\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
+    '%(rsync)s -av $PARENTDIR/apt/ $TMPREPO/apt/\n'
+    '%(rsync)s -av $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
+    'mkdir -p $TMPREPO/WEB\n'
+    '%(rsync)s -av $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
+    '# Copy ancillary files from $UPLOADEDREPO first, so that newer builds override old.\n'
+    '%(rsync)s -av $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
+    '# Then copy the new one, ignoring existing files. This way we make sure no files can be overwritten.\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/RPMS/ $TMPREPO/RPMS/\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/SRPMS/ $TMPREPO/SRPMS/\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
+    '%(rsync)s -av --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
+    '# Web area will always be the latest one built\n'
+    '%(rsync)s -av $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
+    'CHILDHASH=`find $UPLOADREPO/RPMS/cache -type f -name "*.rpm" | sed -e "s|^.*/RPMS/cache||" | sort | sha256sum | cut -f1 -d\ `\n'
+    'rm -rf $UPLOADREPO\n'
+    '# Generate a new apt cache.\n'
+    'source %(serverAptEnv)s\n'
+    'PREVIOUSSUBSYS=`ls $PARENTDIR/apt/%(cmsplatf)s/base/pkglist.*.bz2 | sed -e "s|.*[.]\\(.*\\)[.]bz2|\\1|"`\n'
+    'for x in %(subsystems)s $PREVIOUSSUBSYS; do\n'
+    '  mkdir -p $TMPREPO/apt/%(cmsplatf)s/RPMS.$x\n'
+    'done\n'
+    'for x in `find $TMPREPO/md5cache/%(cmsplatf)s -name "*.md5cache"`; do\n'
+    '  mv $x `dirname $x`/`echo $TMPREPO | tr / _`_apt_%(cmsplatf)s`echo $x | sed -e"s/.*%(cmsplatf)s//"`\n'
+    'done\n'
+    'genbasedir --cachedir=$TMPREPO/md5cache/%(cmsplatf)s --flat $TMPREPO/apt/%(cmsplatf)s `echo %(subsystems)s $PREVIOUSSUBSYS | tr " " "\n" | sort -u`\n'
+    'chmod 755 $TMPREPO/apt/%(cmsplatf)s\n'
+    '# Move the new repository into place and link it to its <repo>.<user> name.\n'
+    'CHILD="$CACHE/%(repository)s.${PARENTHASH}-${CHILDHASH}"\n'
+    'if [ ! -e $CHILD ] ; then\n'
+    '  mv -T $TMPREPO $CHILD || { mv $TMPREPO $TMPREPO.delme && exit 1; }\n'
+    'else\n'
+    '  mv $TMPREPO $TMPREPO.delme\n'
+    'fi\n'
+    'if [ %(syncBack)s = True ]; then\n'
+    '  TARGETREPO=%(repository)s\n'
+    'else\n'
+    '  TARGETREPO=%(repository)s.%(uploadTmpRepository)s\n'
+    '  if [ -x %(uploadDir)s/$TARGETREPO ] && [ ! -L %(uploadDir)s/$TARGETREPO ] ; then\n'
+    '    mv %(uploadDir)s/$TARGETREPO %(uploadDir)s/delme.$TARGETREPO\n'
+    '  fi\n'
+    'fi\n'
+    'UNIQUEDIR=`mktemp -d -t cmsBuildUpload.XXXXXXXXXX`\n'
+    'UNIQUEID=`echo $UNIQUEDIR | sed -e "s|.*cmsBuildUpload[.]||"`\n'
+    'echo $UNIQUEID\n'
+    '# Create a transaction.\n'
+    'ln -sf $CHILD %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
+    '# Try to abort all the pending transactions but ours.\n'
+    'for x in `find %(uploadDir)s/$TARGETREPO.next-* ! -name "*-$UNIQUEID"`; do\n'
+    ' if rm $x; then true; else rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID ; fi\n'
+    'done\n'
+    '# In case no transaction is aborted either parallel transactions completed\n'
+    '# successfully (and the parenthash is not the same anymore) or there\n'
+    '# were no other transactions.\n'
+    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
+    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
+    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
+    '  rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n' 
+    '  rm -rf $UNIQUEDIR\n' 
+    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
+    '  exit 1\n'
+    'fi\n'
+    'mv -T %(uploadDir)s/$TARGETREPO.next-$UNIQUEID %(uploadDir)s/$TARGETREPO\n'
+    'rm -rf %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
+    'rm -rf $UNIQUEDIR\n',
+    serverAptEnv=opts.serverAptEnv,
+    cmsplatf=opts.architecture,
+    tmpUploadDir=tmpUploadDir,
+    subsystems=subsystems,
+    syncBack=opts.syncBack,
+    originalParentHash=parentHash,
+    **repoInfo)
+  (err, msg) = executeScript(createRepo, False)
+  if err:
+    log("Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
+    if opts.debug:
+      log(msg)
+    return False
+  log("Upload successfully finished")
+  return True
             
 def remove_help ():
     log ("cmsBuild delete <package>")
@@ -4126,49 +4057,6 @@ class CaseSensitiveConfigParser (ConfigParser):
     def optionxform (self, option):
         return option
 
-# Helper script which creates the set of commands to be executed.
-# We only support two different workflows:
-#
-# * cmsBuild [--no-bootstrap] build <package> [<additional packages>]
-# * cmsBuild [--no-bootstrap] [--sync-back] upload <package> [<additional packages>]
-#
-# where both workflows include a bootstrap step (unless --no-bootstrap) is
-# specified and upload implies building the same packages.
-def createCommands (opts, args):
-    opts.workDir = abspath(opts.workDir)
-    opts.installDir = opts.workDir
-    if (opts.repository == "cms") or opts.repository.startswith("cms."):
-        opts.installDir = "/opt/cmssw"
-
-    opts.tempDirPrefix = "tmp"
-    if opts.workDir.split(sep)[1] == opts.tempDirPrefix:
-        opts.tempDirPrefix += "X"
-
-    executeWithErrorCheck ("rm -rf %s" % join(opts.workDir, opts.tempDirPrefix, "BUILDROOT"),"Unable to remove BUILDROOT directory.")
-    commandSpec = []
-    
-    if len(args) < 2:
-      fatal("Wrong number of arguments.")
-    
-    if not args[0] in ["build", "upload"]:
-      fatal("Unknown command %s. Alternatives are build, upload." % args[0])
-    
-    if opts.syncBack and args[0] == "build":
-      fatal("--sync-back option is available only when uploading.")
-
-    if opts.bootstrap:
-      commandSpec.append("bootstrap")
-
-    if not exists(abspath(opts.cmsdist)) and not "://" in opts.cmsdist:
-      cmsdist = abspath(opts.cmsdist)
-      fatal("Wrong path specified for CMSDIST: %s.\nNothing done." % cmsdist)
-
-    commandSpec.append("build")
-
-    if args[0] == "upload":
-      commandSpec.append("upload")
-    return commandSpec
-
 g_originalEnvironment = {}
 
 def saveOriginalEnvironment ():
@@ -4233,11 +4121,30 @@ if __name__ == "__main__":
     packages = {}
     #tags_cache = TagCacheAptImpl (opts)
     try:
-      commandSpec = createCommands(opts, args)
+      # We only support two different workflows:
+      #
+      # * cmsBuild [--no-bootstrap] build <package> [<additional packages>]
+      # * cmsBuild [--no-bootstrap] [--sync-back] upload <package> [<additional packages>]
+      #
+      # where both workflows include a bootstrap step (unless --no-bootstrap) is
+      # specified and upload implies building the same packages.
+      commandSpec = []
       
+      if opts.bootstrap:
+        commandSpec.append("bootstrap")
+
+      if not exists(abspath(opts.cmsdist)) and not "://" in opts.cmsdist:
+        cmsdist = abspath(opts.cmsdist)
+        fatal("Wrong path specified for CMSDIST: %s.\nNothing done." % cmsdist)
+
+      commandSpec.append("build")
+
+      if args[0] == "upload":
+        commandSpec.append("upload")
+        
       log("The following commands will be executed:\n %s" % 
           "\n".join (["* %s" % spec for spec in commandSpec]), DEBUG)
-      
+        
       # Create the work area and a tmp dir for it it does not exists and cd to it.
       opts.tempdir = join(opts.workDir, opts.tempDirPrefix)
       if not exists(opts.tempdir):
@@ -4248,6 +4155,8 @@ if __name__ == "__main__":
       procLock = cmsLock(opts.workDir)
       if not procLock:
           fatal ("There is already a cmsBuild process running for workdir %s." % opts.workDir)
+
+      executeWithErrorCheck ("rm -rf %s" % join(opts.workDir, opts.tempDirPrefix, "BUILDROOT"),"Unable to remove BUILDROOT directory.")
 	  
       # Checkout if a tag is specified for CMSDIST. If it is checkout the package
       # in a temporary directory and keep track of the path to it.
@@ -4329,24 +4238,32 @@ if __name__ == "__main__":
       
       # Tags cache always needs to be there.
       tags_cache = TagCacheAptImpl(opts)
-      for command in commandSpec:
-        if command == "bootstrap":
-          # If the apt-init.sh file is missing, do the bootstrap,
-          # parse the output to find the init.sh and link it to
-          # apt-init.sh, so that next time this stage will we skipped.
-          #
-          # Source the apt-init.sh file and setup the environment,
-          # update the apt cache.
-          aptInitSh = join(opts.workDir, opts.architecture, "apt-init.sh") 
-          if not exists(aptInitSh):
-            environmentInitSh = bootstrap(opts)
-            symlink(environmentInitSh.replace(opts.workDir, ".."), aptInitSh)
-          setupAptEnvironment(aptInitSh)
-          tags_cache.update()
-        elif command == "build":
-          build(opts, args[1:], factory)
-        elif command == "upload":
-          upload(opts, args[1:], factory)
+      successfulTransaction = False 
+      while not successfulTransaction:
+        successfulTransaction = True 
+        for command in commandSpec:
+          if command == "bootstrap":
+            # If the apt-init.sh file is missing, do the bootstrap,
+            # parse the output to find the init.sh and link it to
+            # apt-init.sh, so that next time this stage will we skipped.
+            #
+            # Source the apt-init.sh file and setup the environment,
+            # update the apt cache.
+            aptInitSh = join(opts.workDir, opts.architecture, "apt-init.sh") 
+            if not exists(aptInitSh):
+              environmentInitSh = bootstrap(opts)
+              symlink(environmentInitSh.replace(opts.workDir, ".."), aptInitSh)
+            setupAptEnvironment(aptInitSh)
+            tags_cache.update()
+          elif command == "build":
+            build(opts, args[1:], factory)
+          elif command == "upload":
+            # We continue trying unless some fatal error occurs (which exits
+            # immediately).  or the remote repository is not consistent with the
+            # current state.
+            successfulTransaction = upload(opts, args[1:], factory)
+            if not successfulTransaction:
+              log("Looks like repository changed while we were building. Trying again.")
     except KeyboardInterrupt:
         log ("User requested to abort. Exiting.")
         sys.exit (1)
