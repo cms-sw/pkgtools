@@ -1,0 +1,48 @@
+#!/bin/sh -e
+
+if [ ! X$# = X2 ]; then
+  echo "Syntax $0 <cmssw-version> <architecture>" ; exit 1
+fi
+
+if [ ! -d CMSDIST ]; then
+  echo "Cannot find CMSDIST" ; exit 1
+fi
+
+export CMSSW_X_Y_Z=$1
+export CMSSW_ORIG=$CMSSW_X_Y_Z
+export ARCH=$2
+
+case $CMSSW_X_Y_Z in
+  CMSSW_*) ;;
+  *) echo "Malformed release name." ; exit 1 ;;
+esac
+
+case $CMSSW_X_Y_Z in
+  *patch*)
+    CMSSW_PATCH=$CMSSW_X_Y_Z
+    CMSSW_X_Y_Z=`echo $CMSSW_X_Y_Z | sed -e 's/_[^_]*patch[0-9]*//'`
+  ;;
+esac
+
+case $ARCH in
+  osx*|slc*) ;;
+  *) echo "Malformed architecture name." ; exit 1 ;;
+esac
+
+INITIALS=`finger $USER | grep Name: | perl -p -i -e "s/.*Name: //;s/[a-z0-9 ]//g" | tr "[:upper:]" "[:lower:]"`
+
+cvs up -A CMSDIST/cmssw.spec CMSDIST/fwlite.spec CMSDIST/cmssw-patch.spec
+perl -p -i -e "s/### RPM cms cmssw.*/### RPM cms cmssw $CMSSW_X_Y_Z/" CMSDIST/cmssw.spec
+perl -p -i -e "s/### RPM cms fwlite.*/### RPM cms fwlite ${CMSSW_X_Y_Z}_FWLITE/" CMSDIST/fwlite.spec
+
+MSG="Prepared for ${CMSSW_X_Y_Z} on ${ARCH}"
+if [ ! "X$CMSSW_PATCH" = X ]; then
+  perl -p -i -e "s/### RPM cms cmssw-patch.*/### RPM cms cmssw-patch $CMSSW_PATCH/" CMSDIST/cmssw-patch.spec
+  MSG="Prepared for ${CMSSW_PATCH} (based on ${CMSSW_X_Y_Z}) on ${ARCH}"
+fi
+
+echo $MSG
+
+cvs commit -m"$MSG" CMSDIST/cmssw.spec CMSDIST/fwlite.spec CMSDIST/cmssw-patch.spec
+cvs -Q tag ${INITIALS}For${CMSSW_ORIG}-${ARCH} CMSDIST
+cvs -q up -r ${INITIALS}For${CMSSW_ORIG}-${ARCH} CMSDIST

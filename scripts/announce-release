@@ -1,0 +1,58 @@
+#!/usr/bin/python
+from optparse import OptionParser
+from commands import getstatusoutput
+import sys
+
+MAIL_TEMPLATE="""Hi all,
+
+The %(type)s release %(name)s is now available for the following
+architectures:
+
+...
+
+The list of changed tags with respect to %(previous)s is given below. 
+
+More information is available at the reference table:
+
+https://twiki.cern.ch/twiki/bin/view/CMSPublic/SWGuideFrontierConditions
+
+[Usual boilerplate: this forum is intended for announcements.
+Please do not respond to this posting with problem reports about
+%(name)s or requests regarding future %(cycle)s releases, but use
+instead one of the normal "Discussions" forums for such things.]
+
+Cheers,
+  ...
+"""
+
+if __name__ == "__main__":
+  parser = OptionParser()
+  parser.add_option("--name", dest="name")
+  parser.add_option("--previous", dest="previous")
+  parser.add_option("--type", dest="type")
+  parser.add_option("--architecture", dest="architecture")
+  parser.add_option("--output", "-o", dest="output")
+  
+  opts, args = parser.parse_args()
+  if not opts.name:
+    parser.error("Please specify a release name.")
+  
+  if not opts.previous:
+    parser.error("Please specify the previous release.")
+
+  if not opts.type in ["development", "production", "analysis"]:
+    parser.error("Please specify a release type.")
+
+  if not opts.architecture:
+    parser.error("Please specify the current architecture")
+  
+  if opts.output:
+    output = file(opts.output,"w")
+  else:
+    output = sys.stdout
+  
+  cycle = ".".join(opts.name.split("_")[1:3])
+  d = {"cycle": cycle, "name": opts.name, "previous": opts.previous, "type": opts.type, "architecture": opts.architecture}
+  output.write(MAIL_TEMPLATE % d)
+  ok, out = getstatusoutput("export SCRAM_ARCH=%(architecture)s; scram project %(name)s ; cd %(name)s ; eval `scram run -sh`; cmstc diff %(previous)s %(name)s" % d)
+  output.write(out)

@@ -1,0 +1,17 @@
+cmsBuild was written and is maintained by Giulio Eulisse (`<firstname.lastname@cern.ch>`).
+
+## Additional Contributors
+
+* Lassi Tuura (original bash code, lots of ideas badly reimplemented in python)
+* Shahzad Muzaffar (CMS tag collector integration)
+* Andrea Bocci (integration and adaptations for CMS Online deployment)
+* David Lange (CMS tag collector integration)
+
+## Thanks
+
+Additional thanks should go to Peter Elmer and Andreas Pfeiffer for suggestions, bug reporting, extensive testing and usage.
+
+This work was supported by the [National Science Foundation][nsf] and the [Department of Energy][doe] of the USA.
+
+[nsf]: http://nsf.gov
+[doe]: http://www.energy.gov/

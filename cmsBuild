@@ -1,14 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/python -u
 #
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
-# Peter Elmer, Princeton University                     23 Apr, 2007
-# Giulio Eulisse, Northeastern University
-# David Lange, LLNL
 
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, makedirs, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
+from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
 from commands import getstatusoutput
 from urllib2 import urlopen, URLError
@@ -19,8 +17,11 @@ from ConfigParser import ConfigParser
 from ConfigParser import InterpolationMissingOptionError
 import re, os
 import traceback
+from optparse import OptionParser, OptionGroup
 import fnmatch
 from shutil import rmtree
+import urllib2
+from glob import glob
 
 logLevel = 10 
 NORMAL=10
@@ -78,46 +79,32 @@ def recursive_glob(treeroot, pattern):
     results.extend(join(base, f) for f in goodfiles)
   return results
 
-# Emulate rsplit in python 2.3
-def rsplit24 (string, splitter, *amounts):
-    return string.rsplit (splitter, *amounts)
-
-def rsplit23 (string, splitter, *amounts):
-    if not splitter in string:
-        return [string]
-    splitResults = string.split (splitter)
-    if amounts:
-        res = splitter.join (splitResults[:-amounts[0]])
-        resultList = []
-        resultList.append (res)
-        for t in splitResults[-amounts[0]:]:
-            resultList.append (t)
-        return resultList
-rsplit = rsplit24
-
-if not hasattr (str, "rsplit"):
-    rsplit = rsplit23
-
 rpm_db_cache = {}
     
-def downloadExternal (command, downloadInfo):
-    error, result = getstatusoutput (command % downloadInfo)
-    if error:
-        log ("Error while downloading %(source)s:" % downloadInfo)
-        log (result)
-        return False
+def downloadUrllib2(source, destDir, options):
+    try:
+      dest = "/".join([destDir.rstrip("/"), basename(source)])
+      req = urllib2.Request(source, headers={"Cache-Control": "no-cache"})
+      s = urllib2.urlopen(req)
+      f = file(dest+".tmp","w")
+      # Read in blocks to avoid using too much memory.
+      block_sz = 8192*16
+      while True:
+        buffer = s.read(block_sz)
+        if not buffer:
+          break
+        f.write(buffer)
+      f.close()
+      os.rename(dest+".tmp",dest)
+    except URLError, e:
+      if not "SOURCES/cache" in source:
+        log("Error while downloading %s: %s" % (source, e))
+      return False
+    except Exception, e:
+      print source, destDir
+      log("Error while downloading %s: %s" % (source, e))
+      return False
     return True
-
-def downloadCurl (source, dest, options):
-    dest=join (dest, rsplit (source, "/", 1)[1])
-    command = """curl -L -f -q -s "%(source)s" -o "%(dest)s.tmp" && mv "%(dest)s.tmp" "%(dest)s" """
-    return downloadExternal (command, locals ())
-    
-def downloadWget (source, dest, options):
-    dest=join (dest, rsplit (source, "/", 1)[1])
-    command = """wget --no-check-certificate -q -O "%(dest)s.tmp" "%(source)s" && mv "%(dest)s.tmp" "%(dest)s" """ 
-    return downloadExternal (command, locals ())
-
 
 def parseUrl (url, requestedKind=None, defaults={}, required=[]):
     match = re.match("([^+:]*)([^:]*)://([^?]*)(.*)", url)
@@ -242,11 +229,11 @@ def downloadSvn (source, dest, options):
         makedirs (exportDir)
     args["dest"] = join (dest, args["output"].lstrip("/"))
     args["tempdir"] = tempdir
-    args["exportdir"] = rsplit (exportDir, "/", 1)[1]
-    args["exportpath"] = rsplit (exportDir, "/", 1)[0]
+    args["exportdir"] = exportDir.rsplit("/", 1)[1]
+    args["exportpath"] = exportDir.rsplit("/", 1)[0]
     if not args["revision"].isdigit():
       args["revision"] = '"' + args["revision"] + '"' 
-    command = """cd %(exportpath)s ; svn %(strategy)s --force --non-interactive -r%(revision)s "%(svnroot)s" "%(exportdir)s" """
+    command = """cd %(exportpath)s ; svn %(strategy)s --force --non-interactive --trust-server-cert -r%(revision)s "%(svnroot)s" "%(exportdir)s" """
     command = command % args
     message = "Error while downloading files from subversion repository"
     ok = executeWithErrorCheck (command, message)
@@ -334,7 +321,7 @@ def downloadGit(source, dest, options):
                "gitroot": gitroot, "dest": dest,
                "exportpath": exportpath})
   makedirs(exportpath)
-  command = """cd %(exportpath)s && git init && git pull %(protocol)s%(gitroot)s refs/heads/%(branch)s && git reset --hard %(tag)s && rm -rf .git"""
+  command = """cd %(exportpath)s && git init && git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s && git reset --hard %(tag)s && rm -rf .git"""
   error, output = getstatusoutput(command % args)
   if error:
     log("Error while downloading sources from %s using git.\n\n"
@@ -345,27 +332,13 @@ def downloadGit(source, dest, options):
 
 downloadHandlers = {'cvs': downloadCvs,
                     'cmstc': downloadTc,
-                    'http': None,
-                    'https': None,
-                    'ftp': None,
-                    'ftps': None,
+                    'http': downloadUrllib2,
+                    'https': downloadUrllib2,
+                    'ftp': downloadUrllib2,
+                    'ftps': downloadUrllib2,
                     'git': downloadGit,
                     'svn': downloadSvn}
 
-def selectHttpDownloadHandler (handlers):
-    wgetError, wgetOutput = getstatusoutput ("wget --version 2>/dev/null")
-    curlError, curlOutput = getstatusoutput ("curl --version 2>/dev/null")
-    handler = None
-    if len ([line for line in wgetOutput.split ("\n") if line]) != 0:
-        handler = downloadWget
-    elif len ([line for line in curlOutput.split ("\n") if line]) != 0:
-        handler = downloadCurl
-    else:
-        # FIXME: we probably can always fall back to use urllib2.
-        log ("FATAL: neither wget nor curl found. Cannot download sources from http/https")
-        sys.exit (1)
-    for protocol in ["http", "https", "ftp", "ftps"]:
-        handlers[protocol] = handler
     
 def getUrlChecksum (s):
     m = md5adder (s)
@@ -374,7 +347,7 @@ def getUrlChecksum (s):
 def isProcessRunning(pid):
   running = False
   try:
-    kill(pid, 0)
+    os.kill(pid, 0)
     running = True
   except:
     pass
@@ -466,7 +439,7 @@ def download (source, dest, options):
       else:
         raise MalformedUrl(source)
       source = "cmstc://?%s%s%s&module=CMSSW&export=src&output=/%s" % (release,baserel,extratags,output)
-
+      
     cacheDir=abspath (join (options.workDir, "SOURCES/cache")) 
     urlTypeRe = re.compile ("([^:+]*)([^:]*)://.*")
     match = urlTypeRe.match (source)
@@ -474,10 +447,14 @@ def download (source, dest, options):
         raise MalformedUrl (source)
     downloadHandler = downloadHandlers[match.group (1)]
     checksum = getUrlChecksum (source)
-    filename = rsplit (source, "/", 1)[1]
+    filename = source.rsplit("/", 1)[1]
     downloadDir = join (cacheDir, checksum)
-    if not exists (downloadDir):
-        makedirs (downloadDir)
+    try:
+      makedirs (downloadDir)
+    except OSError, e:
+      if not exists(downloadDir):
+        raise downloadDir 
+
     realFile = join (downloadDir,filename)
     if exists (realFile) and not exists (join (dest, filename)):
         symlink (realFile, join (dest, filename))
@@ -486,7 +463,7 @@ def download (source, dest, options):
         return True
     cachedFile = "%s/%s/SOURCES/cache/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
     downloadOptions = DownloadOptions(options)
-    log ("Trying to fetch cached file: %s" % cachedFile)
+    log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
     success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions)
     if not success:
         success = downloadHandler (source, downloadDir, downloadOptions)
@@ -541,8 +518,8 @@ class NotCorrectlyBootstrapped (Exception):
 class UnknownCompiler (Exception):
     pass
 
-def getInitialId (options):
-    return options.testTag and 1 or 0
+# The initial id for a given tag. Change to 1 if you always want to have -cms.
+INITIAL_ID = 0
     
 def tagToId (tag, origTag):
     return int ((tag or 0) and (tag.replace (origTag, "") or 1))
@@ -629,10 +606,10 @@ def getPkgChecksumFile (officialRpmLocation, buildOptions=None):
         doNotBootstrap = buildOptions.bootstrap and "" or "--do-not-bootstrap"
         architecture = "--architecture %s" % buildOptions.architecture
         cmsdist = "--cmsdist %s" % buildOptions.cmsdist
-        
+        brokenLink = join(buildOptions.workDir, officialRpmLocation) 
         log ("""ERROR: File
         
-                %(officialRpmLocation)s 
+                %(brokenLink)s 
         
                 links to 
                 
@@ -663,7 +640,7 @@ class TagCacheAptImpl (object):
     
     def update (self):
       if hasattr (self.options, "bootstrap") and self.options.bootstrap == True :
-        aptGetUpdateCommand = "apt-get update -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0"
+        aptGetUpdateCommand = "apt-get update"
         error, output = getstatusoutput (aptGetUpdateCommand)
         if error:
           die("Error while executing apt-get update.\n%s" % output)
@@ -679,9 +656,17 @@ class TagCacheAptImpl (object):
           self.checksumCache = dict([(v,k) for (k,v) in pairs])
         except:
           die("Malformed apt-cache output.")
-        
+       
     def requestTag (self, pkgInfo, tag):
-        """ requestTag returns a tag based on what is found on the 
+        """ requestTag returns a unique tag (i.e. the mnemonic suffix at the 
+            end of the package name) based on what is found in the online 
+            database and in the local build area.
+            
+            @a pkgInfo is the structure which holds the information about a 
+               tag.
+            @a tag the mnemonic tag to be used to keep track of different 
+               package builds. E.g. "cms" or "ge"
+            @return a unique tag (ie cmsXXX) which can be used for the package.
         """
         tags = {}
         if self.options.bootstrap:
@@ -696,7 +681,7 @@ class TagCacheAptImpl (object):
             checksum = getPkgChecksumFile (linkName, self.options)
             tempTag = getPkgName(package).replace (pkgInfo.id (), "").strip ("-")
             tags[tempTag] = checksum
-        for i in range (getInitialId (self.options), 9999):
+        for i in xrange(INITIAL_ID, 9999):
             finalTag = idToTag (i, tag)
             if finalTag not in tags:
                 return finalTag
@@ -736,10 +721,10 @@ class TagCacheAptImpl (object):
         
         if not output:
             return None
-        fullVersion = rsplit (output, "+", 1)[1]
+        fullVersion = output.rsplit("+", 1)[1]
         if "-" not in fullVersion:
             return ""
-        tag = rsplit (fullVersion, "-", 1)[1]
+        tag = fullVersion.rsplit("-", 1)[1]
         # Handle the cases where -NNN is actually part of the realversion
         if re.search('^'+self.options.tag+'\d*$',tag,re.IGNORECASE):
             return tag
@@ -749,7 +734,8 @@ class TagCacheAptImpl (object):
         """ 
         """
         assert (False and "Not implemented for the time being.")
-        
+
+global tags_cache        
 tags_cache = None
 
 # FIXME: write a more valuable description
@@ -796,32 +782,21 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
 """}
 
-#FIXME: This is to avoid trigger a rebuild.
-#Copy this back in to DEFAULT_SECTIONS[%files] and remove it
-DEFAULT_FILES_SECTION = """
-%{installroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/%{pkgversion}
-%dir %{installroot}/
-%dir %{installroot}/%{cmsplatf}/
-%dir %{installroot}/%{cmsplatf}/%{pkgcategory}/
-%dir %{installroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
-"""
-
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
 
 
-# Preambles
+# Preambles. %dynamic_path_var is defined in rpm-preamble.
 
 INITENV_PREAMBLE = [
-("+PATH", "PATH", "%i/bin"),
-("+PATH", "LD_LIBRARY_PATH", "%i/lib"),
-("+PATH", "DYLD_FALLBACK_LIBRARY_PATH", "%i/lib"),
+("CMD_SH", "if", "[ -f %i/etc/profile.d/dependencies-setup.sh ]; then . %i/etc/profile.d/dependencies-setup.sh; fi"),
+("CMD_CSH", "if", "( -f %i/etc/profile.d/dependencies-setup.csh ) source %i/etc/profile.d/dependencies-setup.csh; endif"),
 ("SETV", "%(uppername)s_ROOT", "%i"),
 ("SETV", "%(uppername)s_VERSION", "%v"),
 ("SETV", "%(uppername)s_REVISION", "%pkgrevision"),
 ("SETV", "%(uppername)s_CATEGORY", "%pkgcategory"),
-("CMD_SH", "if", "[ -f %i/etc/profile.d/dependencies-setup.sh ]; then . %i/etc/profile.d/dependencies-setup.sh; fi"),
-("CMD_CSH", "if", "( -f %i/etc/profile.d/dependencies-setup.csh ) source %i/etc/profile.d/dependencies-setup.csh; endif")]
+("+PATH", "PATH", "%i/bin"),
+("+PATH", "%%{dynamic_path_var}", "%i/lib")]
 
 DEFAULT_PREAMBLE = """
 """
@@ -870,53 +845,40 @@ DEFAULT_FILES_PREAMBLE = """
 %%defattr(-, root, root)
 """
 
-COMMANDS_SH = {"SETV": """%(var)s="%(value)s"
-""",
-               "SET": """%(var)s="%(value)s"; export %(var)s
-""", 
-               "+PATH": """%(var)s="%(value)s:$%(var)s"; export %(var)s
-""",
-               "UNSET": """unset %(var)s || true
-""", 
-               "CMD": """%(var)s %(value)s
-""",
-               "CMD_SH":"""%(var)s %(value)s
-""", 
-               "CMD_CSH": "",
-               "ALIAS": """alias %(var)s="%(value)s"
-""",
+COMMANDS_SH = {"SETV":      """%(var)s="%(value)s"\n""",
+               "SET":       """export %(var)s="%(value)s";\n""",
+               "+PATH":     """[ ! -d %(value)s ] || export %(var)s="%(value)s${%(var)s:+:$%(var)s}";\n""",
+               "UNSET":     """unset %(var)s || true\n""",
+               "CMD":       """%(var)s %(value)s\n""",
+               "CMD_SH":    """%(var)s %(value)s\n""",
+               "CMD_CSH":   "",
+               "ALIAS":     """alias %(var)s="%(value)s"\n""",
                "ALIAS_CSH": "",
-               "ALIAS_SH":"""alias %(var)s="%(value)s"
-"""}
+               "ALIAS_SH":  """alias %(var)s="%(value)s"\n"""}
 
-COMMANDS_CSH = {"SETV": """set %(var)s="%(value)s"
-""",
-                "SET": """setenv %(var)s "%(value)s"
-""", 
-                       "+PATH": """if ( ${?%(var)s}) then
-setenv %(var)s "%(value)s:$%(var)s"
-else
-    setenv %(var)s "%(value)s"
-endif
-""",
-                       "UNSET": """unset %(var)s || true
-""", 
-                       "CMD": """%(var)s %(value)s
-""",
-                       "CMD_SH": "",
-                       "CMD_CSH":"""%(var)s %(value)s
-""", 
-                       "ALIAS": """alias %(var)s "%(value)s"
-""",
-                       "ALIAS_SH": "",
-                       "ALIAS_CSH":"""alias %(var)s "%(value)s"
-"""}
+COMMANDS_CSH = {"SETV":     """set %(var)s="%(value)s"\n""",
+                "SET":      """setenv %(var)s "%(value)s"\n""",
+                "+PATH":    """if ( -d %(value)s ) then\n"""
+                            """  if ( ${?%(var)s} ) then\n"""
+                            """    setenv %(var)s "%(value)s:$%(var)s"\n"""
+                            """  else\n"""
+                            """    setenv %(var)s "%(value)s"\n"""
+                            """  endif\n"""
+                            """endif\n""",
+                "UNSET":    """unset %(var)s || true\n""",
+                "CMD":      """%(var)s %(value)s\n""",
+                "CMD_SH":   "",
+                "CMD_CSH":  """%(var)s %(value)s\n""",
+                "ALIAS":    """alias %(var)s "%(value)s"\n""",
+                "ALIAS_SH": "",
+                "ALIAS_CSH":"""alias %(var)s "%(value)s"\n"""}
 
 SPEC_HEADER = """
 %%define pkgname        %(name)s
 %%define pkgversion     %(version)s
 %%define pkgcategory    %(group)s
-%%define instroot       %(workDir)s
+%%define cmsroot        %(workDir)s
+%%define instroot       %(workDir)s/%(tempDirPrefix)s/BUILDROOT/%(checksum)s%(installDir)s
 %%define realversion    %(realVersion)s
 %%define gccver         %(compilerRealVersion)s
 %%define compilerRealVersion %(compilerRealVersion)s
@@ -930,7 +892,7 @@ SPEC_HEADER = """
 %%define tempprefix     %(tempDirPrefix)s
 Name: %(group)s+%(name)s+%(version)s
 Group: %(group)s
-Version: 1
+Version: %(rpmVersion)s
 Release: %(pkgRevision)s
 License:  "As required by the orginal provider of the software."
 Summary: %(summary)s SpecChecksum:%(checksum)s
@@ -944,6 +906,37 @@ Prefix: %(installDir)s
 """
 
 DEFAULT_INSTALL_POSTAMBLE="""
+# Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
+# to support architectures not being build with cmsBuild > V00-19-XX
+%if "%{?keep_pkgconfig:set}" != "set"
+if [ -d "%i/lib/pkgconfig" ]; then rm -rf %i/lib/pkgconfig; fi
+%endif
+
+# Do not package libtool and archive libraries, unless required.
+%if "%{?keep_archives:set}" != "set"
+# Don't need archive libraries.
+rm -f %i/lib/*.{l,}a
+%endif
+
+# Strip executable / paths which were specified in the strip_files macro.
+%if "%{?strip_files:set}" == "set"
+for x in %strip_files
+do
+  if [ -e $x ]
+  then
+    find $x -type f -perm -a+x -exec %strip {} \;
+  fi 
+done
+%endif
+
+# remove files / directories which were specified by the drop_files macro.
+%if "%{?drop_files:set}" == "set"
+for x in %drop_files
+do
+  if [ -e $x ]; then rm -rf $x; fi
+done
+%endif
+
 case %{cmsplatf} in
     osx* )
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
@@ -1005,19 +998,23 @@ requires_cache = {}
 checksums_cache = {}
 visits = {}
 
+# Silence the deprecation warning until we move completely to 2.6.X
+import warnings
+warnings.filterwarnings("ignore",category=DeprecationWarning)
 try:
-    from md5 import new as md5adder
+  from md5 import new as md5adder
 except ImportError:
-    from hashlib import md5 as md5adder
+  from hashlib import md5 as md5adder
 
 def calculateHumanReadableVersion (pkg):
     # This takes care of converting a checksum to something human-readable.
     #  * If the package has a revision different than 1, we assume that it is
     #    an old style one and we return the realVersion as version.
-    #  * If the checksum is available in the DB, we use the tag, rather than the checksum.
-    #  * If the checksum is not in the DB, but an official tag is requested (via --tag), we associate the checksum to
-    #    the tag, possibly adding an incremental number to it if a given package/version already uses it.
-    #  * If --tag is not used we just use the md5 sum as a to uniquely identify the package.
+    #  * If the checksum is available in the DB, we use the tag, rather than 
+    #    the checksum.
+    #  * If the checksum is not in the DB, but an official tag is requested, 
+    #    we associate the checksum to the tag, possibly adding an incremental 
+    #    number to it if a given package/version already uses it.
 
     if not isDefaultRevision(pkg.pkgRevision):
 # lange - 080727 -- to get a revision the user will just have to specify the full
@@ -1214,7 +1211,7 @@ class MetaSpecSyntax (object):
         self.__IMPORT      = re.compile ("^## IMPORT (.*)")
         self.__BUILDIF     = re.compile ("^## BUILDIF (.*)")
         self.__REVISION    = re.compile ("^## REVISION (.*)")
-        self.__SUBPACKAGE  = re.compile (r'^##\s+SUBPACKAGE\s+([\w+-]+)\s*$', re.M)
+        self.__SUBPACKAGE  = re.compile (r'^##\s+SUBPACKAGE\s+([\w+-]+)(\s+IF\s+(%[\w+-]+))?\s*$', re.M)
 
         commands = "|".join (COMMANDS_SH.keys ()).strip ("|").replace ("+", 
                                                                        "[+]")
@@ -1340,10 +1337,10 @@ class SourcesDownload (BuilderAction):
         for source in self.pkg.sources:
             if remoteSourcesRE.match (source):
                 self.files.append (join ("SOURCES", self.pkg.pkgdir, 
-                                         rsplit (source, "/", 1)[1]))
+                                         source.rsplit("/", 1)[1]))
             else:
                 self.files.append (join ("SOURCES", self.pkg.pkgdir,
-                                         rsplit (basename (source), ".", 1)[0]))
+                                         basename(source).rsplit(".", 1)[0]))
         self.missingFiles = [ abspath (filename)
                               for filename in self.files
                               if not exists (filename) ]
@@ -1634,6 +1631,8 @@ class SubPackage (object):
         self.options        = self.parent.options
         self.cmsplatf       = self.parent.cmsplatf
         self.workDir        = self.parent.workDir
+        self.installDir     = self.parent.installDir
+        self.tempDirPrefix  = self.parent.tempDirPrefix
         self.builddir       = self.parent.builddir
         self.sourcedir      = self.parent.sourcedir
         self.specdir        = self.parent.specdir
@@ -1739,14 +1738,15 @@ class Package (object):
         self.pkginstroot = None
         self.pkgrel = None
         self.__specdir = None
-        self.cmsplatf = options.architecture
+        self.cmsplatf = options.architecture 
         self.rpmdir = None
         self.rpmfilename = None
         self.srpmfilename = None
-        self.pkgRevision = "1"
+        self.pkgRevision = '1'
         self.specPreHeader = ""
         #For online: pkgRevision is always architecture
         if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
+        self.rpmVersion = "1"
 
         self.requiresStatement = "Requires: gcc"
         self.sections = {}
@@ -1783,11 +1783,12 @@ class Package (object):
         for section in DEFAULT_SECTIONS.keys ():
             self.sections[section] = {}
             self.sections[section][''] = DEFAULT_SECTIONS[section]
+            #FIXME: This is to avoid trigger a rebuild. This overrides the %files section
+            #For any release series which is going to trigger a rebuild please fix DEFAULT_SECTIONS[%file]
+            #to have only %{installroot}/ and remove next 2 lines.
+            if section == "%files":
+                self.sections[section][''] = '%{installroot}/'
             self.sections[section][''] += self.sectionPostambles[section]
-            #FIXME: This is to avoid trigger a rebuild. This overrides the %files section when installDir != workDir
-            #Remove this when DEFAULT_SECTIONS[%file] is fixed to use %{installroot} instead of %i, %instroot
-            if (self.options.workDir != self.options.installDir) and (section == "%files"):
-                self.sections[section][''] = DEFAULT_FILES_SECTION
     
     def initWithSpec (self, specLines):
         """ This parses the spec files and creates a structure with its contents.
@@ -1876,7 +1877,9 @@ class Package (object):
                 imports.append (imatch.group (1).strip (" \n") + ".file")
             elif smatch:
                 subpackageName = smatch.group(1)
-                self.subpackages.append( SubPackage(self, subpackageName) )
+                condition = smatch.group(3)
+                if not condition or self.isSymbolDefined(condition):
+                    self.subpackages.append( SubPackage(self, subpackageName) )
             else:
                 self.spec.append (line)
         try:
@@ -1886,6 +1889,17 @@ class Package (object):
                 self.imports.append (importFilename) 
         except IOError, e:
             raise FileNotFound (importFilename)
+
+    def isSymbolDefined(self, symbol):
+        """This function checks if a symbol is defined in the current spec file. That is, if rpmbuild evaluates %symbol to a non-empty string. 
+        Note: I *think* that only the symbols defined in the main section are visible here.
+        """
+        tmp = copy.copy(self)
+        tmp.createDefaultSections()
+        tmp.parseSections()
+        value = tmp.rpmEvalStrings(symbol)
+        isDefined = (value != symbol)
+        return isDefined
 
     def parseSections (self):
         """ This helper method is responsible for parsing the spec and create subdivide sections found inside it.
@@ -1924,15 +1938,8 @@ class Package (object):
     def calculateChecksum (self):
         """ 
         """
-        # In case --unsafe is specified, the md5 sums are not calculated and all
-        # the specs with the same realversion have the same version.
-        # FIXME: Really required?
         checksumCalculator = ChecksumCalculator ()
         
-        if self.options.unsafeMode == True:
-            self.version = self.realVersion
-            return
-
         if self.checksum != "%{nil}":
             return
         # In the case --use-system-compiler option is specified, the compiler itself
@@ -2079,7 +2086,7 @@ class Package (object):
         self.buildDependencies.sort ()
         self.origBuildDependencies.sort ()
         self.fullDependencies.sort ()
-        
+
     def dumpSpec (self):
         self.spec = "\n".join([self.specPreHeader, 
                                SPEC_HEADER % self.__dict__, 
@@ -2197,7 +2204,7 @@ class Package (object):
         return not self.__eq__ (other)
     
     def __cmp__ (self, other):
-        """ Package A is greater than package B if 
+        """ Package A is greater than package B if
             Package A depends on package B.
             Moreover, if A does not depend B and viceversa, the one with less dependent
             packages greater first. If they have the same number of dependent packages, the
@@ -2250,189 +2257,223 @@ class Package (object):
                                 for element in match.group (1).split ()])
                 break
         cmsdistPath = abspath (self.options.cmsdist)
+        # If no site is set, simply returns the original dependency name.
+        # If site is set, return "site-dep" as a dependency if site-dep.spec
+        # exists.
+        def siteSpecific(d):
+          if not self.options.site:
+            return d
+          siteDep = self.options.site + "-" + d
+          siteSpec = join(cmsdistPath, siteDep + ".spec")
+          if exists(join(cmsdistPath, siteDep + ".spec")):
+            log("Site specific spec %s preferred for %s." % (siteSpec, d), DEBUG)
+            return siteDep
+          return d
+        deps = [siteSpecific(d) for d in deps]
         sources.extend ([join (cmsdistPath, source + ".file")
                          for source in localSources])
         patches.extend ([join (cmsdistPath, patch + ".patch") 
                         for patch in localPatches])
         self.__requiresCache[self.name] = (deps, sources, patches, buildDeps)
         return (deps, sources, patches, buildDeps)
-    
-def parseOptions ():
-    from optparse import OptionParser
 
+def parseOptions():
+    parser = OptionParser(usage="""
+  cmsBuild [<additional-options>] [--no-bootstrap] -a <architecture> -c <cmsdist-dir> build <package> [<package2> .. <packageN>]
+  cmsBuild [<additional-options>] [--sync-back] [--no-bootstrap] -a <architecture> -c <cmsdist-dir> upload <package> [<package2> .. <packageN>]""")
+    deprecatedOptions = [("--compiling-processes", "--jobs / -j"),
+                         ("--workers-pool-size", "--builders")]
+    for deprecated, new in deprecatedOptions:
+      if deprecated in sys.argv:
+        parser.error("Deprecated option name %s. Please use %s." % (deprecated, new))
+    
     # FIXME add the relevant options.
-    parser = OptionParser ()
-    parser.add_option ("-c", "--cmsdist", 
-                       dest="cmsdist",
-                       default=abspath ("./CMSDIST"))
-    parser.add_option ("--cmsdist-tag",
-                        dest="cmsdistTag",
-                        default="",
-                        help="Tag to fetch for CMSDIST.")
-    parser.add_option ("-i", "--work-dir",
-                       dest="workDir",
-                       default=getcwd ())
-    parser.add_option ("--unsafe",
-                       dest="unsafeMode",
-                       action="store_true")
-    parser.add_option ("--compiling-processes",
-                       dest="compilingProcesses",
-                       default=0)
-    parser.add_option ("--ignore-compile-errors",
-                       dest="ignoreCompileErrors",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--tag",
-                       dest="tag",
-                       default="cms")
-    parser.add_option ("--test-tag",
-                       dest="testTag",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--do-not-bootstrap",
-                       dest="doNotBootstrap",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--do-not-build",
-                       dest="doNotBuild",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--use-system-compiler",
-                       dest="systemCompiler",
-                       action="store_true",
-                       default=None)
-    parser.add_option ("--skip-pre-install-checks",
-                       action="store_true",
-                       dest="skipPreInstall",
-                       default=None,
-                       help="Skip execution of default CMS pre-install scriplet")
-    parser.add_option ("--compiler",
-                       dest="compilerName",
-                       default="gcc")
-    parser.add_option ("--server",
-                       dest="server",
-                       default="http://cmsrep.cern.ch/cmssw")
-    parser.add_option ("--repository",
-                       dest="repository",
-                       default="cms")
-    parser.add_option ("--workers-pool-size",
-                       dest="workersPoolSize",
-                       default=1,
-                       type="int")
-    parser.add_option ("--trace",
-                       dest="trace",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--debug",
-                       dest="debug",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--sync-back",
-                       dest="syncBack",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--deprecate-local",
-                       dest="doDeprecate",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--check-consistency",
-                       dest="doCheckOnBuild",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("--upload-server",
-                       dest="uploadServer",
-                       default="cmsrep.cern.ch")
-    parser.add_option ("--upload-user",
-                       dest="uploadUser",
-                       default="cmsbuild")
-    parser.add_option ("--upload-port",
-                       dest="uploadPort",
-                       default="22")
-    parser.add_option ("--upload-root-directory",
-                       dest="uploadRootDirectory",
-                       default="/data/cmssw")
-    parser.add_option ("--upload-tmp-repository",
-                       dest="uploadTmpRepository",
-                       help="Name of temporary repo to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
-                       default=getLocalUserName ())
-    parser.add_option ("--pretend",
-                       dest="pretend",
-                       action="store_true",
-                       default=False)
-    parser.add_option ("-y", "--assume-yes",
-                       dest="assumeYes",
-                       action="store_true",
-                       default=True,
-                       help="Automatically answer YES to all questions")
-    parser.add_option ("--only-once",
-                       dest="onlyOnce",
-                       action="store_true",
-                       default=True,
-                       help="Execute bootstrap only once")
-    parser.add_option ("--cfg",
-                       dest="cfg",
+    parser.add_option("-c", "--cmsdist", 
+                      dest="cmsdist",
+                      help="the location of the CMSDIST directory",
+                      metavar="PATH",
+                      default=abspath("./CMSDIST"))
+    parser.add_option("--cmsdist-tag",
+                       dest="cmsdistTag",
                        default="",
-                       help="Uses the cmsBuild configuration found in FILE")
-    # FIXME: should autodetect.
-    parser.add_option ("--architecture",
-                       dest="architecture",
-                       default="",
-                       help="Architecture to be used.")
-    parser.add_option ("--temp-dir-prefix",
-                        dest="tempDirPrefix",
-                        default="tmp",
-                        help="Prefix for the randomly created tmp directory name")
-    parser.add_option ("--date-format",
-                        dest="dateFormat",
-                        default="%y%m%d",
-                        help="Format of the %%(date)s variable in the cfg files")
-    parser.add_option ("--use-apt-version",
-                        dest="useAptVersion",
-                        default="0.5.15lorg3.2-CMS")
-    parser.add_option ("--bootstrap-subdir",
-                        dest="bootstrapSubdir",
-                        default="cms")
-    parser.add_option ("--build-command-prefix",
-                        dest="buildCommandPrefix",
-                        default="",
-                        help="String to prepend to any rpmbuild command")
-    parser.add_option ("--use-32-bit-on-64",
-                        dest="use32BitOn64",
-                        default=False,
-                        action="store_true",
-                        help="prepends linux32 to the various build commands")
-    parser.add_option ("--compiler-version",
-                       dest="compilerVersion",
-                       default="",
-                       help="Override the version of the compiler found in the compiler spec.")
+                       metavar="TAG",
+                       help="Tag to fetch for CMSDIST.")
+    parser.add_option("--architecture", "-a",
+                      dest="architecture",
+                      default=None,
+                      help="Architecture to be used.")
+    parser.add_option("-i", "--work-dir",
+                      dest="workDir",
+                      default=getcwd(),
+                      metavar="PATH",
+                      help="the location where the build happens")
+    parser.add_option("--jobs", "-j",
+                      dest="compilingProcesses",
+                      metavar="N",
+                      help="The number of processes to be used to compile a given package.",
+                      default=0)
+    parser.add_option("--repository",
+                      dest="repository",
+                      metavar="NAME",
+                      help="Name of the repository directory on server. E.g. 'cms'.",
+                      default="cms")
+    parser.add_option("--builders",
+                      dest="workersPoolSize",
+                      metavar="N",
+                      default=1,
+                      help="Maximum number of packages to be build in parallel.",
+                      type="int")
+    parser.add_option("--sync-back",
+                      dest="syncBack",
+                      action="store_true",
+                      help="When uploading, copy the temporary directory to the production one.",
+                      default=False)
+    advancedBuildOptions = OptionGroup(parser, "Advanced build options")
+    advancedBuildOptions.add_option("--use-system-compiler",
+                                    dest="systemCompiler",
+                                    action="store_true",
+                                    help="""Use the system compiler rather than the one specified in CMSDIST""",
+                                    default=None)
+    advancedBuildOptions.add_option("--ignore-compile-errors",
+                                    "-k",
+                                    dest="ignoreCompileErrors",
+                                    help="Ignores CMSSW compilation errors.",
+                                    action="store_true",
+                                    default=False)
+    advancedBuildOptions.add_option("--no-bootstrap",
+                                    dest="bootstrap",
+                                    action="store_false",
+                                    help="Do not bootstrap area and ignore packages on the remote repository.",
+                                    default=True)
+    advancedBuildOptions.add_option("--skip-pre-install-checks",
+                                    action="store_true",
+                                    dest="skipPreInstall",
+                                    default=None,
+                                    help="Skip execution of default CMS pre-install scriplet")
+    advancedBuildOptions.add_option("--build-command-prefix",
+                                    dest="buildCommandPrefix",
+                                    default="",
+                                    metavar="COMMAND",
+                                    help="String to prepend to any rpmbuild command")
+    advancedBuildOptions.add_option("--pretend",
+                                    dest="pretend",
+                                    action="store_true",
+                                    help="Do not actually build",
+                                    default=False)
+    # FIXME: really needed??? Shouldn't this simply be the repository?
+    advancedBuildOptions.add_option("--bootstrap-subdir",
+                                    dest="bootstrapSubdir",
+                                    metavar="PATH",
+                                    help="Location of the bootstrap.sh file relative to the base repository path.",
+                                    default="cms")
 
-    parser.add_option ("--no-cleanup",
-                       dest="noCleanup",
-                       default=False,
-                       action="store_true",
-                       help="Do not automatically clean-up stale files.")
-    parser.add_option("--server-apt-env",
-                      dest="serverAptEnv",
-                      default="/data/cmssw/apt.old/etc/profile.d/init.sh",
-                      help="Server side location of the apt environment script to be sourced.")
+    advancedBuildOptions.add_option("--server",
+                                    dest="server",
+                                    metavar="URL",
+                                    help="URL of apt repository. E.g. 'http://cmsrep.cern.ch/cmssw'",
+                                    default="http://cmsrep.cern.ch/cmssw")
+    advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
+                                    default=False, help="Use the new scheduler to install / build packages")
+    # FIXME: change option to --no-deprecate and do the deprecation 
+    #        automatically by default.
+    #parser.add_option ("--deprecate-local",
+    #                   dest="doDeprecate",
+    #                   action="store_true",
+    #                   default=False)
+    uploadGroup = OptionGroup(parser, "Upload Options",
+                        "Options to fine-tune the upload to repository process.")
+    uploadGroup.add_option("--upload-server",
+                           dest="uploadServer",
+                           metavar="HOSTNAME",
+                           help="The hostname of the server where the repository is physically located.",
+                           default="cmsrep.cern.ch")
+    uploadGroup.add_option("--upload-user",
+                           dest="uploadUser",
+                           metavar="USERNAME",
+                           help="The username by which connect to the server where the repository is located.",
+                           default="cmsbuild")
+    uploadGroup.add_option("--upload-port",
+                           dest="uploadPort",
+                           metavar="<0-65535>",
+                           help="The port on which the repository sshd is listening to (default 22).",
+                           default="22")
+    uploadGroup.add_option("--upload-root-directory",
+                           dest="uploadRootDirectory",
+                           metavar="PATH",
+                           default="/data/cmssw",
+                           help="The base directory where the repository is located. E.g. /data/cmssw.")
+    uploadGroup.add_option("--upload-tmp-repository",
+                           dest="uploadTmpRepository",
+                           help="Name of temporary repository to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
+                           default=getuser())
 
+    uploadGroup.add_option("--server-apt-env",
+                           dest="serverAptEnv",
+                           default="/data/cmssw/apt/etc/profile.d/init.sh",
+                           metavar="FILENAME",
+                           help="Server side location of the apt environment script to be sourced.")
     
+    debugGroup = OptionGroup(parser, "Debug options")
+    debugGroup.add_option("--debug",
+                          dest="debug",
+                          action="store_true",
+                          help="Print out debug information.",
+                          default=False)
+    debugGroup.add_option("--no-cleanup",
+                          dest="noCleanup",
+                          default=False,
+                          action="store_true",
+                          help="Do not automatically clean-up stale files.")
+    debugGroup.add_option("--specs-only",
+                          dest="specsOnly",
+                          help="Do not build. Only write out RPM spec files.",
+                          action="store_true",
+                          default=False)
+    debugGroup.add_option("--trace",
+                          dest="trace",
+                          action="store_true",
+                          help="Show activity of builders and scheduler.",
+                          default=False)
+    debugGroup.add_option("--progress",
+                          dest="progress",
+                          action="store_true",
+                          help="Show progress",
+                          default=False)
+    parser.add_option_group(advancedBuildOptions)
+    parser.add_option_group(uploadGroup)
+    parser.add_option_group(debugGroup)
     opts, args = parser.parse_args (None, None)
     
+    # Setup some default values.
+    # FIXME: use an OptionParser callback.
+    # FIXME: exclusive --cmsdist and --cmsdist-tag options.
+    # FIXME: change site to "variant" and extract it from the architecture.
+    opts.site = ""
     if "://" not in opts.cmsdist:
         opts.cmsdist = abspath (opts.cmsdist)
-   
+    
+    if opts.cmsdistTag:
+       opts.cmsdist = "cvs://?tag=%s" % opts.cmsdistTag 
+    
+    if not opts.architecture:
+      parser.error("Please specify the architecture you want to build for.")
+
     # Check for weird characters in workdir
     if re.match(".*[\\\+.[*](?!app$).*", opts.workDir):
       parser.error("Please avoid '+.[*$' in --work-dir path.")
     
+    # The tag will always match the repository (minus the various .pre bits, 
+    # like for comp.pre)
+    opts.tag = opts.repository.split(".")[0]
+    
     setLogLevel (opts)
-
+    if len(args) < 2:
+      parser.error("Please build or upload action. Use --help to see additional options.")
     return opts, args
     
 def createDirs (architecture, dest="./"):
     dirs = ["SPECS", join ("RPMS", architecture), 
-            "SRPMS", join ("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB"]
+            "SRPMS", join ("BUILD", architecture), "SOURCES", "BUILDROOT"]
     for d in dirs:
         try:
             makedirs (join (abspath (dest), d))
@@ -2454,11 +2495,6 @@ def saveSpec (p):
     #any multiline macro in the %post section does not expant properly if it is not followed
     #by any other command/comment.
     f.write ("\n#\n");
-    #ONLY for V00-16 tags: rpm 4.4.2.2 does not delete buildroot at the end
-    #but rpm 4.8.0 does. As in V00-16 tag, our build root is same as workdir so
-    # rpm deletes whole workdir after rpm is built.
-    #To avoid this we add explicit clean section
-    f.write ("%clean\n");
     f.close ()
 
 def packageList (pkg):
@@ -2473,7 +2509,7 @@ def fetchLocal (pkg, sourceFilename):
         if not exists (pkg.sourcedir):
             makedirs (pkg.sourcedir)
         destFilename = join (pkg.sourcedir, 
-                             basename (rsplit (sourceFilename, ".", 1)[0]))
+                             basename(sourceFilename.rsplit(".", 1)[0]))
         log ("Copying %s to %s" % (sourceFilename, destFilename), DEBUG)
         source = open (sourceFilename)
         dest = file (destFilename, 'w')
@@ -2484,16 +2520,39 @@ def fetchLocal (pkg, sourceFilename):
     except Exception, e:
         return (sourceFilename, False)
 
+def fetchSourcesNew(pkg, scheduler):
+  scheduler.log("Fetching sources for %s" % pkg.name)
+  sourcedir = pkg.sourcedir
+  downloadables = pkg.sources + pkg.patches
+  if not downloadables:
+    scheduler.log("No sources to be downloaded found for packages %s." % pkg.name)
+    return
+  urlRe = re.compile (".*:.*/.*")
+
+  # No need to create the download directory
+  # not to dump the cmsos, because it was already
+  # done.
+  for url in downloadables:
+    if urlRe.match(url):
+      try:
+        success = download(url, sourcedir, pkg.options)
+      except MalformedUrl, e:
+        return str(e)
+    else:
+      output, success = fetchLocal(pkg, url)
+    if not success:
+      return "Unable to download %s" % url
+    scheduler.log("Done fetching %s" % url)
 
 def fetchSources (pkg):
-    log ("Fetching sources for %s" % pkg.name)
+    log ("Fetching sources for %s" % pkg.name, DEBUG)
     sourcedir = pkg.sourcedir
     if not sources and not patches:
         log ("No sources to be downloaded found for packages %(name)s" % pkg.__dict__)
     urlRe = re.compile (".*:.*/.*")
 
     def doDownload (source):
-        log (source)
+        log (source, DEBUG)
         if urlRe.match (source):
             result = download (source, sourcedir, pkg.options)
             if not result:
@@ -2509,11 +2568,11 @@ def fetchSources (pkg):
 
     pkg.dumpCmsos ()
     if pkg.patches:
-        log ("Fetching local patches:")
+        log ("Fetching local patches:", DEBUG)
         for url in pkg.patches : doDownload (url)
         
     if pkg.sources:
-        log ("Fetching sources: ")
+        log ("Fetching sources: ", DEBUG)
         for url in pkg.sources : doDownload (url)
     return (pkg.name, True)
 
@@ -2638,6 +2697,38 @@ def installApt (pkg):
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via apt.", DEBUG)
 
+def scheduleInstallPackage(pkg, scheduler):
+  if pkg.name == "system-compiler":
+    return False
+
+  bootstrapped = pkg.options.bootstrap
+  
+  instDir = join(pkg.options.workDir, pkg.pkgrel)
+  if not bootstrapped and exists(join(instDir, ".package-checksum")):
+    scheduler.log("Package already built into %s. Not building." % instDir)
+    # subpackages were already built as part of the main package, but the RPMs still need to be symlinked
+    return checkCanInstallRpm(pkg)
+  
+  if not bootstrapped:
+    return False
+
+  scheduler.log("Checking if %s is cached." % pkg.name)
+  # FIXME: this is evaluated twice!! look at rpmBuild
+  actionName = "install-%s" % pkg.pkgName()
+  if checkIfInstalled(pkg):
+    scheduler.log("%s already in rpm database. Not building." % pkg.name)
+    scheduler.serial(actionName, [], installDoneDummy)
+    return True
+  if checkCanInstallRpm(pkg):
+    scheduler.log("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName())
+    scheduler.serial(actionName, [], installRpm, pkg, bootstrapped)
+    return True
+  if checkIfOnServer (pkg):
+    scheduler.log("%s is available from remote apt-get repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository))
+    scheduler.serial(actionName, [], installApt, pkg)
+    return True
+  return False
+  
 def rpmGetCached (pkg):
     """ This helper function is used to download packages from the apt repository.
         Returns True if the package can be downloaded/installed, False otherwise.
@@ -2647,8 +2738,9 @@ def rpmGetCached (pkg):
 
     bootstrapped = pkg.options.bootstrap
    
-    if not bootstrapped and exists (join (pkg.pkginstroot, ".package-checksum")):
-        log ("Package already built into %s. Not building." % pkg.pkginstroot, DEBUG)
+    instDir = join (pkg.options.workDir, pkg.pkgrel)
+    if not bootstrapped and exists (join (instDir, ".package-checksum")):
+        log ("Package already built into %s. Not building." % instDir, DEBUG)
         # subpackages were already built as part of the main package, but the RPMs still need to be symlinked
         return checkCanInstallRpm(pkg)
     
@@ -2677,12 +2769,12 @@ def rpmGetCached (pkg):
         return True
 
 def getCommandPrefix (options):
-    linux32RE = "slc._ia32_gcc..."
+    linux32RE = "slc[^_]+_ia32_gcc[^_]+"
     returnString=""
-    if re.match (linux32RE, options.architecture) or options.use32BitOn64:
+    if re.match (linux32RE, options.architecture):
         returnString = "linux32 %s" % options.buildCommandPrefix
     elif options.buildCommandPrefix:
-        returnString = self.options.buildCommandPrefix
+        returnString = options.buildCommandPrefix
     return returnString.strip ()
 
 def handleStaleFiles (files, noCleanup):
@@ -2691,6 +2783,94 @@ def handleStaleFiles (files, noCleanup):
              raise UnexpectedFile (staleFile)
         log ("Removing stale file " + staleFile, DEBUG)
         unlink (staleFile)
+
+def buildPackage(pkg, scheduler):
+  """ This helper function is responsible for building/installing a given spec and it's associated
+      rpm. What it does is the following (TODO):
+      * Checks if the rpm is already installed in the RPM DB. If yes, exists.
+      * Checks if the rpm is already available in the local area. If yes, installs it.
+      * Checks if the rpm is already available on the apt server. If yes, downloads, installs and returns.
+      If any of the above is true it:
+      * Builds the rpm, if it fails, it aborts.
+      * Installs the rpm in the local db, if it fails, it aborts."""
+  if pkg.name == "system-compiler":
+    return
+  
+  scheduler.log("Creating directory %s if not existing." % pkg.builddir)
+  if not exists (pkg.builddir):
+    makedirs (pkg.builddir)
+  logfile = "%s/log" % pkg.builddir
+  
+  scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
+  optionsDict = {
+    "topdir": abspath("."),
+    "specdir": pkg.specdir,
+    "builddir": pkg.builddir,
+    "makeprocesses": "",
+    "ignoreCompileErrors": ""
+  }
+
+  rpmsCacheDir = dirname(join(abspath ("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename))
+  finalRpmCacheDir = dirname(join (abspath ("RPMS"), pkg.rpmfilename))
+  srpmsCacheDir = join(abspath("SRPMS/cache/%s" % pkg.checksum))
+  
+  missingDirs = [d for d in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir] 
+                 if not exists(d)]
+  for directory in missingDirs:
+    makedirs(directory) 
+  
+  finalRpmFilename = join(abspath("RPMS"), pkg.rpmfilename)
+  uniqueRpmFilename = join(abspath("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename)
+  handleStaleFiles ([finalRpmFilename, uniqueRpmFilename], pkg.options.noCleanup)    
+  
+  if pkg.options.compilingProcesses:
+    optionsDict["makeprocesses"] = "--define \"compiling_processes %s\"" % pkg.options.compilingProcesses
+  if pkg.options.ignoreCompileErrors:
+    optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\"" 
+  optionsDict["tmpdir"] = join(opts.workDir, opts.tempDirPrefix)
+  optionsDict.update({"prefix": getCommandPrefix(pkg.options),
+                      "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
+                      "extraRpmDefines": pkg.options.rpmQueryDefines})
+
+  # FIXME: should be done only once!
+  err, out = getstatusoutput("rpmbuild --version")
+  if err:
+    return "ERROR: unable to find working rpmbuild"
+ 
+  rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+                    " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
+                    " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
+  rpmbuildCommand = rpmbuildCommand.strip()
+  scheduler.log(rpmbuildCommand)
+  error, output = getstatusoutput(rpmbuildCommand)
+  if error:
+    if not exists(logfile):
+      return "Error happened before any log output."
+    logLines = open(logfile).readlines()
+    return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (pkg.name, logfile, "".join(logLines[-20:]))
+  if output:
+    return output
+  scheduler.log("Build successful.")
+  
+  # link the RPM from the unique name to the friendly name
+  symlink(uniqueRpmFilename, finalRpmFilename)
+  # link subpackages, if any
+  for subpackage in pkg.subpackages:
+    finalSubFilename = join(abspath ("RPMS"), subpackage.rpmfilename)
+    uniqueSubFilename = join(abspath ("RPMS/cache/%s" % subpackage.checksum), subpackage.rpmfilename)
+    symlink(uniqueSubFilename, finalSubFilename)
+  
+def installPackage(pkg, scheduler):
+  if not checkCanInstallRpm (pkg):
+    raise RpmBuildFailed (pkg)
+  scheduler.log("Trying to install the rpm package just built.")
+  installRpm(pkg, pkg.options.bootstrap)
+  scheduler.log("Done")
+  #print scheduler.jobs
+  f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
+  f.write (pkg.checksum)
+  f.close ()
+  scheduler.reschedule()
 
 def rpmBuild (pkg, tracker):
     """ This helper function is responsible for building/installing a given spec and it's associated
@@ -2713,6 +2893,7 @@ def rpmBuild (pkg, tracker):
     tracker.postMessage ("BUILD_PKG", {"pkgName": pkg.pkgName (),
                                        "logFile": logfile})
     optionsDict = {
+        "topdir": abspath("."),
         "specdir": pkg.specdir,
         "builddir": pkg.builddir,
         "makeprocesses": "",
@@ -2737,15 +2918,17 @@ def rpmBuild (pkg, tracker):
         optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\"" 
     
     optionsDict["prefix"] = getCommandPrefix (pkg.options)
-    optionsDict["buildRoot"] = pkg.options.buildRoot
+    optionsDict["tmpdir"]    = join (opts.workDir, opts.tempDirPrefix)
+    optionsDict["buildRoot"] = join (optionsDict["tmpdir"], "BUILDROOT", pkg.checksum )
     optionsDict["extraRpmDefines"] = pkg.options.rpmQueryDefines
 
     err, out = getstatusoutput("rpmbuild --version")
     if err:
-      log ("ERROR: unable to find working rpmbuild")
-      sys.exit(1)
+      fatal("ERROR: unable to find working rpmbuild")
  
-    rpmbuildCommand = "%(prefix)s rpmbuild %(buildRoot)s -ba %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
+    rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+                      " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
+                      " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
     rpmbuildCommand = rpmbuildCommand.strip ()
     log (rpmbuildCommand, DEBUG)
     error, output = getstatusoutput (rpmbuildCommand)
@@ -2767,9 +2950,13 @@ def rpmBuild (pkg, tracker):
     if not checkCanInstallRpm (pkg):
         raise RpmBuildFailed (pkg)
     log ("Trying to install the rpm package just built.", DEBUG)
+    log ("Acquiring lock", TRACE)
+    tracker.globalLock.acquire ()
+    log ("Lock acquired", TRACE)
     installRpm (pkg, pkg.options.bootstrap)
+    tracker.globalLock.release ()
     log ("Done", DEBUG)
-    f = open (join (pkg.pkginstroot, ".package-checksum"), 'w')
+    f = open (join (pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
     f.write (pkg.checksum)
     f.close ()
 
@@ -2786,17 +2973,17 @@ def buildSpec (pkg, tracker):
         makedirs (sourcedir)
         pkg.dumpCmsos ()
     # Serialize package installation/check via apt.
-    tracker.postMessage ("SOURCES_CACHED", {"pkgName": pkgName})
+    tracker.postMessage ("PACKAGE_CACHED", {"pkgName": pkgName})
     log ("Acquiring lock", TRACE)
     tracker.globalLock.acquire ()
     log ("Lock acquired", TRACE)
     if rpmGetCached (pkg):
         tracker.globalLock.release ()
-        tracker.postMessage ("/SOURCES_CACHED", {"pkgName": pkgName})
+        tracker.postMessage ("/PACKAGE_CACHED-FOUND", {"pkgName": pkgName})
         tracker.postMessage ("/PACKAGE", {"pkgName": pkgName})
         return
     tracker.globalLock.release ()
-    tracker.postMessage ("/SOURCES_CACHED", {"pkgName": pkgName})
+    tracker.postMessage ("/PACKAGE_CACHED-NOT_FOUND", {"pkgName": pkgName})
     tracker.postMessage ("FETCH_SOURCES", {"pkgName": pkgName})
     fetchSources (pkg)
     tracker.postMessage ("/FETCH_SOURCES", {"pkgName": pkgName})
@@ -2839,11 +3026,12 @@ class BuildTracker (object):
         "/BUILD_PKG": '[%(eventTime)s] Done building %(pkgName)s.',
         "FETCH_SOURCES": '[%(eventTime)s] Fetching sources for %(pkgName)s',
         "/FETCH_SOURCES": '[%(eventTime)s] Done fetching sources for %(pkgName)s.',
-        "SOURCES_CACHED": '[%(eventTime)s] Checking cached rpms for %(pkgName)s',
-        "/SOURCES_CACHED": '[%(eventTime)s] Done checking cached rpms for %(pkgName)s'
+        "PACKAGE_CACHED": '[%(eventTime)s] Checking repository for previous built %(pkgName)s.',
+        "/PACKAGE_CACHED-FOUND": '[%(eventTime)s] Done checking repository for %(pkgName)s. Package found and installed.',
+        "/PACKAGE_CACHED-NOT_FOUND": '[%(eventTime)s] Done checking repository for %(pkgName)s. Package not found, proceeding with build.'
     }
     
-    def __init__ (self, packages, maxWorkers):
+    def __init__ (self, packages, maxWorkers, progress):
         self.maxWorkers = maxWorkers
         self.packages = packages
         self.builtPackages = []
@@ -2856,6 +3044,8 @@ class BuildTracker (object):
         self.buildErrors = []
         self.quitRequested = False
         self.keyboardInterrupt = False
+        self.progress = progress
+        self.progressCounter = 0
         self.packagesToBuild = [ pkg.name for pkg in self.packages ]
         for w in range (0, maxWorkers): self.createNewWorker ()
     
@@ -2884,6 +3074,11 @@ class BuildTracker (object):
                 
                 if not self.schedule ():
                     log ("No scheduling happened.", TRACE)
+                if self.progress:
+                  self.progressCounter += 1
+                if self.progressCounter > 10:
+                  self.progressCounter = 0
+                  sys.stderr.write(".");
                 sleep (0.001)
             except KeyboardInterrupt:
                 self.globalLock.acquire ()
@@ -3103,9 +3298,69 @@ class BuildChecker (object):
                 result = result or True
         return result
 
+# If a package is in apt cache, queue the action to install it.
+# If a package is not found in cache, queue actions to download
+# sources, build, and install the resulting package.
+# Notice that in both cases the action completes successfully.
+def checkPackageInCache(pkg, scheduler):
+  # make sure subpackages are properly up-to-date with the definitions in their
+  # parents
+  if pkg.parent:
+    pkg.updateFromParent()
+
+  pkgName = pkg.pkgName()
+  scheduler.log("Starting to process package %s" % pkgName)
+  sourcedir = pkg.sourcedir
+  if not exists (sourcedir):
+    log ("Creating directory %s" % sourcedir, DEBUG)
+    makedirs (sourcedir)
+    pkg.dumpCmsos ()
+  # Check if it possible to install package and enqueue 
+  # serial task to do it.
+  # FIXME: Clean up the fact queuing of tasks is actually
+  #       a consequence of invoking scheduleInstallPackage.
+  scheduled = scheduleInstallPackage(pkg, scheduler)
+  if scheduled:
+    scheduler.log("Package %s found in repository" % pkgName)
+    scheduler.reschedule()
+    return
+  scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
+  scheduler.parallel("fetch-%s" % pkgName, [], fetchSourcesNew, pkg, scheduler)
+  installActionDependencies = ["build-%s" % pkgName]
+  buildActionDependencies = ["install-%s" % d.pkgName() for d in pkg.fullDependencies if not isPackageInstalled(d)] + ["fetch-%s" % pkgName]
+  scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
+  scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
+  scheduler.serial("install-%s" % pkgName, installActionDependencies, installPackage, pkg, scheduler)
+  scheduler.reschedule()
+
+# New version using the new scheduler.
+def buildSpecsNew(pkg):
+  from scheduler import Scheduler
+  packages = filter(lambda p : not isPackageInstalled(p), pkg.fullDependencies + [pkg])
+  scheduler = Scheduler(pkg.options.workersPoolSize)
+
+  for p in packages:
+    scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, p, scheduler)
+
+  # We create before hand since we know they are going to be needed. This
+  # is to avoid having parallel threads creating them at the same time with
+  # one of the two failing because the directory is already there.
+  # FIXME: clean up the other places where these are created but only
+  #        after we move to the new scheduler.
+  for path in ["SOURCES/cache", "RPMS", "SRPMS", "BUILD", "SPECS", "BUILDROOT"]:
+    d = join(pkg.options.workDir, path)
+    if not exists(d):
+      makedirs(d)
+
+  scheduler.run()
+  for (action, error) in scheduler.errors.iteritems():
+    log("* The action \"%s\" was not completed successfully because %s" % (action, error))
+  if scheduler.brokenJobs:
+    sys.exit(1)
+
 def buildSpecs (pkg):
     packages = filter(lambda p: not isPackageInstalled(p), pkg.fullDependencies + [pkg])
-    tracker = BuildTracker (packages, pkg.options.workersPoolSize)
+    tracker = BuildTracker (packages, pkg.options.workersPoolSize, pkg.options.progress)
     tracker.run ()
     if tracker.buildErrors:
         log ("Errors in the following packages")
@@ -3127,74 +3382,40 @@ def buildSpecs (pkg):
                             log (line.strip("\n"))
             sys.exit (1)
 
-def checkIfBootstrapArea (opts):
-    """ Sanity check to make sure that a bootstrapped area is working.
-        If the area is not bootstrapped, continue with the creation of the rpms (this is
-        required by the initial distribution kit creation).
-    """
-    prefix = getCommandPrefix (opts)
-    checkCommand = "touch `%(prefix)s rpm --eval %%_dbpath`/Packages 2>/dev/null" % locals ()
-    error, output = getstatusoutput (checkCommand)
-    result = False
-    if error:
-        log ("""*****************************************************************
-WARNING: You are running cmsBuild in a non bootstrapped area.
-You should be building packages this way only when creating
-bootstrap packages for a new architecture.
-*****************************************************************
-""")
-        return False
-    error, output = getstatusoutput ("which apt-get 2>/dev/null")
-    if error:
-        raise NotCorrectlyBootstrapped ("apt-get cannot be found on the system")
-    
-    error, output = getstatusoutput ("apt-get -v | grep -e '[*]Pkg.*rpm.*' >/dev/null")
-    if error:
-        raise NotCorrectlyBootstrapped ("apt-get does not have support for rpm")
-    
-    error, output = getstatusoutput ("apt-get update")
-    if error:
-        #raise NotCorrectlyBootstrapped ("could not do apt-get update")
-        pass
-    return True
-
-def help (options, args, factory=None):
-    log ("""cmsBuild - cms build and packaging tool
-Usage: cmsBuild COMMAND [options] PACKAGES
-The most commonly used cmsBuild commands are:
-    build       builds the packages specified in PACKAGES
-    sources     list the sources that are going to be downloaded for the given PACKAGES 
-    fetch       fetches all the sources/patches that are required by PACKAGES
-    help        prints this message
-""")
-
-def build (opts, args, factory):
-    packages = [factory.createWithSpec (pkgName) for pkgName in args]
-    # expand subpackegs to be built
-    packages = factory.expandSubpackages( packages )
-    for pkg in packages:
-        logMessage = "Package %s requested." % pkg.pkgName ()
-        if pkg.pkgRevision > 1:
-          logMessage += " Forcing it at revision %s." % pkg.pkgRevision
-        log (logMessage)
-        if pkg.fullDependencies:
-            log ("This will bring in also the following packages: ")
-            finalString = "\n".join (["%s (%s)" % (dep.pkgName (), dep.checksum) 
-                                      for dep in pkg.fullDependencies])
-            log (finalString)
-
-    if opts.doNotBuild:
-        log ("SPECS files written")
-        sys.exit (0)
-    
-    if opts.pretend:
-        log ("Option --pretend specified. Not building.")
-        return
-    
-    # FIXME: why serializing when we could be building in parallel?
-    for pkg in packages:
-        rpmCacheUpdate(opts)
-        buildSpecs (pkg)
+def build(opts, args, factory):
+  err, out = getstatusoutput("rpm --version")
+  if err:
+    fatal("unable to find a working rpm.")
+  packages = [factory.createWithSpec(pkgName) for pkgName in args]
+  # expand subpackegs to be built
+  packages = factory.expandSubpackages(packages)
+  for pkg in packages:
+    logMessage = "Package %s requested." % pkg.pkgName ()
+    if not isDefaultRevision(pkg.pkgRevision):
+      logMessage += " Forcing it at revision %s." % pkg.pkgRevision
+    log (logMessage)
+    if pkg.fullDependencies:
+      log ("This will bring in also the following packages: ")
+      deps = sorted(pkg.fullDependencies, key = lambda d: d.pkgName().lower())
+      finalString = "\n".join (["%s (%s)" % (dep.pkgName (), dep.checksum) 
+                                for dep in deps])
+      log (finalString)
+  
+  if opts.specsOnly:
+      log ("SPECS files written")
+      sys.exit (0)
+  
+  if opts.pretend:
+      log ("Option --pretend specified. Not building.")
+      return
+  
+  # FIXME: why serializing when we could be building in parallel?
+  for pkg in packages:
+      rpmCacheUpdate(opts)
+      if opts.newScheduler:
+        buildSpecsNew(pkg)
+      else:
+        buildSpecs(pkg)
 
 def isPackageInstalled(pkg):
     pkgName = pkg.pkgName ()
@@ -3210,8 +3431,8 @@ def fetch (opts, args, factory):
     pkgList = []
     for pkgName in args:
         # do not care about subpackages, they come from the same sources as the master
-        pkg = factory.createWithSpec (pkgName)
-        createDirs (architecture=pkg.cmsplatf)
+        pkg = factory.createWithSpec(pkgName)
+        createDirs(architecture=pkg.cmsplatf)
         pkgList += pkg.fullDependencies + [pkg]
     for pkg in pkgList:
         fetchSources (pkg)
@@ -3223,112 +3444,6 @@ def sources (opts, args, factory):
         log ("The following files are going to be fetched for package %s." % pkg.name)
         [log ("Source: %s" % source) for source in pkg.sources if source != "none"]
         [log ("Patch: %s" % source) for source in pkg.patches if source != "none"]
-
-class VersionString (object):
-    """ A class that represents string usually used for versions.
-        Like: FooBar3.4.5, 3.4.5, 3.4.5a, 3.4.5lorg23.2
-    """
-    value = property (lambda self : self.__versionString, None, None)
-    
-    def __init__ (self, versionString=""):
-        self.__versionString = versionString
-        versions = []
-        token = ""
-        lastC = ""
-        for c in versionString:
-            if c in [".", "-"]:
-                versions.append (token)
-                token = str ("")
-            elif not c.isalpha () and lastC.isalpha ():
-                versions.append (token)
-                token = str (c)
-            else:
-                token += c
-            lastC = c
-        versions.append (token)
-        self.__versions = [re.match ("([0-9]*)([a-zA-Z]*)", version).groups ()
-                           for version in versions]
-    
-    def __cmp__ (self, other):
-        def convertToInt (n):
-            if not n: return 0
-            return int (n)
-        if self.__versionString == other.__versionString:
-            return 0
-        maxItems = min (len (self.__versions), len (other.__versions))
-        for i in range (0, maxItems):
-            compareNumeric = cmp (convertToInt (self.__versions[i][0]) , 
-                                  convertToInt (other.__versions [i][0]))
-            if compareNumeric: return compareNumeric
-            compareAlpha = cmp (self.__versions[i][1] , 
-                                other.__versions [i][1])
-            if compareAlpha: return compareAlpha
-        value = cmp (len (self.__versions), len (other.__versions))
-        assert (value)
-        return value
-
-class BootstrapLocationGuesser (object):
-    def __init__ (self):
-        self.__bootstrapLog = ""
-    def setBootstrapLog (self, bootstrapLog):
-        self.__bootstrapLog = bootstrapLog
-        
-    def guessInitSh (self, opts):
-        """ Used to find out the location of the init.sh for the current apt
-            version. This tries to be as smart as possible by doing the following:
-            * First of all lookup if the bootstrapLog contains any indication of 
-              what was used to do the bootstrap.
-            * Secondly look up in `architecture/external/apt` and find out the 
-              most recent version for of apt installed there.
-            * If everything else fails, use the default, hardcoded, version.
-        """
-        self.__opts = opts
-        bootstrapInitsh = [line.strip ("# ")
-                           for line in self.__bootstrapLog.split ("\n")
-                           if line.startswith ("###")]
-        if len (bootstrapInitsh) ==  1:
-            return bootstrapInitsh[0]
-        baseAptDir = "%s/%s/external/apt" % (self.__opts.workDir, 
-                                             self.__opts.architecture)
-        log ("BOOTSTRAP GUESSER PATH: %s" % baseAptDir, DEBUG)
-        
-        suffix = "etc/profile.d/init.sh"
-        if not exists (baseAptDir):
-            log ("WARNING: Unable to find the basepath for apt (%s). Using default" % baseAptDir)
-            return None
-        versionChamp = VersionString ()
-        for guess in listdir (baseAptDir):
-            pathname = join (baseAptDir, guess)
-            if isdir (pathname):            
-                versionCandidate = VersionString (guess)
-                log ("Comparing %s vs %s" % (versionChamp.value, 
-                                             versionCandidate.value), DEBUG)
-                if versionChamp < versionCandidate:
-                    versionChamp = versionCandidate
-                log ("Winner is %s" % versionChamp.value, DEBUG)
-        versionString = versionChamp.value
-        log ("Version string: %s" % versionString, DEBUG)
-        if not versionString:
-            versionString = self.__opts.useAptVersion
-        return join (baseAptDir, versionString, suffix)
-
-def guessUseSystemCompiler (architecture, option):
-    """ This is used to determine wether or not the system compiler should be
-        used by default or not on a given platform.
-        * If the appropriate option is specified on the command line, use it.
-        * If the architecture matches OSX or PS3, enable it by default.
-    """
-    log ("Guessing if using the system compiler or not", DEBUG)
-    if option:
-        log ("Option specified for using the system compiler: %s" % option, DEBUG)
-        return option
-    matchers = ["osx[0-9]*_.*", "ydl[0-9]*_ppc64.*", ".*online.*"]
-    for matcher in matchers:
-        if re.match (matcher, architecture):
-            log ("By default %s uses --use-system-compiler" % architecture, DEBUG)
-            return True
-    log ("By default %s does not uses --use-system-compiler" % architecture, DEBUG)
-    return False
 
 class PlatformDetectionError (Exception):
     pass
@@ -3343,107 +3458,62 @@ def callCmsos (opts):
     log ("cmsos value is %s" % cmsos, DEBUG)
     return cmsos
 
-def guessArchitecture (opts):
-    """ Helper method to detect the architecture. Notice that in order
-        to do so we need to have a CMSDIST checkout, since cmsos.file 
-        is in there and we also need the compiler version from the spec.
-    """
-    # FIXME: should I rathar throw exceptions?
-    log ("Detecting architecture...", DEBUG)
-    if not opts.cmsdist and not opts.architecture:
-        raise PlatformDetectionError ("""Neither --cmsdist/--cmsdist-tag nor --architecture specified.""")
+# The helper method responsible for bootstrapping an area.
+# @a opts the build options passed on command line.
+# @return the location of the init.sh script to be sourced when building 
+#         or uploading.
+def bootstrap(opts):
+  bootstrapUrl = "%s/%s/bootstrap.sh" % (opts.server, opts.bootstrapSubdir)
+  try:
+    f=urlopen(bootstrapUrl)
+    bootstrapContents = f.read()
+  except:
+    log("Unable to fetch file %s. Mispelled architecture name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
+    sys.exit (1)
+  bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
+  bootstrapFile = open(bootstrapFilename, "w")
+  bootstrapFile.write(bootstrapContents)
+  bootstrapFile.close()
+      
+  log("Bootstrapping from server %s" % opts.server, DEBUG)
+  boostrapServer = opts.server.replace("http://","").replace("https://","")
+  parts = boostrapServer.split("/", 1) 
+  if len(parts) == 2:
+    bootstrapServer = parts[0]
+    bootstrapServerPath = "-server-path " + parts[1]
+  else:
+    bootstrapServerPath = ""
+  options = ["-server", bootstrapServer, 
+             bootstrapServerPath,
+             "-arch",  opts.architecture,
+             "-path", opts.workDir,
+             "-repository", opts.repository,
+             "-assume-yes", "-only-once", "setup"]
+  bootstrapCommand ="TMPDIR=%s sh -ex %s %s" % (opts.tempdir, bootstrapFilename, " ".join(options)) 
+  log("Bootstrapping cmsBuild area.")
+  log(bootstrapCommand, DEBUG)
+  error, output = getstatusoutput(bootstrapCommand)
+  bootstrapLog = join(opts.tempdir, "bootstrap.log")
+  f = open(bootstrapLog, "w")
+  f.write(output)
+  f.close()
+  if error:
+    fatal("unsuccessful bootstrap, log can be found in %s." % bootstrapLog)
 
-    if opts.architecture:
-        log ("Returning %s" % opts.architecture, DEBUG)
-        opts.systemCompiler = guessUseSystemCompiler (opts.architecture, 
-                                                      opts.systemCompiler)
-        return opts.architecture
-    cmsos = callCmsos (opts)
-    opts.systemCompiler = guessUseSystemCompiler (cmsos,
-                                                  opts.systemCompiler)
+  parts = glob(join(opts.workDir,opts.architecture, "external/apt/*/etc/profile.d/init.sh"))
+  if len(parts) != 1:
+    fatal("""malformed bootstrap. More than one apt installation found.""")
 
-    pathname = join (opts.cmsdist, "%s.spec" % opts.compilerName)
-    try:
-        lines = open (pathname).readlines ()
-    except IOError, e:
-        raise PlatformDetectionError ("""Unable to find %s.""" % pathname)
-    if opts.systemCompiler:
-        try:
-            version = detectCompilerVersion (opts.compilerName)
-        except UnknownCompiler, e:
-            raise PlatformDetectionError ("Unable to detect system compiler version:\n%s" % output)
-    else:
-        (group, name, version) = parseRPMLine (lines, opts)
-        version = version.split ("-")[0]
-        version = version.replace (".", "")
-        if not re.match ("[0-9][0-9][0-9]", version):
-            raise PlatformDetectionError ("%s does not look like an architecture version" % version)
-    compilerName = "%s%s" % (opts.compilerName, version)
-    architectureString = "%s_%s" % (cmsos, compilerName)
-    return architectureString
-    
-def bootstrap (opts, args, factory):
-    if not opts.architecture:
-        log ("You need to specify one (and only one) architecture to bootstrap.")
-        log ("Nothing changed, aborting bootstrap.")
-        sys.exit (1) 
+  initSh = parts[0]
 
-    bootstrapUrl = "%s/%s/bootstrap.sh" % (opts.server, opts.bootstrapSubdir)
-    try:
-        f=urlopen (bootstrapUrl)
-    except:
-        log ("Unable to fetch file %s. Mispelled architecture name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
-        sys.exit (1)
+  if not exists(initSh):
+    fatal("""ERROR: cannot read apt-get environment. File missing: %s.""" % s)
 
-    tempdir = join(opts.workDir, opts.tempDirPrefix)
-    bootstrapFilename = join (tempdir, "bootstrap.sh")
-    bootstrapFile = open (bootstrapFilename, "w")
-    bootstrapFile.write (f.read ())
-    bootstrapFile.close ()
-    if opts.assumeYes:
-        assumeYes = "-assume-yes"
-    else:
-        assumeYes = ""
-        
-    if opts.onlyOnce:
-        onlyOnce = "-only-once"
-    else:
-        onlyOnce = ""
-    log("Bootstrapping from server %s" % opts.server, DEBUG)
-    boostrapServer = opts.server.replace("http://","").replace("https://","")
-    parts = boostrapServer.split("/", 1) 
-    if len(parts) == 2:
-      bootstrapServer = parts[0]
-      bootstrapServerPath = "-server-path " + parts[1]
-    else:
-      bootstrapServerPath = ""
-    bootstrapCommand ="TMPDIR=%s sh -ex %s -server %s %s -arch %s -path %s -repository %s %s %s setup " % (tempdir, bootstrapFilename, 
-                                            bootstrapServer,
-                                            bootstrapServerPath,
-                                            opts.architecture, 
-                                            opts.workDir, opts.repository,
-                                            assumeYes, onlyOnce)
-    log ("Bootstrapping cmsBuild area")
-    log (bootstrapCommand, DEBUG)
-    error, output = getstatusoutput (bootstrapCommand)
-    bootstrapLog = join (tempdir, "bootstrap.log")
-    f = open (bootstrapLog, "w")
-    f.write (output)
-    f.close ()
-    if error:
-        log ("Error while executing the bootstrap, log can be found in %s" % bootstrapLog)
-        sys.exit (1)
-    g_bootstrapGuesser.setBootstrapLog (bootstrapLog)
-    # If we are not in a cfg file write where to find the correct init.sh
-    log ("Done. Setup log can be found in %s." % bootstrapLog)
-    if not opts.cfg:
-        aptInitSh = g_bootstrapGuesser.guessInitSh (opts)
-        log ("Now make sure you do:")
-        log ("")
-        log (". %s" % aptInitSh)
-        log ("")
-        log ("before you continue.")
-    createDirs (architecture=opts.architecture, dest=opts.workDir)
+  # If we are not in a cfg file write where to find the correct init.sh
+  log("Done. Setup log can be found in %s." % bootstrapLog)
+  log("init.sh can be found in %s" % initSh, DEBUG)
+  createDirs(architecture=opts.architecture, dest=opts.workDir)
+  return initSh
 
 def checkFileOnServer (contactString, filename):
     command = """ssh %(contactString)s if [ -f %(file)s ]; then echo 1; fi"""
@@ -3633,7 +3703,7 @@ mkdir -p %(repositoryDir)s/RPMS/cache/%(checksum)s/%(cmsplatf)s
 mkdir -p %(repositoryDir)s/SRPMS/cache/%(checksum)s/%(cmsplatf)s
 mkdir -p %(repositoryDir)s/SOURCES/%(pkgRel)s\n""" % locals ()
         remoteSourceRE = re.compile (".*:.*/.*")
-        sourceFiles = [ (rsplit (source, "/", 1)[1], getUrlChecksum (source))
+        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
                         for source in pkg.sources 
                         if remoteSourceRE.match (source) ]
         for sourceFilename, sourceChecksum in sourceFiles:
@@ -3722,7 +3792,7 @@ rsync -av %(sourceDir)s/%(aptRepoPath)s/ %(destDir)s/%(aptRepoPath)s
     
     def createPackageLinks (self, pkg):
         remoteSourceRE = re.compile (".*:.*/.*")
-        sourceFiles = [ (rsplit (source, "/", 1)[1], getUrlChecksum (source))
+        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
                         for source in pkg.sources 
                         if remoteSourceRE.match (source) ]
         repositoryDir = self.repositoryDir
@@ -3753,403 +3823,7 @@ ln -s ../../%(cachedRpmFilename)s %(repositoryDir)s/RPMS/%(rpmfilename)s
 """ % locals ()
         return result
 
-def getLocalUserName ():
-    error, user = getstatusoutput ("whoami")
-    user = user.strip ("\n")
-    if error:
-        log ("Unable to determine user identity.")
-        return "unknown"
-    return user
-    
-def format(s, **kwds):
-  return s % kwds
-
-def statusAndLog(status, s, **kwds):
-  log(s % kwds)
-  return status
-
-def upload(opts, args, factory):
-  """New upload method. Updates using this are atomic and it should
-     automatically retry when parallel updates happen.
-     The workflow is the following.
-
-     * If it exists as a real directory, migrate old style repository to
-       me in <repository>-cache/<repository>.00..00-00..00.  We add a symlink
-       "<repository>" pointing to it, so that we are compatible with old areas.
-     * If the repository does not exists, create it from scratch with
-       the naming convention used above.
-     * Get the final part of the hash of the repository pointed by the symlink called
-       "<repository>". In case we start from scratch this will be 00..00, for example.
-     * Check consistency of the upload area just like before.
-     * Create locally a delta repository containing all the bits that need to
-       be uploaded.
-     * Upload the local delta repository to a unique temporary directory on server.
-     * rsync the parent repository in a temporary "new area", using --link-dest to minimize
-       disk-space. Notice we do not use --link-dest for files which will have to be rewritten 
-       (e.g. apt md5cache)
-     * rsync the uploaded delta in the same temporary new area, ignoring files
-       already existing. This will avoid any kind of overwriting of past repositories, which are
-       effectively immutable.
-     * calculate the new hash of the temporary area by taking a sha256 sum of
-       the file listing in RPMS/cache. This listing will include, by construction,
-       all the hashes for the packages and will therefore uniquely identify the 
-       repository.
-     * Move the new temporary ara in it's final location 
-       
-       <repository>-cache/<repository>.00..00-XX..XX
-
-       where XX..XX is the hash calculated above.
-     * Create a unique symlink:
-       
-       <repository>.next-XXXXXXX
-       
-       this will uniquely identify this session.
-     * Kill all the other sessions by removing all the symlinks called <repository>.next-* apart from
-       us.
-     * Get the parent hash and check it is still the one when we began.
-     * Swap <repository>.next-XXXXXXX and <repository>. This will happen atomically. This will
-       effectively commit the transaction and <repository> will now point to
-       the updated repository.
-     
-     If at any time there is an error (e.g. a parallel upload succeeded before us), we start again
-     from scratch, including the consistency check.
-     If the consistency check fails, we need to rebuild and therefore we die.
-  """
-  # Make sure we cannot possibly use the cms repository to avoid damage.
-  if opts.repository.startswith("comp"):
-    print "You cannot use this with official repositories, yet. Nothing done."
-    sys.exit(1)
-
-  if not args:
-    upload_help()
-    return False
-
-  # A few helpers
-  def getResult(s):
-    return [x.replace("RESULT:","") for x in s.split("\n") if x.startswith("RESULT:")][0]
-  
-  def executeScript(dumpedScript, local=True):
-    if local:
-      executionCmd="sh -e %(debug)s %(filename)s"
-    else:
-      executionCmd="ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
-    # Run (or print-out) the script
-    if not opts.pretend:
-      fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
-      f = os.fdopen(fd, "w")
-    else:
-      f = sys.stderr
-    f.write(dumpedScript)
-    f.close()
-    if not opts.pretend:
-      script = format(executionCmd,
-                      debug=opts.debug and "-x" or "",
-                      filename=filename,
-                      cmdServer=opts.uploadServer,
-                      cmdUser=opts.uploadUser,
-                      cmdPort=opts.uploadPort)
-      err, out = getstatusoutput(script)
-    if opts.debug:
-      log(out)
-    return (err, out)
-
-  def logAndDieOnError(err, msg, out):
-    if not err:
-      return
-    log(msg)
-    if opts.debug:
-      log(out)
-    sys.exit(1)
-
-  migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
-                       'mkdir -p $CACHE\n'
-                       '# Automatically migrate old style repositories by assigning them the 00..00 hash\n'
-                       '# Notice that we keep <repository>.<user> and <repository> in two separate\n'
-                       '# caches so that temporary uploads do not overlap with production ones and\n'
-                       '# make sure migrated old style repositories do not overlap.\n'
-                       'if [ -x %(uploadDir)s/%(repository)s ] && [ ! -L %(uploadDir)s/%(repository)s ]; then \n'
-                       '  echo "Migrating old style repository"\n'
-                       '  mv %(uploadDir)s/%(repository)s $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000\n'
-                       '  ln -sf $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000 %(uploadDir)s/%(repository)s\n'
-                       'fi\n'
-                       'PARENTDIR="`readlink %(uploadDir)s/%(repository)s || true`"\n'
-                       'if [ "X$PARENTDIR" = X ]; then\n'
-                       '  PARENTDIR="$CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000"\n'
-                       '  mkdir -p $PARENTDIR/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
-                       '  ln -sf $PARENTDIR %(uploadDir)s/%(repository)s\n'
-                       'fi\n'
-                       'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-                       'echo RESULT:$PARENTHASH',
-                       uploadDir=opts.uploadRootDirectory,
-                       repository=opts.repository)
-  (err, parentHashResult) = executeScript(migrateRepo, False)
-  logAndDieOnError(err, "Error while migrating repository structure.", parentHashResult)
-  parentHash = getResult(parentHashResult)
-
-  pkgs = [factory.createWithSpec(specName) for specName in args]
-  if len(pkgs) !=  len(args):
-    return statusAndLog(False, "ERROR: Error while parsing spec.")
-
-  pkgs = factory.expandSubpackages(pkgs)
-  cmsplatf = pkgs[0].cmsplatf
-  fullPackageList = []
-  fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
-  def checkIfValid (p):
-    return p not in fullPackageList and exists (p.rpmLocation())
-      
-  for pkg in fullPackageList:
-    fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
-    fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
-
-  deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
-  deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
-  deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
-                          "for p in %(deprecableRPMS)s; do\n"
-                          '  realfile=`readlink RPMS/$x`\n'
-                          '  rm -rf RPMS/$x\n'
-                          '  rm $realfile\n'
-                          "done",
-                          architecture=opts.architecture,
-                          deprecableRPMS=deprecableRPMS,
-                          deprecablePackages=deprecablePackages)
-  checkers = [BuildChecker(pkg) for pkg in pkgs]
-  for checker in checkers:
-    if not checker.checkConsistency():
-      result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
-      if opts.debug:
-        sys.exit(1)
-      else:
-        executeScript(deprecateLocal)
-        return result
-    if not checker.checkIfUploadable():
-      return statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
-                                name=pkg.pkgName())
-
-  log("Ready to upload.")
-
-  packageNames = [pkg.pkgName() for pkg in fullPackageList]
-  pkgChecksums = [p.checksum for p in fullPackageList]
-  tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
-  subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
-  # Create an area locally which has to be merged with the remote repository.
-  createEmptyRepository = format(
-    "set -e\n"
-    "rm -rf %(tmpdir)s\n"
-    "mkdir -p %(tmpdir)s/RPMS/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/RPMS/cache\n"
-    "mkdir -p %(tmpdir)s/SRPMS\n"
-    "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/SOURCES/cache\n"
-    "mkdir -p %(tmpdir)s/apt/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/TARS\n"
-    "mkdir -p %(tmpdir)s/WEB\n"
-    'for x in %(subsystems)s; do\n'
-    '  mkdir -p %(tmpdir)s/apt/%(architecture)s/RPMS.$x\n'
-    'done\n',
-    architecture=opts.architecture,
-    tmpdir=tmpdir,
-    subsystems=subsystems)
-  # Hard-link packages.
-  hardLinkPackages = format(
-    "rsync -avm --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
-    "rsync -avm --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
-    ,
-    workdir=opts.workDir,
-    tmpdir=tmpdir,
-    includes=" ".join(["--include \"**%s**\"" % x for x in pkgChecksums]),
-    architecture=opts.architecture)
-  # Copy bootstrap.sh, bootstrap-driver.txt, cmsos. Given we can rollback now
-  # there is no risk of screwing up the repository by copying some unwanted
-  # driver / bootstrap.sh / cmsos.
-  # FIXME: copy also some predefined web area, so that we have rollbackable web
-  #        area?
-  copyByProducts = format("cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver.txt | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver-comp.txt | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/external/apt/*/bin/bootstrap.sh | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/cms/cms-common/*/*/common/cmsos | tail -1` %(tmpdir)s/cmsos || true\n",
-                          workdir=opts.workDir,
-                          tmpdir=tmpdir,
-                          architecture=opts.architecture)
-  # Create the needed symlinks.
-  symlinks = ""
-  for pkg in fullPackageList:
-    symlinks += format(
-      "ln -s ../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/RPMS/%(architecture)s/%(packageName)s\n"
-      "ln -s ../../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/apt/%(architecture)s/RPMS.%(subsystem)s/%(packageName)s\n", 
-      checksum=pkg.checksum,
-      tmpdir=tmpdir,
-      architecture=opts.architecture,
-      subsystem=pkg.group,
-      packageName=basename(pkg.rpmfilename))
-
-  remoteSourceRE=re.compile (".*:.*/.*")
-  sources = ""
-  for pkg in [pkg for pkg in fullPackageList if exists (pkg.rpmLocation())]:
-    # FIXME: this should really parse the url to determine the output filename
-    #        rather than relying on the fact we always end up urls with
-    #        /some-file.tar.gz
-    sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source))
-                   for source in pkg.sources
-                   if remoteSourceRE.match(source)]
-    for filename, checksum in sourceFiles:
-      sources += format(
-        "mkdir -p %(tmpdir)s/SOURCES/cache/%(checksum)s\n"
-        "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
-        "ln -f %(workdir)s/SOURCES/%(group)s/%(name)s/%(version)s/%(filename)s %(tmpdir)s/SOURCES/cache/%(checksum)s/%(filename)s\n"
-        "ln -sf ../../../../../SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
-        workdir=opts.workDir,
-        tmpdir=tmpdir,
-        architecture=opts.architecture,
-        group=pkg.group,
-        name=pkg.name,
-        version=pkg.version,
-        filename=filename,
-        checksum=checksum)
-  
-
-  (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
-  logAndDieOnError(err, "Error while creating the local repository.", out)
-
-  hashCommand = "find %(repoBase)s/RPMS/cache -type f -name '*.rpm' | sed -e 's|^.*/RPMS/cache||' | sort | sha256sum | cut -f1 -d\ "
-  err, nextHash = getstatusoutput(format(hashCommand, repoBase=tmpdir))
-  if err:
-    log("Error while calculating repository checksum")
-    sys.exit(1)
-  
-  repoInfo = {"uploadDir": opts.uploadRootDirectory,
-              "repository": opts.repository,
-              "uploadTmpRepository": opts.uploadTmpRepository,
-              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync",port=opts.uploadPort),
-              "server": opts.uploadServer,
-              "user": opts.uploadUser}
-
-  # Create unique repository on server
-  (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
-                                                "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/`", **repoInfo),
-                                         False)
-  logAndDieOnError(err, "Error while creating temporary directory", createUploadTmp)
-  tmpUploadDir = getResult(createUploadTmp)
-  
-  # Upload local repository to a temp area on the server.
-  upload = format("%(rsync)s -av %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/",
-                  tmpdir=tmpdir,
-                  tmpUploadDir=tmpUploadDir,
-                  **repoInfo)
-  (err, msg) = executeScript(upload, True)
-  logAndDieOnError(err, "Error while uploading. No changes to repository.", msg)
-  # Human readable repositories are symlinks to one called:
-  # <prefix>.<parent>-<me>
-  # 
-  # where <prefix> is the --repository option passed on command line, e.g. cms.
-  #       <parent> is the sha256 of the previous repository listing.
-  #       <me> is the sha256 of the current repository listing.
-  # Notice that if the repository is not yet a link we use
-  #       <prefix>.0000000000000000-<me>
-  # where me is the sha256 of the repository listing, and then we symlink it to 
-  # <prefix>.
-  # If the repository does not exists at all, we create a dummy:
-  # <prefix>.00...00-00...00
-  # This allows us to have migrations as well, by tweaking the rsync rule to ignore old
-  # architectures for example.
-  #
-  # We then create a
-  createRepo = format(
-    'CACHE="%(uploadDir)s/%(repository)s-cache"\n'
-    'test -d $CACHE\n'
-    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
-    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
-    '  exit 1\n'
-    'fi\n'
-    'UPLOADREPO=%(tmpUploadDir)s\n'
-    'TMPREPO=%(tmpUploadDir)s-target\n'
-    'mkdir -p $TMPREPO/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
-    '# First copy / link the old repository.\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
-    '%(rsync)s -av $PARENTDIR/apt/ $TMPREPO/apt/\n'
-    '%(rsync)s -av $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
-    'mkdir -p $TMPREPO/WEB\n'
-    '%(rsync)s -av $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
-    '# Copy ancillary files from $UPLOADEDREPO first, so that newer builds override old.\n'
-    '%(rsync)s -av $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
-    '# Then copy the new one, ignoring existing files. This way we make sure no files can be overwritten.\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/SRPMS/ $TMPREPO/SRPMS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
-    '# Web area will always be the latest one built\n'
-    '%(rsync)s -av $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
-    'rm -rf $UPLOADREPO\n'
-    '# Generate a new apt cache.\n'
-    'source %(serverAptEnv)s\n'
-    'PREVIOUSSUBSYS=`ls $PARENTDIR/apt/%(cmsplatf)s/base/pkglist.*.bz2 | sed -e "s|.*[.]\\(.*\\)[.]bz2|\\1|"`\n'
-    'for x in %(subsystems)s $PREVIOUSSUBSYS; do\n'
-    '  mkdir -p $TMPREPO/apt/%(cmsplatf)s/RPMS.$x\n'
-    'done\n'
-    'for x in `find $TMPREPO/md5cache/%(cmsplatf)s -name "*.md5cache"`; do\n'
-    '  mv $x `dirname $x`/`echo $TMPREPO | tr / _`_apt_%(cmsplatf)s`echo $x | sed -e"s/.*%(cmsplatf)s//"`\n'
-    'done\n'
-    'genbasedir --cachedir=$TMPREPO/md5cache/%(cmsplatf)s --flat $TMPREPO/apt/%(cmsplatf)s `echo %(subsystems)s $PREVIOUSSUBSYS | tr " " "\n" | sort -u`\n'
-    'chmod 755 $TMPREPO/apt/%(cmsplatf)s\n'
-    '# Move the new repository into place and link it to its <repo>.<user> name.\n'
-    'CHILD="$CACHE/%(repository)s.${PARENTHASH}-%(childHash)s"\n'
-    'mv -T $TMPREPO $CHILD || { mv $TMPREPO $TMPREPO.delme && exit 1; }\n'
-    'if [ %(syncBack)s = True ]; then\n'
-    '  TARGETREPO=%(repository)s\n'
-    'else\n'
-    '  TARGETREPO=%(repository)s.%(uploadTmpRepository)s\n'
-    '  if [ -x %(uploadDir)s/$TARGETREPO ] && [ ! -L %(uploadDir)s/$TARGETREPO ] ; then\n'
-    '    mv %(uploadDir)s/$TARGETREPO %(uploadDir)s/delme.$TARGETREPO\n'
-    '  fi\n'
-    'fi\n'
-    'UNIQUEDIR=`mktemp -d -t cmsBuildUpload.XXXXXXXXXX`\n'
-    'UNIQUEID=`echo $UNIQUEDIR | sed -e "s|.*cmsBuildUpload[.]||"`\n'
-    'echo $UNIQUEID\n'
-    '# Create a transaction.\n'
-    'ln -sf $CHILD %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
-    '# Try to abort all the pending transactions but ours.\n'
-    'for x in `find %(uploadDir)s/$TARGETREPO.next-* ! -name "*-$UNIQUEID"`; do\n'
-    ' if rm $x; then true; else rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID ; fi\n'
-    'done\n'
-    '# In case no transaction is aborted either parallel transactions completed\n'
-    '# successfully (and the parenthash is not the same anymore) or there\n'
-    '# were no other transactions.\n'
-    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
-    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  mv $CHILD $CHILD.delme\n'
-    '  rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n' 
-    '  rm -rf $UNIQUEDIR\n' 
-    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
-    '  exit 1\n'
-    'fi\n'
-    'mv -T %(uploadDir)s/$TARGETREPO.next-$UNIQUEID %(uploadDir)s/$TARGETREPO\n'
-    'rm -rf %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
-    'rm -rf $UNIQUEDIR\n',
-    serverAptEnv=opts.serverAptEnv,
-    cmsplatf=opts.architecture,
-    tmpUploadDir=tmpUploadDir,
-    subsystems=subsystems,
-    syncBack=opts.syncBack,
-    originalParentHash=parentHash,
-    childHash=nextHash,
-    **repoInfo)
-  (err, msg) = executeScript(createRepo, False)
-  if err:
-    log("Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
-    if opts.debug:
-      log(msg)
-    return False
-  log("Upload successfully finished")
-  return True
-
-def uploadOLD (opts, args, factory):
+def upload (opts, args, factory):
     """ The method is responsible for uploading packages to the repository.
         what it does is the following.
         1. Check that all the packages that are getting uploaded match the 
@@ -4166,9 +3840,8 @@ def uploadOLD (opts, args, factory):
     if len (pkgs) !=  len (args):
         log ("ERROR! Error while parsing spec.")
         return False
-    # expand subpackages to be uploaded
-    pkgs = factory.expandSubpackages(pkgs)
 
+    pkgs = factory.expandSubpackages(pkgs)
     cmsplatf = pkgs[0].cmsplatf
     fullPackageList = []
     fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
@@ -4177,8 +3850,8 @@ def uploadOLD (opts, args, factory):
         return p not in fullPackageList and exists (p.rpmLocation())
         
     for pkg in fullPackageList:
-        fullPackageList += [ dep for dep in pkg.fullDependencies 
-                             if checkIfValid (dep)]
+      fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
+      fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
 
     for pkg in pkgs:
         checker = BuildChecker (pkg)
@@ -4190,7 +3863,7 @@ def uploadOLD (opts, args, factory):
             return True
     
     log ("Ready to upload.")
-    localUser = getLocalUserName ()
+    localUser = getuser()
 
     if localUser is "unknown": 
         log ("ERROR: Unable to detect user name. Aborting.")
@@ -4246,7 +3919,7 @@ def uploadOLD (opts, args, factory):
                            pretend=opts.pretend, 
                            executor=remoteExec)
     syncBackScript = Script (name="Do sync back", pretend=opts.pretend, executor=remoteExec)
-    uploadScript = Script (name="Upload", pretend=opts.pretend,executor=LocalExecutor (opts))
+    uploadScript = Script (name="Upload", pretend=opts.pretend, executor=LocalExecutor (opts))
 
     syncBackScript.do (personalRepo.lockParent ())
     
@@ -4298,7 +3971,7 @@ def uploadOLD (opts, args, factory):
         uploadScript.do (localRepo.uploadFileToRepository (cachedRpmFilename, personalRepo))
         checkSB.do (personalRepo.checkFile (cachedRpmFilename))
         syncBackScript.do (personalRepo.syncFileToParent (cachedRpmFilename))
-        sourceFiles = [ (rsplit (source, "/", 1)[1], getUrlChecksum (source))
+        sourceFiles = [ (source.rsplit("/", 1)[1], getUrlChecksum (source))
                         for source in pkg.sources 
                         if remoteSourceRE.match (source) ]
         for srcFilename, srcChecksum in sourceFiles:
@@ -4378,7 +4051,7 @@ e.g.: external+gcc+3.4.5-CMS3""" % packageName)
     def getDeps (packageName):
         rpmTestRemove = """rpm -e --test %s""" % packageName
         error, output = do (rpmTestRemove)
-        dependentPkgs = [getPkgName (rsplit (line, " ", 1)[1])
+        dependentPkgs = [getPkgName (line.rsplit(" ", 1)[1])
                          for line in output.split ("\n")
                          if "is needed by" in line]
         return dependentPkgs
@@ -4429,7 +4102,7 @@ commandHandlers = {
 
 def getSpecRepository (url, options):
     destTmpDir = abspath (options.tempDirPrefix)
-    destTgz = abspath (options.tempDirPrefix+"/CMSDIST.tgz")
+    destTgz = join(destTmpDir,"CMSDIST.tgz")
     destDir = abspath ("CMSDIST")
     if exists (destTgz):
         unlink (destTgz)
@@ -4449,105 +4122,52 @@ def getSpecRepository (url, options):
         sys.exit (1)
     return destDir
 
-def setOptions (parser, section, options):
-    configurableIntOptions = ["compilingProcesses", "workersPoolSize", 
-                              "priority", "uploadPort"]
-    configurableBooleanOptions = [ "testTag", "systemCompiler", 
-                                   "pretend", "assumeYes", "debug", 
-                                   "trace", "doDeprecate", "syncBack", 
-                                   "doNotBuild", "doNotBootstrap", 
-                                   "doCheckOnBuild", "onlyOnce", 
-                                   "use32BitOn64", "ignoreCompileErrors", 
-                                   "skipPreInstall", "noCleanup"]
-    # Options are evaluated in the following order (latest arrived wins):
-    # * all the options which are already there in options (coming from
-    #   commandline)
-    # * all the globals (picked up raw, so that macro expansion happens only at the end)
-    # * all the section specific option.
-    defaults = [(opt, str (getattr (options, opt))) 
-                for opt in dir (options) if "_" not in opt]
-    if parser.has_section ("globals"):
-        defaults.extend (parser.items ("globals", raw=True))
-    if parser.has_section (section):
-        defaults.extend (parser.items (section, raw=True))
-    defaults = dict (defaults)
-    interpolator = CaseSensitiveConfigParser (defaults) 
-    interpolator.add_section ("DUMMY")
-    optionsList = defaults.keys()
-   
-    if defaults["tag"] == None:
-        defaults["tag"] = "CMSBUILD_SAFE_NONE_MAGIC_STRING"
-    log ("Defaults %s" % defaults, DEBUG)
-    for option in optionsList:
-        if option in configurableBooleanOptions:
-            optionValue = interpolator.get ("DUMMY", option)
-            if optionValue == "None":
-                continue 
-            setattr (options, option, interpolator.getboolean ("DUMMY", option))
-        elif option in configurableIntOptions:
-            setattr (options, option, interpolator.getint ("DUMMY", option))
-        else:
-            setattr (options, option, interpolator.get ("DUMMY", option))
-    if defaults["tag"] == "CMSBUILD_SAFE_NONE_MAGIC_STRING":
-        defaults["tag"] = None
-    log ("%s" % options, DEBUG)
-
-
 class CaseSensitiveConfigParser (ConfigParser):
     def optionxform (self, option):
         return option
 
-def createCommands (options, commandLineArgs):
-    defaultOptions = {"date": strftime (options.dateFormat),
-                      "home": getenv ("HOME"),
-                      "pwd": getcwd ()}
-        
-    parser = CaseSensitiveConfigParser (defaultOptions)
-    if options.cfg:
-        filename = abspath (options.cfg)
-        log ("Reading build configuration from: %s " % filename)
-        if not exists (filename):
-            log ("ERROR: Cfg file %s not found." % filename)
-            sys.exit (1)
-        parser.readfp (open (filename))
-    
-    if parser.has_section ("globals"):
-        setOptions (parser, "globals", options)
+# Helper script which creates the set of commands to be executed.
+# We only support two different workflows:
+#
+# * cmsBuild [--no-bootstrap] build <package> [<additional packages>]
+# * cmsBuild [--no-bootstrap] [--sync-back] upload <package> [<additional packages>]
+#
+# where both workflows include a bootstrap step (unless --no-bootstrap) is
+# specified and upload implies building the same packages.
+def createCommands (opts, args):
+    opts.workDir = abspath(opts.workDir)
+    opts.installDir = opts.workDir
+    if (opts.repository == "cms") or opts.repository.startswith("cms."):
+        opts.installDir = "/opt/cmssw"
 
-    options.pwd = getcwd ()
-    options.workDir = abspath (options.workDir)
-    options.buildRoot = ""
-    options.installDir = options.workDir
-    if options.workDir == "/opt/cmssw":
-        options.buildRoot = "--buildroot "+options.pwd
-        options.workDir   = join(options.pwd,options.workDir.strip(sep))
+    opts.tempDirPrefix = "tmp"
+    if opts.workDir.split(sep)[1] == opts.tempDirPrefix:
+        opts.tempDirPrefix += "X"
 
-    options.tempDirPrefix = options.tempDirPrefix.strip(sep)
-    if options.workDir.split(sep)[1] == options.tempDirPrefix:
-        options.tempDirPrefix += "X"
+    executeWithErrorCheck ("rm -rf %s" % join(opts.workDir, opts.tempDirPrefix, "BUILDROOT"),"Unable to remove BUILDROOT directory.")
+    commandSpec = []
     
-    setLogLevel (options)
+    if len(args) < 2:
+      fatal("Wrong number of arguments.")
+    
+    if not args[0] in ["build", "upload"]:
+      fatal("Unknown command %s. Alternatives are build, upload." % args[0])
+    
+    if opts.syncBack and args[0] == "build":
+      fatal("--sync-back option is available only when uploading.")
 
-    commandList = []
-    log ("The following sections where found in the cfg file: %s.\n" % ", ".join (parser.sections ()), 
-         DEBUG)
-    for section in [s for s in parser.sections () if s != "globals"]:
-        opts = copy.deepcopy (options)
-        setOptions (parser, section, opts)
-        sectionTokens = section.split("#")[0].split ()
-        callbackName = sectionTokens[0]
-        args = sectionTokens[1:]
-        opts.workDir = options.workDir
-        opts.buildRoot = options.buildRoot
-        opts.installDir = options.installDir
-        opts.tempDirPrefix = options.tempDirPrefix
-        commandList.append (Command (callbackName, args, opts))
-    
-    if len (commandLineArgs):
-        opts = copy.deepcopy (options)
-        commandList.append (Command (commandLineArgs.pop (0), 
-                                     commandLineArgs, opts))
-    return commandList 
+    if opts.bootstrap:
+      commandSpec.append("bootstrap")
+
+    if not exists(abspath(opts.cmsdist)) and not "://" in opts.cmsdist:
+      cmsdist = abspath(opts.cmsdist)
+      fatal("Wrong path specified for CMSDIST: %s.\nNothing done." % cmsdist)
+
+    commandSpec.append("build")
+
+    if args[0] == "upload":
+      commandSpec.append("upload")
+    return commandSpec
 
 g_originalEnvironment = {}
 
@@ -4572,9 +4192,9 @@ def restoreOriginalEnvironment ():
             continue
         if key not in g_originalEnvironment.iterkeys ():
             environ[key] = ""
-    
+
 def rpmCacheUpdate(opts):
-    if opts.bootstrap == True:
+    if hasattr (opts, "bootstrap") and opts.bootstrap == True:
         rpm_db_cache.clear()
         rpmQueryCommand = "rpm -qa --queryformat '%{NAME} %{RELEASE}\n'"
         error, output = getstatusoutput (rpmQueryCommand)
@@ -4585,134 +4205,21 @@ def rpmCacheUpdate(opts):
             rpm_db_cache[n]=r
     return
 
-class Command (object):
-    description = property (lambda self : "%s %s" % (self.callbackName, 
-                                                     " ".join (self.args)))
-    def __init__ (self, callbackName, args, opts):
-        self.callbackName = callbackName
-        self.args = args
-        self.opts = opts
-        self.priority = hasattr (opts, "priority") and opts.priority or 0
-
-    def __repr__ (self):
-        return "<Command %s %s>" % (self.callbackName, " ".join (self.args))
-    
-    def __cmp__ (self, other):
-        return cmp (self.priority, other.priority) 
-
-    def run (self):
-        if not exists (self.opts.workDir):
-            makedirs (self.opts.workDir)
-        
-        chdir (self.opts.workDir)
-
-        if self.opts.cmsdistTag:
-            self.opts.cmsdist = "cvs://?tag=%s" % self.opts.cmsdistTag 
-
-        if "://" in self.opts.cmsdist:
-            self.opts.cmsdist = getSpecRepository (self.opts.cmsdist, self.opts)
-        
-        self.opts.architecture = guessArchitecture (self.opts)
-        
-        # If APT_INIT_SH is not there, it means we can save the original
-        # environment.
-        if not getenv ("APT_INIT_SH"):
-            saveOriginalEnvironment ()
-        # Checks the environment to see if we are in a bootstrapped are.
-        # * If the option --do-not-bootstrap is there or we are bootstrapping,
-        #   everything is fine.
-        # * Otherwise we : 
-        #       * restore the original environment if modified.
-        #       * source the init.sh file an we make it the environment 
-        #         available.
-        if self.opts.doNotBootstrap or self.callbackName in ["bootstrap"]:
-            self.opts.bootstrap = False
-        else:
-            environmentInitSh = g_bootstrapGuesser.guessInitSh (self.opts)
-            if not environmentInitSh:
-                log ("""Unable to detect a bootstrapped area. Either make sure you bootstrapped one
-or add the --do-not-bootstrap option to your command line arguments.""")
-                sys.exit (1)                
-            aptInitSh = getenv ("APT_INIT_SH")
-            log (environmentInitSh, DEBUG)
-            log (aptInitSh or "", DEBUG)
-            if exists (environmentInitSh):
-                if aptInitSh:
-                    restoreOriginalEnvironment ()
-                assert (not getenv ("APT_INIT_SH"))
-                try:
-                    lines = popen (". %s; env" % environmentInitSh).read ()
-                    if not lines:
-                        log ("FATAL: Unable to source environment in %(environmentInitSh)s" % locals ())
-                        sys.exit (1)
-                    lines = re.sub ("\\\n".encode ('string-escape'), 
-                                    '', 
-                                    lines)
-                    for line in lines.split ("\n"):
-                        if not line:
-                            continue
-                        key, value = line.split ("=", 1)
-                        environ[key] = value
-                except ValueError:
-                    log ("ERROR: Unable to interpret environment. Malformed line %s" % line)
-                    sys.exit (1)
-                environ["APT_INIT_SH"] = environmentInitSh
-                self.opts.bootstrap = True
-        if self.opts.bootstrap:
-            checkIfBootstrapArea (self.opts)        
-        global tags_cache
-        tags_cache = TagCacheAptImpl (self.opts)
-        tags_cache.update ()
-        log ("Executing command %s %s" % (self.callbackName, " ".join (self.args)), DEBUG)
-        log ("options:\n %s" % "\n".join (["\t%s:%s" % (item, 
-                                                        getattr (self.opts,item)) 
-                                           for item in dir (self.opts) 
-                                           if not "_" in item]), 
-                                          DEBUG)
-        factory = PackageFactory (self.opts)
-        commandHandlers[self.callbackName] (self.opts, self.args, factory)
-
-    def check (self):
-        callbackName = self.callbackName
-        opts = self.opts
-        args = self.args
-        if callbackName != "upload" and opts.syncBack:
-            log ("--sync-back option is only available when uploading.")
-            return False
-        if callbackName == "upload" and opts.syncBack and not opts.assumeYes:
-            try:
-                ok = raw_input ("This will modify the official repository. Are you sure you want to continue? [y/N] ")
-            except EOFError:
-                log ("Nothing done. Exiting.")
-                return False
-            if not ok or ok[0].upper () != "Y":
-                log ("Nothing done. Exiting.")
-                return False
-        
-        if callbackName not in ["build"] and opts.doCheckOnBuild:
-            log ("--check-consistency can be used only in conjuction with build and pretend.")
-            return False
-        
-        if callbackName not in ["build", "upload"] and opts.doDeprecate:
-            log ("--deprecate-local can be used only in conjuction with build, pretend and upload.")
-            return False
-        
-        if not callbackName in commandHandlers:
-            help (opts, args)
-            return False
-        
-        if not callbackName in ["bootstrap"] and not "://" in opts.cmsdist and not exists (abspath (opts.cmsdist)):
-            log ("Cannot locate CMSDIST in %s." % abspath (opts.cmsdist))
-            log ("Nothing done. Exiting.")
-            return False
-            
-        if callbackName not in ["build", "check", "upload", "bootstrap", "deprecate-local"]:
-            return False
-        
-        return True
-
-def initDownloadHandlers ():
-    selectHttpDownloadHandler (downloadHandlers)
+def setupAptEnvironment(environmentInitSh):  
+  if not exists(environmentInitSh):
+    fatal("Error while bootstrapping. File not found %s." % environmentInitSh)
+  lines = popen(". %s; env" % environmentInitSh).read()
+  if not lines:
+    fatal("Unable to source environment in %s" % environmentInitSh)
+  lines = re.sub("\\\n".encode('string-escape'), '', lines)
+  for line in (l for l in lines.split("\n") if l):
+    parts = line.split("=", 1)
+    if len(parts) != 2:
+      fatal("Unable to interpret environment. Malformed line %s" % line)
+    environ.__setitem__(*parts)
+  error, aptLocation = getstatusoutput("which apt-get")
+  if error or not aptLocation.startswith(opts.workDir):
+    fatal("Cannot find a working apt-get in bootstrapped area %s" % opts.workDir)
 
 if __name__ == "__main__":
     # Stop processing is SCRAM runtime env is set to avoid picking up
@@ -4721,76 +4228,147 @@ if __name__ == "__main__":
         fatal ("You have SCRAM runtime environment set. Please run it from a fresh shell.")
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
-    initDownloadHandlers ()
-    opts, args = parseOptions ()
+    opts, args = parseOptions()
 
-    arch_data = opts.architecture.split("_",2)
-    arch_data[2] = re.sub('^[a-z]+','',arch_data[2])
-    opts.rpmQueryDefines = '--define "cmscompilerv  %s" --define "cmsos %s"' % (arch_data[2], "_".join(arch_data[0:2]))
-    environ["SCRAM_ARCH"] = opts.architecture
-
-    global g_bootstrapGuesser
-    g_bootstrapGuesser = BootstrapLocationGuesser ()
-    
     packages = {}
     #tags_cache = TagCacheAptImpl (opts)
     try:
-        commandList = []
-        commandList.extend (createCommands (opts,args))
-        
-        environ["VO_CMS_SW_DIR"] = opts.workDir
-        # Create the work area and a tmp dir for it it does not exists and cd to it.
-        opts.tempdir = join(opts.workDir, opts.tempDirPrefix)
-        if not exists(opts.tempdir):
-            makedirs(opts.tempdir)
-        chdir (opts.workDir)
-        
-        #Process level lock: To make sure that there is only one cmsBuild process is running for this work area
-        procLock = cmsLock(opts.workDir)
-        if not procLock:
-            fatal ("There is already a cmsBuild process running for workdir %s." % opts.workDir)
+      commandSpec = createCommands(opts, args)
+      
+      log("The following commands will be executed:\n %s" % 
+          "\n".join (["* %s" % spec for spec in commandSpec]), DEBUG)
+      
+      # Create the work area and a tmp dir for it it does not exists and cd to it.
+      opts.tempdir = join(opts.workDir, opts.tempDirPrefix)
+      if not exists(opts.tempdir):
+        makedirs(opts.tempdir)
+      chdir (opts.workDir)
+      
+      #Process level lock: To make sure that there is only one cmsBuild process is running for this work area
+      procLock = cmsLock(opts.workDir)
+      if not procLock:
+          fatal ("There is already a cmsBuild process running for workdir %s." % opts.workDir)
 	  
-        if not len (commandList):
-            help (opts, args)
-            sys.exit (0)
-        
-        brokenCommands = [ command for command in commandList
-                           if not command.check () ]
-         
-        if brokenCommands:
-            log ("ERROR: The following commands are not ok. Nothing is done.")
-            log ("\n".join (["* %(callbackName)s %(args)s" % command.__dict__ 
-                             for command in brokenCommands ]))
-        commandList.sort ()
-        log ("The following commands will be executed:\n %s" % 
-             "\n".join (["* %s" % command.description 
-                         for command in commandList]))
-        
-        for command in commandList:
-            command.run ()
-
+      # Checkout if a tag is specified for CMSDIST. If it is checkout the package
+      # in a temporary directory and keep track of the path to it.
+      if "://" in opts.cmsdist:
+        opts.cmsdist = getSpecRepository(opts.cmsdist, opts)
+      # Syntactic sugar to be able to say:
+      #
+      # cmsBuild build CMSSW_X_Y_Z
+      #
+      # which modifies the cmssw.spec in-place and builds it.
+      cmsswCommands = [x for x in args if x.startswith("CMSSW_")] 
+      if len(cmsswCommands) > 1:
+        fatal("You can only build one version of CMSSW at the time")
+      elif len(cmsswCommands) == 1:
+        cmsswVersion = cmsswCommands[0]
+        args.remove(cmsswVersion)
+        args.append("cmssw")
+        cmsswSpec = join(opts.cmsdist, "cmssw.spec")
+        cmd = "perl -p -i -e 's/### RPM cms cmssw.*/### RPM cms cmssw %s/' %s"
+        error, output = getstatusoutput(cmd % (cmsswVersion, cmsswSpec))
+        if error:
+          fatal("Unable to modify cmssw.spec as requested.")
+      
+      if not exists(opts.cmsdist):
+        fatal("A CMSDIST checkout (or a tag) is required in order to build.")
+      # Make sure that the build architecture and the actual platform we
+      # are running on are compatible.
+      if opts.architecture.startswith("osx"):
+        if not sys.platform == "darwin":
+          fatal("Cannot build architecture %s on linux. Did you mean %s?" % (opts.architecture, opts.architecture.replace("osx106", "slc5")))
+      if opts.architecture.startswith("slc"):
+        if not sys.platform.startswith("linux"):
+          fatal("Cannot build architecture %s on osx. Did you mean %s?" % (opts.architecture, opts.architecture.replace("slc5", "osx106")))
+      
+      # Force the architecture and extract ancillary options like the compiler 
+      # version, the compiler name, whether to force 32 bit builds on linux and
+      # whether the system compiler should being used.
+      # Cross check that:
+      # * If on macosx or in online, check that the system compiler has the same
+      #   version as the one specified in the architecture string.
+      # * If we are not using the system compiler, a spec file with the 
+      #   compiler name exists and matches the architecture.
+      m = re.match("[^_]+_[^_]+_([a-z]+)([0-9]+)", opts.architecture)
+      if not m:
+        fatal("Malformed architecture string.")
+      opts.compilerName, compactCompilerVersion = m.groups()
+      opts.compilerVersion = ".".join([x for x in compactCompilerVersion])
+      
+      # Check validity of the system compiler.
+      if opts.compilerName == "gcc" and sys.platform == "darwin":
+        if detectCompilerVersion("gcc") == opts.compilerVersion:
+          opts.systemCompiler = True
+        else:
+          opts.systemCompiler = False
+      else:
+        opts.systemCompiler = False
+      
+      # Check validity of the spec file.
+      if not opts.systemCompiler:
+        pathname = join (opts.cmsdist, "%s.spec" % opts.compilerName)
+        try:
+          lines = open(pathname).readlines()
+        except IOError, e:
+          fatal("The spec %s does not match the requested architecture %s." % (pathname, opts.architecture))
+        (group, name, version) = parseRPMLine(lines, opts)
+        version = version.split ("-")[0]
+        if name != opts.compilerName or version != opts.compilerVersion:
+          msg = "The compiler %s-%s (specified in %s) differs from %s-%s (specified by the architecture %s)."
+          fatal(msg % (name, version, pathname, opts.compilerName,
+                       opts.compilerVersion, opts.architecture))
+      
+      arch_data = opts.architecture.split("_",2)
+      arch_data[2] = re.sub('^[a-z]+','',arch_data[2])
+      opts.rpmQueryDefines = '--define "cmscompilerv  %s" --define "cmsos %s"' % (arch_data[2], "_".join(arch_data[0:2]))
+      environ["SCRAM_ARCH"] = opts.architecture
+      environ["VO_CMS_SW_DIR"] = opts.workDir
+      
+      factory = PackageFactory(opts)
+      
+      # Tags cache always needs to be there.
+      tags_cache = TagCacheAptImpl(opts)
+      for command in commandSpec:
+        if command == "bootstrap":
+          # If the apt-init.sh file is missing, do the bootstrap,
+          # parse the output to find the init.sh and link it to
+          # apt-init.sh, so that next time this stage will we skipped.
+          #
+          # Source the apt-init.sh file and setup the environment,
+          # update the apt cache.
+          aptInitSh = join(opts.workDir, opts.architecture, "apt-init.sh") 
+          if not exists(aptInitSh):
+            environmentInitSh = bootstrap(opts)
+            symlink(environmentInitSh.replace(opts.workDir, ".."), aptInitSh)
+          setupAptEnvironment(aptInitSh)
+          tags_cache.update()
+        elif command == "build":
+          build(opts, args[1:], factory)
+        elif command == "upload":
+          upload(opts, args[1:], factory)
     except KeyboardInterrupt:
-        log ("User requested to abort compilation. Exiting.")
+        log ("User requested to abort. Exiting.")
         sys.exit (1)
     except RpmBuildFailed, e:
         log ("Package %s could not build. Final lines of the build log are: " % e.pkg.name)
         logfile = open("%s/log" % e.pkg.builddir).readlines ()
         for line in logfile[-10:]:
-            log (line)
+          log(line)
         sys.exit (1)
     except RpmInstallFailed, e:
-        log ("The installation of %s could not be completed for the following reason:")
-        log (e.why)
+        log("The installation of %s could not be completed for the following reason:")
+        log(e.why)
         sys.exit (1)
     except NotCorrectlyBootstrapped, e:
-        log ("""FATAL: While it seems that you have run bootstrap.sh, 
-                 the bootstrapped area actually looks broken for the following reason:""")
+        log("""FATAL: While it seems that you have run bootstrap.sh, 
+               the bootstrapped area actually looks broken for the following reason:""")
         log (e.why)
         sys.exit (1)
     except FileNotFound, e:
         log ("""ERROR! File not found: %(filename)s""" % e.__dict__)
         sys.exit (1)
     except PlatformDetectionError, e:
-        log ("""ERROR: Unable to detect the architecture:""")
-        log ("%s" % e)
+        log("""ERROR: Unable to detect the architecture:""")
+        log("%s" % e)
         sys.exit (1)

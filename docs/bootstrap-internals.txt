@@ -1,0 +1,178 @@
+CMS software area bootstrap internals
+=====================================
+
+This document is a little summary of how the bootstrap procedure works.
+
+1. Download and execution of an architecture independent bootstrap script.
+2. Download of a bootstrap driver text file which contains architecture 
+   specific information. 
+3. Download of a binary tarball containing a standalone rpm/apt installation 
+   as specified in the bootstrap driver.
+4. Creation of a private RPM database.
+5. Seeding of a the rpm database by harvesting information from various system
+   sources (e.g. the local system rpm database, the .deb database, standard 
+   locations) as specified by the bootstrap driver file.
+6. Download and installation of an rpm distribution containing apt and rpm.
+7. Update of the apt database.
+8. Installation of additional base packages and their dependencies, using apt, 
+   as specified by the bootstrap driver. 
+
+## Description of the various steps.
+
+### 1. Architecture independent bootstrap script
+
+The first step is to download an architecture independent bootstrap script. 
+Such a script is a simple `sh` script where we try to use a syntax as *standard* 
+as possible (i.e. no *bash-ism*, *zsh-ism*, *linux-ism*, etc). 
+The script itself is created when you build the `boostrap-driver.spec` package
+using cmsBuild and it's originated from the `CMSDIST/bootstrap.file` 
+template which cmsBuild completes with the proper values for the build path. 
+The actual bootstrap file can be found in
+
+    <work-dir>/<architecture>/cms/bootstrap-driver/<bootstrap-driver-version>/bin/bootstrap.sh
+
+where:
+
+* `<work-dir>`: is the directory specified using the `--work-dir` option (or 
+  its cfg file equivalent `workDir`) when building using cmsBuild.
+* `<architecture>`: is the architecture automatically detected or specified by
+  the `--architecture` (`architecture` cfg option) when building using cmsBuild.
+* `<bootstrap-driver-version>`: is the version of the bootstrap driver 
+  specified by the first line of `bootstrap-driver.spec` spec file. 
+
+### 2. Bootstrap driver
+
+Once the bootstrap command is executed the first thing it does is to download
+a so called bootstrap driver text file, which contains all the architecture 
+specific bootstrap parameters. Such a file is automatically generated when 
+building the `bootstrap-driver.spec` using cmsBuild.
+It has the following format:
+
+    <key>=["]<value>["]
+    
+where:
+
+* `<key>` is either 
+  * `instroot`: the location where the boostrap kit was built. Used for 
+    relocation of the binary tarball and automatically filled in by cmsBuild. 
+  * `rpm_version`: the version of the rpm package to be used for the bootstrap
+                   procedure.
+  * `apt_version`: the version of apt to be used for the bootstrap procedure.
+  * `platformSeeds`: the name of the system packages whose contents and 
+                     *provides* will be used to populate the private rpm database.
+                     Notice that if a package 
+  * `unsupportedSeeds`: same as above, but it will be used only in case 
+                        `-unsupported_distribution_hack` is used.
+  * `packageList`: the packages which compose the bootstrap kit.
+  * `additionalProvides`: additional *provides* to put in the private rpm database.
+  * `unsupportedProvides`: same as above, but it will be used only in case 
+                        `-unsupported_distribution_hack` is used.
+  * `defaultPkgs`: additional packages to be installed once the
+* `<value>` is a string associated with the key.
+
+An example bootstrap driver is the following:
+    
+    instroot=/build1/19N
+    rpm_version=4.4.2.2-CMS19c
+    apt_version=0.5.15lorg3.2-CMS19c
+    platformSeeds="glibc glibc-32bit coreutils bash tcsh zsh pdksh perl
+             tcl tk perl-Tk readline openssl ncurses XFree86-libs 
+             e2fsprogs krb5-libs freetype fontconfig XFree86-Mesa-libGLU
+             XFree86-Mesa-libGL xorg-x11-deprecated-libs
+             xorg-x11-libs xorg-x11-Mesa-libGLU xorg-x11-Mesa-libGL
+             compat-libstdc++-33 fglrx_6_8_0 libidn"
+    unsupportedSeeds="xorg-x11-Mesa compat-readline4 compat-curl2 freetype2 
+        xorg-x11-libX11 libcomerr2 libidn11 libxi6 libxpm4 libxinerama1
+        libncurses5 libsm6 libice6 libc6 libxcursor1 libxmu6 
+        libgl1-mesa-glx libxft2 perl-base xserver-xorg xserver-xorg-core
+        libfreetype6 libfontconfig1 libgl1-mesa libxrandr2 libglu1-mesa 
+        libxext6 libx11-6 libxrender1 libX11 libXmu libSM libICE libXcursor 
+        libXext libXrandr libXft mesa-libGLU mesa-libGL e2fsprogs-libs libXi libXinerama 
+        libXft libXrender libXpm"
+    packageList="external+gcc+4.1.2-CMS19-1-1042.slc4_ia32_gcc412.rpm external+apt+0.5.15lorg3.2-CMS19c-1-1082.slc4_ia32_gcc412.rpm external+zlib+1.2.3-CMS19-1-1017.slc4_ia32_gcc412.rpm external+expat+2.0.0-CMS19-1-1017.slc4_ia32_gcc412.rpm external+openssl+0.9.7d-CMS19-1-1015.slc4_ia32_gcc412.rpm external+beecrypt+4.1.2-CMS19-1-1010.slc4_ia32_gcc412.rpm external+bz2lib+1.0.2-CMS19-1-1014.slc4_ia32_gcc412.rpm external+db4+4.4.20-CMS19-1-1010.slc4_ia32_gcc412.rpm external+elfutils+0.131-CMS19-1-1010.slc4_ia32_gcc412.rpm external+neon+0.26.3-CMS19-1-1009.slc4_ia32_gcc412.rpm external+libxml2+2.6.23-CMS19-1-1010.slc4_ia32_gcc412.rpm external+rpm+4.4.2.2-CMS19c-1-1071.slc4_ia32_gcc412.rpm cms+cms-common+1.0-1-1009.slc4_ia32_gcc412.rpm"
+    additionalProvides=""
+    unsupportedProvides="libtcl8.3.so libtk8.3.so /bin/env libcom_err.so.3 
+                         libcrypto.so.4 libgssapi_krb5.so.2 libk5crypto.so.3
+                         libkrb5.so.3 libssl.so.4 /bin/csh /bin/tcsh libreadline.so.4
+                         libtcl8.4.so libtk8.4.so"
+    defaultPkgs="cms+cms-common+1.0"
+
+### 3. Binary tarball containing a standalone rpm/apt
+
+The information found in the bootstrap driver file and in particular in the 
+`packageList` variable are then used to download the rpm of which the bootstrap 
+driver consist of. 
+The packages will be unpacked using a perl version of `rpm2cpio` embedded in the 
+bootstrap file and relocated using the information specified in the `instroot`
+variable via something similar to:
+
+    perl -p -i -e "s|$instroot|$pwd$instroot|" <all-files which need to be relocated>
+
+### 4. Private RPM database.
+
+Once the binary tarball containing rpm is unpacked and installed, the environment
+is set up to pick up the rpm executable from there. Such an executable is used
+to create a standalone rpm database. The reason why this is not done with the 
+system rpm executable is that we want to support deb-based distributions (Debian, 
+ubuntu, etc)  or even systems like MacosX and CygWin which do not use RPM as 
+their packaging system. Notice also that the CMS version of rpm is specifically 
+patched to be relocatable via the usage of a few environment variables. 
+In particular, as it can be seen from `rpm.spec` we use:
+
+* `LIBRPMALIAS_FILENAME %{i}/lib/rpm/rpmpopt-%{realversion}`
+* `LIBRPMRC_FILENAME %{i}/lib/rpm/rpmrc`
+* `RPM_MACROFILES %{i}/lib/rpm/macros`
+* `USRLIBRPM %{i}/lib/rpm`
+* `RPMMAGIC %{i}/lib/rpm/magic`
+* `RPMCONFIGDIR %{i}/lib/rpm`
+* `SYSCONFIGDIR %{i}/lib/rpm`
+
+Where `%{i}` is relocated to be `$RPM_INSTALL_PREFIX` at post installation time.
+
+### 5. Seeding of the private rpm database.
+
+Once the database has been created is completely empty and we need to fill it 
+with information about what is installed on the system. Such a process we call
+it *seeding*. This is done by harvesting information from the system and 
+creating a special spec file which contains `Provides` statements for all the 
+libraries and capabilities which are found. Such a spec is then built and 
+installed in our private database so that it reflects the system status. In 
+particular the harvesting procedure take into account the following bits:
+
+* If the distribution is rpm based, the contents of the system rpms which are 
+  specified in the bootstrap driver are seeded.
+* If the system is deb based, it harvest the same information as above from 
+  the deb system database.
+* On macosx, various system directories are scanned, including `/bin`, 
+  `/usr/bin`, `/Library` and `/usr/bin/X11R6`.
+* The system perl distribution is harvested as well and its modules are 
+  considered as available.
+
+Notice also that it is possible to repeat the seeding process (via the 
+`bootstrap.sh reseed` command) in the case some package which turns out to be 
+required is not installed at bootstrap time.
+
+### 6. Proper installation of rpm and apt
+
+After the seeding of the private rpm db is done, we can now properly install packages
+in it. The first packages we install, always using the direction found in the 
+bootstrap driver, is rpm and apt themselves, so that we can get rid of the manually 
+installed binary tarball.
+
+### 7. Update of the apt database.
+
+The command
+
+    apt-get update
+    
+is issued to fetch from server the available packages.
+
+### 8. Installation of additional packages.
+
+Any package specified in the bootstrap driver `defaultPkgs` field is than 
+installed. In particular cms install the package `cms+cms-common+1.0` which 
+contains a few wrappers that are "versionless". This is the only package for 
+which cms still uses the revision system to update it, where newer packages 
+replace older. In general different versions of all the other packages results
+in parallel installations.
+ 

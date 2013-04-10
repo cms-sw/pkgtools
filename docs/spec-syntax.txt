@@ -1,0 +1,54 @@
+cmsBuild spec file syntax
+=========================
+
+The instructions that tell cmsBuild how to build an rpm are written in a so 
+called `spec file`. 
+cmsBuild uses a special kind of syntax for its specs which is a mixture of the
+ [normal rpm spec syntax][rpmguide] plus a few macros that get expanded at 
+ build time.
+
+## CMS spec files specific macros:
+
+* `## NOCOMPILER`: the package will not depend on the compiler.
+* `## REVISION <n>`: allows the developer to specify which revision (`<n>`) 
+  use for the resulting rpm. 
+
+## Specifying sources:
+
+One of the addition that `cmsBuild` adds to normal rpm spec files is the ability
+to download sources which are specified in the `SourceN:` tags using various 
+method. This requires the urls to be specified in a special format, especially 
+for fetching data from cvs, svn and git.
+
+
+### Fetching sources from http/https/ftp
+
+The syntax is simply
+
+    Source[0-9]*: <url>
+
+Where `<url>` is the url pointing to the file.
+
+###  Fetching sources from cvs:
+
+In order to fetch sources from cvs, you need to specify a few options to login 
+on the server select the correct module.
+The full syntax is:
+
+    Source[0-9]*: cvs://<server>?<options>
+    
+Where `<server>` uses the usual way of specifying a `CVSROOT`, e.g.
+  
+    :pserver:anonymous@cmscvs.cern.ch:2401/cvs_server/repositories/CMSSW
+    
+Where `<options>` can be either:
+  
+* `passwd`: cypted password to access the repository.
+* `module`: the name of the cvs module to be used for checkout
+* `export`: the directory where the files are checked out (the -d option passed to cvs).
+* `strategy`: can be either `checkout` or `export` and tells the system what 
+  cvs command to use to download sources.
+* `output`: the name of the tarfile where the sources have to be packed. Notice that the 
+  value of this option has to start with '/'.
+
+[rpmguide]: http://docs.fedoraproject.org/en-US/Fedora_Draft_Documentation/0.1/html/RPM_Guide/ch09s02.html

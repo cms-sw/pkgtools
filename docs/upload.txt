@@ -1,0 +1,20 @@
+The subcommand `cmsBuild upload` can be used to upload packages to a remote apt repository.
+
+## SYNOPSIS
+
+    cmsBuild [<additional options>] [-c <cmsdist-location>] -a <architecture> \
+             upload <package> [<package2> .. <packageN>]
+
+## OPTIONS
+
+The main options which can be specified are:
+
+* `-c`: the location of the directory containing the spec files to be built.
+* `–a`: the architecture for which we are doing the build.
+
+Documentation about the `<additional options>` which can be specified can be obtained by passing `--help` on the command line.
+
+## NOTES
+
+The `upload` subcommand will also build any package which needs to be build.
+An additional option `--no-bootstrap` can be used to build and upload the bootstrap kit for a new architecture not yet present on server.
