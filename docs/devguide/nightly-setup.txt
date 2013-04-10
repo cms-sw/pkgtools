@@ -1,0 +1,237 @@
+How to setup nightly builds for COMP packages.
+==============================================
+
+General information
+-------------------
+
+The process of creating a repository for nightly packaging of COMP is a three step
+procedure.
+
+* Re-Initializing a new repository (done every few weeks/month, according to needs)
+* Creating a new set of externals (done every time there is a configuration 
+  change for any of the COMP packages).
+* Rebuilding all the COMP applications (done with a regular cadence between 1 day
+  and 1 week).
+
+Notice that the procedure described will build the packages for the following
+architectures in one go:
+
+* `slc4_ia32_gcc345`
+* `slc4_ia32_gcc422`
+* `slc4_amd64_gcc345`
+* `slc4_amd64_gcc422`
+
+Before you start
+----------------
+
+Make sure you have your `ssh` keyfile added to the keyring of the user cmsbuild
+on cmsrep.cern.ch (talk to Andreas Pfeiffer or David Lange for it (standard CERN 
+email address)).
+In order to check that everything actually works you can do:
+
+    ssh -t cmsbuild@cmsrep.cern.ch echo "OK. You can connect to cmsrep."
+
+If it does not work, please make sure that you are using version 2 of the ssh 
+protocol (you might have to add `Protocol 2,1` to your `~/.ssh/config` file).
+
+Also make sure you build the packages on a 64 bit machine (e.g. lxbuild061).
+    
+
+Setting up the environment
+--------------------------
+
+This is the only part of the recipe an operator should be allowed to modify,
+please look at the section "Configuration used currently in production / 
+test build" for more information on what is actually used for building 
+production / test packages. 
+
+    # The tag to use for the bootstrap kit creation.
+    export COMP_NIGHTLY_INIT_TAG=ge20080304-comp
+    # The tag to use to build externals and applications.
+    export COMP_NIGHTLY_TAG=ge20080304-comp
+    # The project to build.
+    export TARGET_PROJECT=prodrequest
+    # Other possible options:
+    # export TARGET_PROJECT=sitedb
+    # export TARGET_PROJECT=prodrequest
+    export PKGTOOLS_STABLE_TAG=V00-09-00 
+    
+To initialize the repository
+-----------------------------
+
+First thing to do is to initialize the repository. For `comp` nightly builds
+the idea is to do it every once in a while, when the area is rather full and we 
+need disk space. Most likely every 3/4 months. Keep in mind that this repository 
+should not be used for production installations.
+
+* Remove the old one on cmsrep and recreate it.
+
+        ## If your ssh key has a password, you might save time by uncommenting
+        ## the next 2 lines. 
+        # eval `ssh-agent -s`
+        # ssh-add -t 36000
+        ssh cmsbuild@cmsrep.cern.ch rm -rf /data/cmssw/comp
+        ssh cmsbuild@cmsrep.cern.ch mkdir -p /data/cmssw/comp
+
+* Create a new distribution kit for all the supported platforms:
+
+        export WORKAREA=/build1/$USER/comp-nightly-init
+        rm -rf $WORKAREA
+        mkdir -p $WORKAREA
+        cd $WORKAREA
+        cvs co -r $PKGTOOLS_STABLE_TAG PKGTOOLS
+        PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_INIT_TAG --cfg PKGTOOLS/configs/comp-nightly-init.cfg --work-dir w
+        # For OSX use:
+        # PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_INIT_TAG --cfg PKGTOOLS/configs/comp-nightly-init-single.cfg --work-dir w        
+        find $WORKAREA/w -path \*bootstrap-driver\* -name \*-driver.txt -exec scp {} cmsbuild@cmsrep.cern.ch:/data/cmssw/comp \;
+
+To build a new set of externals for COMP
+----------------------------------------
+
+* Modify and tag CMSDIST with a give tag `$COMP_NIGHTLY_TAG` (or ask it to someone,
+  if you are an operator).
+* Build and upload the newly created set of externals.
+
+        export WORKAREA=/build1/$USER/comp-nightly
+        rm -rf $WORKAREA
+        mkdir -p $WORKAREA
+        cd $WORKAREA
+        cvs co -r $PKGTOOLS_STABLE_TAG PKGTOOLS
+        PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_TAG --cfg PKGTOOLS/configs/comp-nightly-externals.cfg --work-dir w
+        # For OSX use:
+        # PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_TAG --cfg PKGTOOLS/configs/comp-nightly-externals-single.cfg --work-dir w
+    
+
+To build a new set of COMP applications
+---------------------------------------
+
+* Modify and tag CMSDIST with a given tag `$COMP_NIGHTLY_TAG` (or ask it to someone,
+  if you are an operator).
+* Build and upload the newly created set of packages
+
+        export WORKAREA=/build1/$USER/comp-nightly
+        rm -rf $WORKAREA
+        mkdir -p $WORKAREA
+        cd $WORKAREA
+        cvs co -r $PKGTOOLS_STABLE_TAG PKGTOOLS
+        PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_TAG --cfg PKGTOOLS/configs/comp-nightly.cfg --work-dir w
+        # For OSX use:
+        # PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_TAG --cfg PKGTOOLS/configs/comp-nightly-single.cfg --work-dir w
+
+To build a given COMP application
+---------------------------------
+* Mofify and tag CMSDIST with a given tag `$COMP_NIGHTLY_TAG`
+* Build and upload the newly created package
+
+        export WORKAREA=/build1/$USER/comp-nightly-$TARGET_PROJECT
+        rm -rf $WORKAREA
+        mkdir -p $WORKAREA
+        cd $WORKAREA
+        cvs co -r $PKGTOOLS_STABLE_TAG PKGTOOLS
+        PKGTOOLS/cmsBuild --cmsdist-tag $COMP_NIGHTLY_TAG --cfg PKGTOOLS/configs/comp-nightly-$TARGET_PROJECT.cfg --work-dir w
+
+Configuration used currently in production / test build
+==========================================
+
+### PHEDEX
+
+Production:
+
+  * PKGTOOLS_STABLE_TAG=V00-09-03
+  * COMP_NIGHTLY_TAG=forPHEDEX-web-services-20090423
+  * TARGET_PROJECT=PHEDEX-combined-web
+
+note: PHEDEX-combined-web is a dummy spec file whose job is to
+      build PHEDEX-web and PHEDEX-datasvc at the same time
+
+Test build:
+
+  * None - we develop from production builds and CVS checkouts
+
+### Frontend
+  
+Test build:
+
+  * PKGTOOLS_STABLE_TAG=V00-09-03
+  * COMP_NIGHTLY_TAG=forFrontend-2
+  * TARGET_PROJECT=frontend
+
+### CondDB 
+
+Production:
+
+  * PKGTOOLS_STABLE_TAG=V00-10-00
+  * COMP_NIGHTLY_TAG=webconddb173
+  * TARGET_PROJECT=webconddb
+
+  * PKGTOOLS_STABLE_TAG=V00-10-00
+  * COMP_NIGHTLY_TAG=condapp173
+  * TARGET_PROJECT=conddb-appserver
+
+  * PKGTOOLS_STABLE_TAG=V00-10-00
+  * This is a subset of cmssw. I only upload in the 
+  * private repository cms.xiezhen, document here for completeness...
+  * COMP_NIGHTLY_TAG=condcore306
+  * TARGET_PROJECT=condcore
+
+Test build:
+
+ None
+
+  * PKGTOOLS_STABLE_TAG=
+  * COMP_NIGHTLY_TAG=
+  * TARGET_PROJECT=
+
+### DBS Data Discovery
+
+Production:
+
+  * PKGTOOLS_STABLE_TAG= (always checkout from CVS head)
+  * COMP_NIGHTLY_TAG=WEBTOOLS-APPS_20080917
+  * TARGET_PROJECT=dbs-web
+  
+Test build:
+
+ None
+
+  * PKGTOOLS_STABLE_TAG=
+  * COMP_NIGHTLY_TAG=
+  * TARGET_PROJECT=
+
+### ProdMon
+
+Production:
+
+  * PKGTOOLS_STABLE_TAG= (always checkout from CVS head)
+  * COMP_NIGHTLY_TAG=sw_20080319
+  * TARGET_PROJECT=prodmon
+  
+Test build:
+ 
+  * PKGTOOLS_STABLE_TAG= (always checkout from CVS head)
+  * COMP_NIGHTLY_TAG=sw_20080319
+  * TARGET_PROJECT=prodmon
+
+### SiteDB:
+
+For SiteDB look at <https://twiki.cern.ch/twiki/bin/view/CMS/SiteDB#Building>.
+
+
+Additional notes:
+=================
+
+### Note: creating a new cfg file for a nightly of a given project.
+In order to create a new `comp-nightly-<project_name>.cfg` file, you need to 
+do the following.
+        
+    export TARGET_PROJECT=project_name
+    cvs co -r $PKGTOOLS_STABLE_TAG PKGTOOLS
+    cd PKGTOOLS
+    cat configs/comp-nightly.cfg | perl -p -e "s!comp-apps!$TARGET_PROJECT!g" > configs/comp-nightly-$TARGET_PROJECT.cfg
+    cvs add configs/comp-nightly-$TARGET_PROJECT.cfg
+    cvs commit configs/comp-nightly-$TARGET_PROJECT.cfg
+
+### Note: Increasing the number of threads.
+It might be worth to increase the number of threads for a given build, since 
+the default is tuned for `lxbuild06X` build machines. You can do so by changing 
+the `compilingProcesses` variable in your cfg file.

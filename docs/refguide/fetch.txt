@@ -1,0 +1,27 @@
+cmsBuild fetch
+==================
+
+SYNOPSIS
+--------
+
+    cmsBuild [global-options] fetch [--pretend] package-name
+
+DESCRIPTION
+-----------
+
+The fetch command is used to download all the files necessary to build a given 
+package `package-name` and all its dependencies.
+In particular in the case you don't have a working area you can use the following
+command
+
+    cmsBuild --do-not-bootstrap --cmsdist-tag <some tag> fetch package-name
+
+to create a copy of the sources to be downloaded in $PWD/SOURCES.
+
+OPTIONS
+-------
+
+Possible options which are specific to this command are:
+
+* `--pretend`: do not actually fetch the files but prints out from where they 
+  will be fetched.

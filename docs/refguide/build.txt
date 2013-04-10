@@ -1,0 +1,43 @@
+cmsBuild build
+==============
+
+SYNOPSIS
+--------
+
+    cmsBuild [global-options] build [build options] --cfg <configuration-file>
+    cmsBuild [global-options] build [build options] <package name>
+
+DESCRIPTION
+-----------
+
+The build command is used to actually build packages.
+
+OPTIONS
+-------
+
+Possible options which are specific to this command are:
+
+* `--cfg <file path>`: the location of the configuration file to be used for 
+                       building. For the file syntax have a look at the
+                       [configuration documentation][config].
+* `--work-dir <path>`: path to the directory to use for all the 
+  build operations.
+* `--pretend`: only prints what will be done, does not actually build stuff.
+* `--do-not-bootstrap`: does not try too source the bootstrap environment 
+  before building.
+* `--tag <tag>`: tells cmsBuild to append `tag` to packages which have the same
+                 group, name and version of another one but that use a different
+                 spec. The system will also add and increasing integer number 
+                 which reflects the number of times a package has been 
+                 successfully built. A description on how the whole tagging 
+                 works can be found [here][tagging]. 
+* `--test-tag`: always adds a tag to a given package, even if the combination 
+                of group, package name and package version was never built 
+                before. This option has to be used in conjunction with the 
+                "test" option and it's useful for example for test packages 
+                which could always have a "-testXXX" appended to their name.
+                A description on how the whole tagging works can be found 
+                [here][tagging].
+
+[config]: config.html
+[tagging]: ../devguide/tagging.html

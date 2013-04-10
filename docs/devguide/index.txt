@@ -1,0 +1,14 @@
+Some development material:
+
+* [How to create a nightly build][nightly]
+
+Some internals documentation:
+
+* [Internals of how tagging of packaging works][tagging] (the `-cmsX` at the end).
+* [Internals of how the option parser works.][option-parser-internals]
+* [Internals of the bootstrapping procedure.][bootstrap]
+
+[nightly]: nightly.html
+[tagging]: tagging.html
+[option-parser-internals]: option-parser-internals.html
+[bootstrap]: bootstrap.html

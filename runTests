@@ -1,0 +1,43 @@
+#!/usr/bin/env python
+from optparse import OptionParser
+from imp import load_module, find_module
+from os.path import join, abspath
+import sys
+from traceback import print_exc
+
+def outputToFile (f):
+    olderr, oldout = (sys.stderr, sys.stdout)
+    sys.stderr = sys.stdout = f
+    return (oldout, olderr)
+
+def outputToSTD (old):
+    sys.stderr, sys.stdout = old
+
+if __name__ == "__main__":
+    parser = OptionParser ()
+    parser.add_option ("-v", "--verbose", dest="verbose", default=False, action="store_true")
+    parser.add_option ("-o", "--log-output", dest="logfile", default="log.txt")
+    opts, args = parser.parse_args ()
+    baseDir = abspath (__file__).rsplit ("/", 1)[0]
+    sys.path.append (baseDir)
+    testDir = join (baseDir, "tests")
+    log = open (opts.logfile, "w")
+    
+    for testcase in args:
+        print "Running test `%s`" % testcase
+        try:
+            if not opts.verbose:
+                old = outputToFile (log)
+            __import__ ("tests.test_" + testcase)
+            if not opts.verbose:
+                outputToSTD (old)
+            result = "OK"
+        except:
+            if not opts.verbose:
+                outputToSTD (old)
+            if opts.verbose:
+                print_exc ()
+                result="ERROR"
+            else:
+                result="ERROR"
+        print "Test result: %s" % result
