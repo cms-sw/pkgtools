@@ -3951,9 +3951,10 @@ def upload(opts, args, factory):
     subsystems=subsystems)
   # Hard-link packages.
   hardLinkPackages = format(
-    "rsync -avm --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
-    "rsync -avm --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
+    "%(rsync)s -avm --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
+    "%(rsync)s -avm --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
     ,
+    rsync="rsync --chmod=a+rX",
     workdir=opts.workDir,
     tmpdir=tmpdir,
     includes=" ".join(["--include \"**%s**\"" % x for x in pkgChecksums]),
@@ -4019,7 +4020,7 @@ def upload(opts, args, factory):
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
               "uploadTmpRepository": opts.uploadTmpRepository,
-              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync",port=opts.uploadPort),
+              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
               "user": opts.uploadUser}
 
