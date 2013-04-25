@@ -31,7 +31,6 @@ esac
 
 INITIALS=`finger $USER | grep Name: | perl -p -i -e "s/.*Name: //;s/[a-z0-9 ]//g" | tr "[:upper:]" "[:lower:]"`
 
-cvs up -A CMSDIST/cmssw.spec CMSDIST/fwlite.spec CMSDIST/cmssw-patch.spec
 perl -p -i -e "s/### RPM cms cmssw.*/### RPM cms cmssw $CMSSW_X_Y_Z/" CMSDIST/cmssw.spec
 perl -p -i -e "s/### RPM cms fwlite.*/### RPM cms fwlite ${CMSSW_X_Y_Z}_FWLITE/" CMSDIST/fwlite.spec
 
@@ -42,7 +41,10 @@ if [ ! "X$CMSSW_PATCH" = X ]; then
 fi
 
 echo $MSG
-
-cvs commit -m"$MSG" CMSDIST/cmssw.spec CMSDIST/fwlite.spec CMSDIST/cmssw-patch.spec
-cvs -Q tag ${INITIALS}For${CMSSW_ORIG}-${ARCH} CMSDIST
-cvs -q up -r ${INITIALS}For${CMSSW_ORIG}-${ARCH} CMSDIST
+pushd CMSDIST
+  git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec
+  git reset --hard HEAD
+  git clean -fxd
+  git tag ${INITIALS}For${CMSSW_ORIG}-${ARCH}
+  git push origin --tags
+popd
