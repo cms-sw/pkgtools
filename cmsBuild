@@ -2361,8 +2361,6 @@ def parseOptions():
                                     metavar="URL",
                                     help="URL of apt repository. E.g. 'http://cmsrep.cern.ch/cmssw'",
                                     default="http://cmsrep.cern.ch/cmssw")
-    advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
-                                    default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
     #        automatically by default.
     #parser.add_option ("--deprecate-local",
@@ -3008,212 +3006,6 @@ def buildSpec (pkg, tracker):
 from threading import Thread, Lock
 from time import sleep, time
 
-class BuildWorker (Thread):
-    """ This is the worker class, responsible for building a given package.
-    """
-    def __init__ (self, buildTracker):
-        Thread.__init__ (self)
-        self.PENDING = 0
-        self.STARTED = 1
-        self.FETCHING = 2
-        self.DONE = 4
-        self.tracker = buildTracker
-        self.status = self.PENDING
-        self.lock = Lock ()
-
-    # run() is executed by Thread.start() in a separate thread
-    def run (self):
-        self.status = self.STARTED
-        try:
-            buildSpec (self.payload, self.tracker)
-        except Exception, e:
-            log ("Exception raised %s in worker %s." % (e, self), DEBUG)
-            self.tracker.notifyError (self.payload, e)
-        self.tracker.workerDone (self)
-        self.status = self.DONE
-
-class BuildTracker (object):
-    messages = {
-        "PACKAGE": '[%(eventTime)s] Processing %(pkgName)s.',
-        "/PACKAGE": '[%(eventTime)s] Done processing %(pkgName)s.',
-        "BUILD_PKG": '[%(eventTime)s] Starting to build %(pkgName)s, log can be found in %(logFile)s.',
-        "/BUILD_PKG": '[%(eventTime)s] Done building %(pkgName)s.',
-        "FETCH_SOURCES": '[%(eventTime)s] Fetching sources for %(pkgName)s',
-        "/FETCH_SOURCES": '[%(eventTime)s] Done fetching sources for %(pkgName)s.',
-        "PACKAGE_CACHED": '[%(eventTime)s] Checking repository for previous built %(pkgName)s.',
-        "/PACKAGE_CACHED-FOUND": '[%(eventTime)s] Done checking repository for %(pkgName)s. Package found and installed.',
-        "/PACKAGE_CACHED-NOT_FOUND": '[%(eventTime)s] Done checking repository for %(pkgName)s. Package not found, proceeding with build.'
-    }
-    
-    def __init__ (self, packages, maxWorkers, progress):
-        self.maxWorkers = maxWorkers
-        self.packages = packages
-        self.builtPackages = []
-        self.currentWorkers = 0
-        self.globalLock = Lock ()
-        self.workers = []
-        self.pendingWorkers = []
-        self.runningWorkers = []
-        self.pendingMessages = []
-        self.buildErrors = []
-        self.quitRequested = False
-        self.keyboardInterrupt = False
-        self.progress = progress
-        self.progressCounter = 0
-        self.packagesToBuild = [ pkg.name for pkg in self.packages ]
-        for w in range (0, maxWorkers): self.createNewWorker ()
-    
-    def run (self):
-        """ This is the method responsible for building.
-            Since we are building a dependency ordered list the 
-            simpliest thing to do is to start as many worker as
-            allowed and have them waiting for their dependencies 
-            to be done. 
-        """
-        while not self.readyToQuit ():
-            try:
-                log ("""----------------------------------------------------""", TRACE)
-                for worker in self.workers:
-                    if worker.status == 0:
-                        log ("Worker %s is idle." % worker, TRACE)
-                    if worker.status == 1:
-                        log ("Worker %s is building %s" % (worker, worker.payload.name), TRACE)
-                        if worker.payload.builddir:
-                            log ("Log can be found in %s/log" % worker.payload.builddir, TRACE)
-                log ("""----------------------------------------------------""", TRACE)
-
-                self.globalLock.acquire ()
-                self.flushMessageQueue ()
-                self.globalLock.release ()
-                
-                if not self.schedule ():
-                    log ("No scheduling happened.", TRACE)
-                if self.progress:
-                  self.progressCounter += 1
-                if self.progressCounter > 10:
-                  self.progressCounter = 0
-                  sys.stderr.write(".");
-                sleep (0.001)
-            except KeyboardInterrupt:
-                self.globalLock.acquire ()
-                self.keyboardInterrupt = True
-                self.globalLock.release ()
-        log ("Quitting Tracker", TRACE)
-
-    def createNewWorker (self):
-        worker = BuildWorker (self)
-        self.workers.append (worker)
-        self.pendingWorkers.append (worker)
-
-    def workerDone (self, worker):
-        """ A worker uses this method to notify the tracker it is done.
-        """
-        self.globalLock.acquire ()
-        self.builtPackages.append (worker.payload.name)
-        self.runningWorkers.remove (worker)
-        self.workers.remove (worker)
-        del worker
-        self.globalLock.release ()
-
-    def schedule (self):
-        """ Used to schedule work for a worker.
-        """
-        if self.quitRequested:
-            log ("Tracker is ready to quit. Waiting for all workers to finish. No more scheduling happening.", TRACE)
-            return False
-
-        if self.buildErrors:
-            log ("Some packages have errors. Prepare to quit", TRACE)
-            self.quitRequested = True
-            return False
-
-        log ("Getting global lock", TRACE)
-        self.globalLock.acquire ()
-
-        for x in range (len (self.workers), self.maxWorkers):
-            self.createNewWorker ()
-
-        if not len (self.pendingWorkers):
-            log ("No pending workers found. No scheduling.", TRACE)
-            self.globalLock.release ()
-            return False
-
-        worker = self.pendingWorkers.pop (0)
-        log ("Worker %s found. Trying to give it something to do." % worker, TRACE)
-
-        if self.dispatchTo (worker):
-            self.runningWorkers.append (worker)
-        else:
-            self.pendingWorkers.append (worker)
-        self.globalLock.release ()
-        log ("Global lock released", TRACE)
-        
-    def dispatchTo (self, worker):
-        """ returns True if new work could be submitted to 
-            a the given worker, False otherwise.
-        """
-        if not self.packages:
-            self.quitRequested = True
-            return False
-        for pkgId, pkg in enumerate (self.packages):
-            if not self.canBeBuilt (pkg):
-                continue
-            nextPackage = self.packages.pop (pkgId)
-            worker.payload = nextPackage
-            worker.start ()
-            return True
-        return False
-
-    def notifyError (self, pkg, exception=None):
-        """ A worker can use this to notify about errors
-        """
-        self.globalLock.acquire ()
-        self.buildErrors.append ((pkg, exception))
-        self.globalLock.release ()
-
-    def canBeBuilt (self, pkg):
-        """ This method returns True if all the dependencies of a given package
-            where built, false otherwise.
-        """
-        for dep in pkg.fullDependencies:
-            if dep.name in self.packagesToBuild and not dep.name in self.builtPackages and dep.name != pkg.name:
-                log ("Package %s cannot be built because %s not built yet." % (pkg.name, dep.name), TRACE)
-                return False
-        return True
-
-    def readyToQuit (self):
-        """ This function returns True if the tracker is done
-            building (or if there is an error) all the packages,
-            False otherwise.
-        """
-        if self.keyboardInterrupt:
-            return True
-        if self.runningWorkers:
-            return False
-        self.globalLock.acquire ()
-        done = False
-        if self.buildErrors:
-            log ("Build errors found. Waiting for all other build threads to complete and then quitting.")
-            done = True 
-        if not self.packages:
-            log ("No more packages to build. Waiting for all build threads to complete their job.")
-            done = True
-        returnValue = done
-        self.globalLock.release ()
-        return returnValue
-        
-    def postMessage (self, message, args):
-        log ("Message posted", TRACE)
-        self.globalLock.acquire ()
-        args["eventTime"] = time ()
-        self.pendingMessages.append ((message, args))
-        self.globalLock.release ()
-
-    def flushMessageQueue (self):
-        for message, args in self.pendingMessages:
-            log (self.messages[message] % args)
-        self.pendingMessages = []
-
 class ActionFactory (object):
     def __init__ (self, pkg):
         self.__package = pkg
@@ -3387,30 +3179,6 @@ def buildSpecsNew(topLevelPackages):
   if scheduler.brokenJobs:
     sys.exit(1)
 
-def buildSpecs (pkg):
-    packages = filter(lambda p: not isPackageInstalled(p), pkg.fullDependencies + [pkg])
-    tracker = BuildTracker (packages, pkg.options.workersPoolSize, pkg.options.progress)
-    tracker.run ()
-    if tracker.buildErrors:
-        log ("Errors in the following packages")
-        for errorPkg, exceptionPkg in tracker.buildErrors:
-            log ("%s" % errorPkg.name)
-            if type (exceptionPkg) == RpmInstallFailed:
-                log ("Package %s could not install." % errorPkg.name)
-                log ("%s" % exceptionPkg)
-            elif type (exceptionPkg) == UnableToDownload:
-                log ("While building %s, could not download file: %s." % (errorPkg.name, exceptionPkg))
-            else: 
-                log ("Package %s could not build because \"%s\"" % (errorPkg.name, exceptionPkg))
-                if errorPkg.builddir:
-                    logFilename = join (errorPkg.builddir, "log")
-                    if exists (logFilename):
-                        log ("Final lines of the build log are: ")
-                        logfile = open (logFilename).readlines ()
-                        for line in logfile[-20:]:
-                            log (line.strip("\n"))
-            sys.exit (1)
-
 def build(opts, args, factory):
   err, out = getstatusoutput("rpm --version")
   if err:
@@ -3439,13 +3207,8 @@ def build(opts, args, factory):
       return
   
   # FIXME: why serializing when we could be building in parallel?
-  if opts.newScheduler:
-    rpmCacheUpdate(opts)
-    buildSpecsNew(packages)
-  else:
-    for pkg in packages:
-      rpmCacheUpdate(opts)
-      buildSpecs(pkg)
+  rpmCacheUpdate(opts)
+  buildSpecsNew(packages)
 
 def isPackageInstalled(pkg):
     pkgName = pkg.pkgName ()
