@@ -150,8 +150,7 @@ def parseCvsUrl (url):
         cvsroot = DEFAULT_CVS_SERVER
     cvsroot = cvsroot.replace (":/", ":2401/")
     args["tag"] = re.sub (re.compile ("^-r"), "", args["tag"])
-    if "export" not in args:
-        args["export"] = args["module"]
+    args["export"] = args.get("export", args["module"])
     args["cvsroot"] = cvsroot
     return (scheme, cvsroot, args)
 
@@ -160,29 +159,24 @@ def parseSvnUrl (url):
                                 defaults={"strategy": "export",
       			            "revision": "HEAD"},
                                 required=["module", "output"])
-  if "export" not in args:
-    args["export"] = args["module"]
-  if "scheme" in args:
-    scheme=args["scheme"]
+  args["export"] = args.get("export", args["module"])
+  scheme = args.get("scheme", scheme)
   if not scheme in ["svn", "http", "https", "file"] and (not scheme.startswith('svn+')):
     scheme = "svn+" + scheme
-  args["svnroot"] = "%(scheme)s://%(root)s" % {"scheme": scheme, "root": root}
+  args["svnroot"] = format("%(scheme)s://%(root)s", scheme=scheme, root=root)
   return (scheme, root, args)
 
 def parseGitUrl(url):
   protocol, gitroot, args = parseUrl(url, requestedKind="git",
                                      defaults={"obj": "master/HEAD"})
-  parts = args["obj"].rsplit("/", 1)                                                                                                                                                                                                                                                              
+  parts = args["obj"].rsplit("/", 1)
   if len(parts) != 2:
     parts += ["HEAD"]
   args["branch"], args["tag"] = parts
 
   if not "export" in args:
     args["export"] = basename(re.sub("\.git$", "", re.sub("[?].*", "",gitroot)))
-    if args["tag"] != "HEAD":
-      args["export"] += args["tag"]
-    else:
-      args["export"] += args["branch"]
+    args["export"] += (args["tag"] != "HEAD") and args["tag"] or args["branch"]
 
   if not "output" in args:
     args["output"] = args["export"] + ".tar.gz"
