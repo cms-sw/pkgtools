@@ -3390,11 +3390,6 @@ def upload(opts, args, factory):
      from scratch, including the consistency check.
      If the consistency check fails, we need to rebuild and therefore we die.
   """
-  # Make sure we cannot possibly use the cms repository to avoid damage.
-  if opts.repository.startswith("comp"):
-    print "You cannot use this with official repositories, yet. Nothing done."
-    sys.exit(1)
-
   if not args:
     upload_help()
     return False
