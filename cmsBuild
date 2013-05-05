@@ -3991,7 +3991,7 @@ def upload(opts, args, factory):
       sources += format(
         "mkdir -p %(tmpdir)s/SOURCES/cache/%(checksum)s\n"
         "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
-        "ln -f %(workdir)s/SOURCES/%(group)s/%(name)s/%(version)s/%(filename)s %(tmpdir)s/SOURCES/cache/%(checksum)s/%(filename)s\n"
+        "ln -f %(workdir)s/SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/cache/%(checksum)s/%(filename)s\n"
         "ln -sf ../../../../../SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
         workdir=opts.workDir,
         tmpdir=tmpdir,
@@ -4006,12 +4006,6 @@ def upload(opts, args, factory):
   (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
   logAndDieOnError(err, "Error while creating the local repository.", out)
 
-  hashCommand = "find %(repoBase)s/RPMS/cache -type f -name '*.rpm' | sed -e 's|^.*/RPMS/cache||' | sort | sha256sum | cut -f1 -d\ "
-  err, nextHash = getstatusoutput(format(hashCommand, repoBase=tmpdir))
-  if err:
-    log("Error while calculating repository checksum")
-    sys.exit(1)
-  
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
               "uploadTmpRepository": opts.uploadTmpRepository,
@@ -4066,10 +4060,9 @@ def upload(opts, args, factory):
     '%(rsync)s -av --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
     '%(rsync)s -av --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
     '%(rsync)s -av --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/WEB/ $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
     '%(rsync)s -av $PARENTDIR/apt/ $TMPREPO/apt/\n'
     '%(rsync)s -av $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
-    'mkdir -p $TMPREPO/WEB\n'
-    '%(rsync)s -av $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
     '# Copy ancillary files from $UPLOADEDREPO first, so that newer builds override old.\n'
     '%(rsync)s -av $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
     '%(rsync)s -av --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
@@ -4079,8 +4072,10 @@ def upload(opts, args, factory):
     '%(rsync)s -av --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
     '%(rsync)s -av --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
     '%(rsync)s -av --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
-    '# Web area will always be the latest one built\n'
-    '%(rsync)s -av $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
+    '# Web area will always be the latest one built,\n'
+    '# however we still hardlink old, unchanged, content.\n'
+    '%(rsync)s -av --link-dest $PARENTDIR/WEB/ $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
+    'CHILDHASH=`find $UPLOADREPO/RPMS/cache -type f -name "*.rpm" | sed -e "s|^.*/RPMS/cache||" | sort | sha256sum | cut -f1 -d\ `\n'
     'rm -rf $UPLOADREPO\n'
     '# Generate a new apt cache.\n'
     'source %(serverAptEnv)s\n'
@@ -4094,8 +4089,12 @@ def upload(opts, args, factory):
     'genbasedir --cachedir=$TMPREPO/md5cache/%(cmsplatf)s --flat $TMPREPO/apt/%(cmsplatf)s `echo %(subsystems)s $PREVIOUSSUBSYS | tr " " "\n" | sort -u`\n'
     'chmod 755 $TMPREPO/apt/%(cmsplatf)s\n'
     '# Move the new repository into place and link it to its <repo>.<user> name.\n'
-    'CHILD="$CACHE/%(repository)s.${PARENTHASH}-%(childHash)s"\n'
-    'mv -T $TMPREPO $CHILD || { mv $TMPREPO $TMPREPO.delme && exit 1; }\n'
+    'CHILD="$CACHE/%(repository)s.${PARENTHASH}-${CHILDHASH}"\n'
+    'if [ ! -e $CHILD ] ; then\n'
+    '  mv -T $TMPREPO $CHILD || { mv $TMPREPO $TMPREPO.delme && exit 1; }\n'
+    'else\n'
+    '  mv $TMPREPO $TMPREPO.delme\n'
+    'fi\n'
     'if [ %(syncBack)s = True ]; then\n'
     '  TARGETREPO=%(repository)s\n'
     'else\n'
@@ -4119,7 +4118,6 @@ def upload(opts, args, factory):
     'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
     'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
     'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  mv $CHILD $CHILD.delme\n'
     '  rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n' 
     '  rm -rf $UNIQUEDIR\n' 
     '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
@@ -4134,7 +4132,6 @@ def upload(opts, args, factory):
     subsystems=subsystems,
     syncBack=opts.syncBack,
     originalParentHash=parentHash,
-    childHash=nextHash,
     **repoInfo)
   (err, msg) = executeScript(createRepo, False)
   if err:
