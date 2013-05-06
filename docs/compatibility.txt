@@ -1,0 +1,7 @@
+cmsBuild should be 100% compatible with a CMSDIST tag, at least for what
+concerns the `spec` files themselves. The only difference is in the
+`rpm-preamble.file` file which has to be updated to the latest/greatest
+version in order to have cmsBuild work.
+Notice however than for some of the packages we have in CMSDIST the
+original authors do not provide sources anymore and therefore cmsBuild will
+fail to download them.

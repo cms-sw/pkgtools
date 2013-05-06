@@ -1,0 +1,25 @@
+cmsBuild bootstrap
+==================
+
+SYNOPSIS
+--------
+
+    cmsBuild [global-options] bootstrap --arch < architecture >
+
+DESCRIPTION
+-----------
+
+The bootstrap command is used to create a fully bootstrapped working area which
+can download packages from the specified repository (by default `cms`).
+The outcome of this command is the same of to the `bootstrap.sh` one (in-fact 
+it internally uses `bootstrap.sh`). 
+
+OPTIONS
+-------
+
+Possible options which are specific to this command are:
+
+* `--repository <repository name>`: the repository to be used by `apt` (the one 
+    referred in `$APT_ROOT/etc/sources.lists`). By default it uses `cms`.
+* `--path <directory>`: the path in which to effectuate the bootstrap.
+* `--architecture <architecture name>`: the architecture you want to use for the bootstrap.

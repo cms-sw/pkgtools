@@ -1,0 +1,44 @@
+Installing software
+===================
+
+Now that you (or someone else) have built your packages you most likely want
+to actually use them. In order to do so, first define some helper environment
+variables.
+
+    export SCRAM_ARCH=slc4_ia32_gcc345
+    # On macosx leopard:
+    # export SCRAM_ARCH=osx105_ia32_gcc401
+    export REPOSITORY=geTest
+    # For webtools nightlies
+    # export REPOSITORY=geTest.eulisse
+    export WORKAREA=/some/work/dir
+    # E.g.
+    # export WORKAREA=`pwd`
+
+Then you need to fetch and run the bootstrap (only **ONCE**).
+
+    mkdir -p $WORKAREA
+    # FIXME: use cms rather than geTest
+    wget -O$WORKAREA/bootstrap.sh http://cmsrep.cern.ch/cmssw/geTest/bootstrap.sh
+    # On macosx wget is not installed by default, use curl:
+    # curl http://cmsrep.cern.ch/cmssw/geTest/bootstrap.sh > $WORKAREA/bootstrap.sh
+    sh $WORKAREA/bootstrap.sh -path $WORKAREA -arch $SCRAM_ARCH -repository $REPOSITORY setup
+    
+You can bring apt-get in your environment by sourcing the appropriate init.sh / init.csh
+
+    . $WORKAREA/$SCRAM_ARCH/external/apt/0.5.15lorg3.2-cms/etc/profile.d/init.sh
+    # On tcsh
+    source $WORKAREA/$SCRAM_ARCH/external/apt/0.5.15lorg3.2-cms/etc/profile.d/init.csh
+    apt-get update
+    
+And the use the usual apt command to install/remove and query packages.
+
+    apt-get update                  # To update the apt database
+    apt-get install <package-name>  # To install package <package-name>
+    apt-get remove <package-name>   # To remove package <package-name>
+    apt-cache search <expression>   # To search for packages matching <expression>
+
+References:
+===========
+
+* [APT HOWTO]: (http://www.debian.org/doc/manuals/apt-howto/index.en.html)

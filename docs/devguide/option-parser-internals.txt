@@ -1,0 +1,15 @@
+
+Adding boolean options
+======================
+
+Because of the way the python `.ini` file parser works, it is necessary to do 
+some magic in order to add boolean options to the `cmsBuild` script.
+Infact it is not sufficient to specify:
+
+    parser.add_option ("--boolean-option-name",
+                       dest="booleanOptionName",
+                       action="store_true",
+                       default=False)
+                       
+to the `parseOptions` method, but one has to add `booleanOptionName` to the 
+list `configurableBooleanOptions`.

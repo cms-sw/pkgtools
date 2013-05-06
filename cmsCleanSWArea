@@ -1,0 +1,551 @@
+#!/usr/bin/perl
+#
+# $Id: cmsCleanSWArea,v 1.5 2010/02/05 13:45:37 wbehrenh Exp $
+#
+# Simple script to remove a CMSSW, CRAB, PRODAGENT or PHEDEX release as well
+# as the rpm's corresponding to any of its dependencies which are no longer
+# needed.
+#
+# Peter Elmer, Princeton University                     29 Dec, 2006
+#
+
+# Command line options
+use Getopt::Std;
+getopts("hopiea:");
+
+# Check sanity of specified options
+if ($opt_h) {
+  usage();
+}
+if (!$opt_a) {
+  die "Error: You must provide an architecture via the -a command option.\n";
+} else {
+  $CMSARCH = $opt_a; # e.g. "slc3_ia32_gcc323"
+}
+
+$progressbar=0;
+if ($opt_p) {$progressbar=1};
+
+$interactive = 0; $commandline = 0; $orphansearch = 0;
+if ($opt_o) {$orphansearch=1;}
+if ($opt_i) {$interactive=1;}
+if (!$orphansearch && !$interactive) {
+  $commandline = 1;
+  if ($#ARGV == -1) {
+    die "Error: Please provide a list of apt names to delete or specify -o or -i\n";
+  }
+}
+if ($orphansearch && $interactive) {
+   die "Error: Please specify only one of the options -o and -i.\n";
+} 
+
+# Sanity check that rpm/apt are installed and that APT_CONF and CMS_PATH
+# are set 
+
+  $RPM = `which rpm`; chomp($RPM);
+  $APTGET = `which apt-get`; chomp($APTGET);
+  $APTCACHE = `which apt-cache`; chomp($APTCACHE);
+  $GREP = `which grep`; chomp($GREP);
+  $CMSPATH = $ENV{'CMS_PATH'}; 
+  # Ugly hack to deal with non-standard CERN setup
+  if ($CMSPATH eq "/afs/cern.ch/cms") {
+    $CMSPATH = $CMSPATH."/sw";
+    print "Will run on CERN SW installation area at $CMSPATH\n";
+  }
+  $DEPCACHE = "$CMSPATH/$CMSARCH/logs/cmsCleanSWArea_depcache.txt";
+  $APTCONFIG = $ENV{'APT_CONFIG'}; 
+
+# Check that the relevant arch actually exists at this site
+
+  if (!-d "$CMSPATH/$CMSARCH") {
+    die "Error: No $CMSARCH installation exists under $CMSPATH\n";
+  }
+
+# Ugly globals
+  @rpmlist = ();       # list of installed rpm's - rpm names
+  @aptlist = ();       # list of installed rpm's - apt names
+  %depcache = ();      # cache of direct dependencies for each rpm (arg is 
+                       # the apt name)
+  %depcachefound = (); # cheap trick to differentiate entries in cache
+                       # with no dependencies from those for which there
+                       # is no entry in the cache. (arg is an apt name)
+  %aptchecked= ();     # temp variable used when sorting dependencies,
+                       # 0 indicates that a given rpm hasn't been considered,
+                       # 1 indicates that an rpm has been fully considered.
+                       # (arg is the apt name)
+  @sortedaptlist = (); # topologically sorted list of rpms, with an order
+                       # such that one can start from the _end_ of the list
+                       # and iterate towards the beginning, deleting rpms 
+                       # one by one, w/o ever trying to delete an rpm on 
+                       # which some other # rpm (not yet deleted) depends.
+                       # (list values are the apt names)
+  %todelete = ();      # variable used to indicate which rpms are to
+                       # be deleted. 0 = keep, 1 = delete.
+
+  if (!$APTCONFIG) {
+    print "Error: APT_CONFIG not set.\n";
+    exit;
+  }
+
+# Get a full list of the rpms which are currently installed
+
+  print "=== Getting list of installed rpms ===\n";
+  my @tmprpmlist = `$RPM -qa --dbpath $CMSPATH/$CMSARCH/var/lib/rpm`;
+
+  # Drop the end of lines
+  foreach $therpm (@tmprpmlist) {
+    chomp($therpm);
+    push @rpmlist, $therpm;
+  } 
+  $numrpms = $#rpmlist + 1;
+  print "  --> Found $numrpms installed rpms\n";
+
+  # Determine the apt name for each rpm name. One package with a
+  # standard name (system-base-import-1.0) should be dropped by this, 
+  # too, but nobody will want to remove that.
+  %apt2rpm = ();
+  %rpm2apt = ();
+  foreach $therpm (@rpmlist) {
+    if ($therpm =~ /(\w+)\+(.*)\+(.*)-(\d+)-(.*)/) {
+      $aptname = "$1+$2+$3";
+      push @aptlist, $aptname;
+      $apt2rpm{$aptname} = $therpm; 
+      $rpm2apt{$therpm} = $aptname; 
+    } else {
+      #print "    Could not find apt name for $therpm\n";
+    }
+  }
+
+  print "=== Loading dependency cache file if it exists ===\n";
+  load_depcache_file(@rpmlist); 
+
+
+# Cache direct dependencies for all rpms. Some of these may already
+# be in the depcache if the depcache file was available, but this
+# insures they are all there. At the same time rewrite the depcache
+# file. 
+# After this, everything should be in memory and all should go faster!
+  print "=== Determining dependencies (may take a while) ===\n";
+  if ($progressbar) {
+    print "    0% |----------------------------------------| 100%\n";
+    print "       |";
+  } 
+  open(TMPCACHE, ">$DEPCACHE");
+  $apttotal = $#aptlist + 1;
+  $aptcount = 0;
+  $pbshown = 0;  # progress bar dots shown (up to 40)
+  foreach $ccc (@aptlist) {
+    $aptcount++;
+    @drpms = dependent_rpms($ccc); # This just loads it in the cache
+    print TMPCACHE "$apt2rpm{$ccc}|$ccc|$depcache{$ccc}\n";
+    if ($progressbar) {
+      $pbtoshow = int(($aptcount/$apttotal) * 40.0);
+      while ($pbshown < $pbtoshow) {
+        $old_handle = select (STDOUT);
+        $| = 1;
+        print "*";
+        select ($old_handle);
+        $pbshown++;
+      }
+    }
+  }
+  if ($progressbar) {print "|\n";}
+  close TMPCACHE;
+
+
+# Do the (topological) sort of this list such that we can later remove rpms
+# one-by-one w/o deleting an rpm still required by something which is
+# not going to be deleted. (We could just pass the entire list to rpm and let
+# it sort it out, but having this is clearer should something go wrong.)
+  # First initialize some work/tmp variables
+  foreach $ccc (@aptlist) {
+    $aptchecked{$ccc} = 0;
+  }
+  # Now actually do the sort
+  foreach $ccc (@aptlist) {
+    order_deps($ccc);  # The output is in global var @sortedaptlist
+  }
+
+  #verify_sort();  # for debugging
+
+###########################################################################
+# Query the user as to the releases to delete or look for orphans, depending
+# on the command line options
+#
+
+# Extract the top-level rpms that a user would typically want to delete
+# For now this is just CMSSW, but in principle should include also
+# PHEDEX, CRAB, PRODAGENT, etc. In addition there may be a few stray
+# system things that should be included here.
+  foreach $ccc (@aptlist) {
+    if ($ccc =~ /^cms\+cmssw(?:-patch)?\+CMSSW/) {
+      push @cmsswtmp, $ccc;
+      $keepcmssw{$ccc} = 1;
+    } 
+  }
+  @cmsswaptlist = sort @cmsswtmp; # sort them to make the interactive case
+                                  # printout clearer for the user 
+
+#
+# Now deal with the three options (look for orphans, interactively choose
+# top level things to delete, take top level things to delete from command
+# line)
+#
+
+  if ($orphansearch) {
+    print "=== Looking for orphaned rpms ===\n";
+    foreach $ccc (@aptlist) {
+      $todelete{$ccc} = 1;     # Start with everything marked to delete
+      $aptchecked{$ccc} = 0;   # Reset sort/dep tracking
+    }
+    foreach $ddd (@cmsswaptlist) {    # Mark all dependencies of top level
+      mark_to_keep_or_delete($ddd,0); # things as "to keep". Anything left
+    }                                 # still marked "to delete" is an orphan.
+
+  } elsif ($interactive) {
+    print "=== Interactive selection of top-level rpms to delete ===\n";
+    # Present the user with the list of top-level rpms (e.g. CMSSW
+    # releases) and let them choose which ones they want to delete. 
+    
+      $choosing = 1;
+      while ($choosing) {
+        print "\n";
+        print "==============================================================\n";
+        print " CMSSW releases and requested actions:\n";
+        print "\n";
+        # print current status of selections for each release
+        for ($i=0; $i<=$#cmsswaptlist; $i++) {
+          $line = sprintf('%4s',$i);
+          $line .= " - ";
+          if ($cmsswaptlist[$i] =~ /cms\+cmssw(?:-patch)?\+(.*)/) {
+            $cmsswtag = $1;
+          } 
+          #$line .= sprintf('%-40s',$cmsswaptlist[$i]);
+          $line .= sprintf('%-40s',$cmsswtag);
+          if ($keepcmssw{$cmsswaptlist[$i]}) {
+            $line .= "(keep)\n";
+          } else {
+            $line .= "(delete)\n";
+          }
+          print $line;
+        }
+        print "\n";
+        print "Enter:\n";
+        print "   # - to toggle {keep/delete}\n";
+        print "   p - to proceed with deletion of releases marked as \"delete\"\n";
+        print "   q - to exit script without doing anything\n";
+        print "\n";
+        print "Request: ";
+        chomp($ans = <STDIN>);
+        if ($ans eq "q") {
+          print "Exiting - no deletions done\n";
+          exit;
+        } elsif ($ans eq "p") {
+          $choosing = 0;
+          print "Proceeding with rpm removal\n";
+        } elsif ($ans =~ /^\d+$/) {
+          if ($ans >=0 && $ans <=$#cmsswaptlist) {
+            if ($keepcmssw{$cmsswaptlist[$ans]} == 0) {
+              $keepcmssw{$cmsswaptlist[$ans]} = 1;
+              print "Release #$ans switched to \"keep\"\n";
+            } else {
+              $keepcmssw{$cmsswaptlist[$ans]} = 0;
+              print "Release #$ans switched to \"delete\"\n";
+            }
+          } else {
+            print "Invalid choice\n";
+          }
+          print "Found numeric answer\n";
+        } else {
+          print "Unknown request\n";
+        }
+      }
+
+    } else { # option "command line list of top level things to delete"
+      # Each of the command line arguments should correspond to a top
+      # level rpm
+      print "=== List of top level packages to delete from command line ===\n";
+      foreach $argnum (0 .. $#ARGV) {
+        $ccc = $ARGV[$argnum];
+        $found = 0;
+        for $ddd (@cmsswaptlist) { # See if it is in the top-level list
+          if ($ccc eq $ddd) {
+            $found = 1;
+            print "  $ccc and dependencies will be removed.\n";
+            $keepcmssw{$ccc} = 0;
+          }
+        }
+        if (!$found) {
+          print "  $ccc is not a known apt name or is not installed - skipped.\n";
+        }
+      }
+    }
+
+#
+# For the interactive and command line cases I still need to determine
+# which rpms to delete based on the %keepcmssw hash
+#
+
+  if ($interactive || $commandline) {
+    # Reset various work variables
+      foreach $ccc (@aptlist) {
+       $todelete{$ccc} = 0;     # Start with everything marked to keep
+       $aptchecked{$ccc} = 0;   # Reset sort/dep tracking
+      }
+
+    # First mark all dependencies of the top things to delete as "to 
+    # delete", too
+      foreach $ccc (@cmsswaptlist) {
+        if (!$keepcmssw{$ccc}) {
+          mark_to_keep_or_delete($ccc,1);
+        }
+      }
+      
+    # mark all top level releases as "to keep" unless they are to delete
+    # this allows removal of patch releases which would otherwise also remove their 
+    # respective mother release
+      @todelete{grep $keepcmssw{$_}, @cmsswaptlist} = ();
+
+    # Now go through everything else being kept and unmark anything which 
+    # is a dependency of something which is to be kept
+      foreach $ccc (@aptlist) {
+        $aptchecked{$ccc} = 0;   # Reset sort/dep tracking
+      }
+      foreach $ccc (@sortedaptlist) {
+        if (!$todelete{$ccc}) {
+          mark_to_keep_or_delete($ccc,0);
+        }
+      } 
+  }
+
+
+# Now print out the rpms to delete (from highest dep to lowest) and (if
+# requested) actually delete those rpms
+#
+ 
+    print "=== Summary of rpms to be deleted ===\n";
+    my @delcommands = ();
+    $delcount = 0;
+    foreach $ccc (reverse @sortedaptlist) {
+      if ($todelete{$ccc}) {
+        $delcount++;
+        $ddd = $apt2rpm{$ccc};
+        $delcmd = "rpm -e --dbpath $CMSPATH/$CMSARCH/var/lib/rpm $ddd";
+        print "   ".$delcmd."\n";
+        push @delcommands, $delcmd;
+      }
+    }
+    if ($delcount == 0) {
+      print "  None\n";
+    }
+
+   # Proceed with the deletions if requested
+   if ($opt_e) {
+     print "=== rpm deletion ===\n";
+     foreach $ccccmd (@delcommands) {
+       print "===> Executing $ccccmd\n";
+       system("$ccccmd");
+     }
+   }     
+
+
+#############################################################################
+#############################################################################
+#
+# Subroutines from this point on
+
+# Determine the set of rpms on which another rpm depends (here the apt name
+# is used, without the revision, rather than the full rpm name with the
+# revision, etc.)
+sub dependent_rpms {
+  my ($topapt) = @_;
+  if ($depcachefound{$topapt}) {
+    return split(" ", $depcache{$topapt});
+  }
+
+  my @tmpresults = `$APTCACHE depends $topapt | $GREP "Depends" `;
+
+  my @results = ();
+  foreach $tmpvar (@tmpresults) {
+    if ($tmpvar !~ /<.*>/) {
+      chomp($tmpvar);
+      ($depends, $tmpvar2) = split(" ", $tmpvar);
+      push @results, $tmpvar2;
+    }
+  }
+  # cache the result
+  $depcache{$topapt} = join(' ',@results);
+  $depcachefound{$topapt} = 1;
+
+  return @results;
+}
+
+# Load the $CMS_PATH/cmsCleanSWArea_depcache.txt file if it exists. Load 
+# into the in memory cache any entries in it which are also in the 
+# currently installed rpm list 
+sub load_depcache_file {
+  my (@inrpmlist) = @_;
+
+  # Create the cache/log directory if it doesn't exist
+  if (!-d "$CMSPATH/$CMSARCH/logs") {
+    mkdir "$CMSPATH/$CMSARCH/logs";
+  }
+
+  if (-e "$DEPCACHE") {
+    print "A dependency cache file was found. It will be used to speed things up\n";
+    my %indepcache = ();
+    my %inrpm2apt = ();
+    my %inapt2rpm = ();
+    # load it
+    open(INDEPCACHE, "<$DEPCACHE");
+    while ($line = <INDEPCACHE>) {
+      chomp($line);
+      # (Kludgey) format is:
+      # rpmname|aptname|deps
+      # The "deps" itself is actually a space separated list
+      my ($aaa, $bbb, $ccc) = split(/\|/, $line);
+      $inapt2rpm{$bbb} = $aaa; 
+      $inrpm2apt{$aaa} = $bbb; 
+      $indepcache{$bbb} = $ccc; 
+    }
+    close INDEPCACHE; 
+    # select out only those corresponding to rpms currently installed 
+    foreach $therpm (@inrpmlist) { 
+      if ($inrpm2apt{$therpm}) {
+        $theapt = $inrpm2apt{$therpm};
+        $depcache{$theapt}=$indepcache{$theapt};
+        $depcachefound{$theapt} = 1;
+      }
+    }
+  } else {
+    print "No dependency cache file found, the information will obtained\n";
+    print "from the rpm DB. This will be slower, but will work.\n";
+    return;
+  }
+}
+
+# Start from some aptname and calculate all of the aptnames for its
+# dependencies, including transitive ones. ('apt-cache depends XXX' only
+# gives the direct dependencies for XXX.)
+sub get_transitive_dependencies {
+  my ($topaptname) = @_;
+  my @deps = dependent_rpms($topaptname);
+  my @alldeps = ();
+  push @alldeps, $topaptname;
+  push @alldeps, @deps;
+  my $adep;
+  foreach $adep (@deps) {
+    push @alldeps, get_transitive_dependencies($adep);
+  }  
+  # Remove duplicates from the list 
+  my %hashcount = ();
+  $hashcount{$_}++ for @alldeps;
+  my @uniqdeps = keys %hashcount;
+  return @uniqdeps;
+}
+
+# Sort a list of aptnames so that they are in dependency order, with 
+# the higher dependencies first
+sub order_deps {
+  my ($aptname) = @_;
+
+  # Exit if we've already considered this one
+  if ($aptchecked{$aptname}) {return;}
+
+  # Deal with this one, recursively, through its direct dependencies
+  $aptchecked{$aptname} = 1;
+  my $next;
+  my @directdeps = dependent_rpms($aptname);
+  foreach $next (@directdeps) {
+    order_deps($next);
+  }
+  push @sortedaptlist, $aptname;
+}
+
+
+# Function for testing/debugging of the topological sort
+sub verify_sort {
+  print "=== The ordered list ===\n";
+  for ($iapt=0; $iapt<=$#sortedaptlist; $iapt++) {
+    print $sortedaptlist[$iapt]."\n";
+    my @deps = dependent_rpms($sortedaptlist[$iapt]);
+    foreach $aaa (@deps) {
+      # loop to make sure that this appears earlier in the list
+      $ok=1;
+      for ($japt=$iapt+1; $japt<=$#sortedaptlist; $japt++) {
+        if ($aaa eq $sortedaptlist[$japt]) {$ok=0};
+      }
+      print "   ($ok) --> ".$aaa."\n";
+    }
+  }
+}
+
+sub mark_to_keep_or_delete {
+  my ($aptname, $keepordelete) = @_;
+  # $keepordelete can be 1 or 0, depending on what we are trying to do,
+  # i.e. mark things to be deleted or unmark things that shouldn't be
+  # deleted. Recursively deals with dependencies, too.
+
+  # Exit if we've already considered this one
+  if ($aptchecked{$aptname}) {return;}
+
+  # Deal with this one, recursively, through its direct dependencies
+  $aptchecked{$aptname} = 1;
+  my $next;
+  my @directdeps = dependent_rpms($aptname);
+  foreach $next (@directdeps) {
+    mark_to_keep_or_delete($next,$keepordelete);
+  }
+  $todelete{$aptname} = $keepordelete;
+}
+
+
+sub usage {
+  print qq{
+    This script manages software release deletions, including the underlying
+    dependencies. There are three modes in which the script can be used:
+
+      1 - The (apt) names of the CMSSW releases to remove can be specified
+          on the command line.
+      2 - The releases to delete can be chosen interactively
+      3 - A search can be done for orphaned rpms (those which are not 
+          direct dependencies of installed CMSSW releases)
+
+    By default the script just prints the removal commands that would be
+    executed. To actually execute those commands the -e option must be
+    specified.
+
+    Specifying the architecture (e.g. slc3_ia32_slc4) is required for all
+    modes.
+
+    Syntax:
+
+      cmsCleanSWArea [-h] [-e] -a <arch> [<cmsswrel1>] [<cmsswrel2>] [...]
+      cmsCleanSWArea [-h] [-e] -a <arch> -i
+      cmsCleanSWArea [-h] [-e] -a <arch> -o
+
+    where <cmsswrel> is the apt name for a CMSSW release (e.g.
+    cms+cmssw+CMSSW_1_2_3, cms+cmssw+CMSSW_1_3_0_pre5, etc.) and <arch>
+    is the architecture name (e.g. slc3_ia32_gcc323, slc4_ia32_gcc345, 
+    etc.)
+
+    Options:
+      -h   - print this help
+      -a   - architecture (e.g. slc4_ia32_gcc345) [Required option]
+      -o   - look for "orphaned" rpms (i.e. rpms that are not required
+             for one of the main packages (CMSSW, CRAB, PHEDEX, etc.) or
+             one of the standard system rpms
+      -i   - interactively provide a list of the main packages (CMSSW, CRAB,
+             PHEDEX, etc.) and ask the user which ones should be deleted,
+             along any of their dependencies not needed for packages not
+             being deleted (currently this is the default if -o is not
+             specified)
+      -e   - execute the rpm deletion commands, the default is only to
+             print them
+      -p   - Show a progress bar when calculating the dependencies (should
+             only be used interactively, not in batch)
+};
+  exit;
+}
+
+
