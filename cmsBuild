@@ -1432,7 +1432,10 @@ class InstallFromServer (BuilderAction):
         pkgNameApt = self.pkg.pkgName ().replace ("+", "\\+")         
         aptCommand = """apt-cache showpkg %(pkgNameApt)s""" % locals ()
         error, output = getstatusoutput (aptCommand)
-        self.output = output.split("Versions:",1)[1].split('Reverse Depends:')[0]
+        try:
+          self.output = output.split("Versions:",1)[1].split('Reverse Depends:')[0]
+        except:
+          die("Error while parsing %s" % output)
         def evalExistsOnServer ():
             for line in self.output.split ("\n"): 
                 if not line.startswith("1-%s." % self.pkg.pkgRevision):
