@@ -3591,7 +3591,7 @@ def upload(opts, args, factory):
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
               "uploadTmpRepository": opts.uploadTmpRepository,
-              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
+              "rsync": format("rsync -e 'ssh -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
               "user": opts.uploadUser}
 
