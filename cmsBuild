@@ -3640,6 +3640,7 @@ def upload(opts, args, factory):
     '# Check if there are already more than 4 rsync running, \n'
     '# and try again in such a case.\n'
     'if [ `pgrep -l rsync | wc -l` -gt 4 ]; then\n'
+    '  echo "rsync already running. Avoid congestion by sleeping 1 minute and trying again."\n'
     '  sleep 60\n'
     '  exit 1\n'
     'fi\n'
