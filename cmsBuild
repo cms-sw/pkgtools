@@ -4012,7 +4012,7 @@ def upload(opts, args, factory):
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
               "uploadTmpRepository": opts.uploadTmpRepository,
-              "rsync": format("rsync -e 'ssh -p %(port)s' --progress --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
+              "rsync": format("rsync -e 'ssh -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
               "user": opts.uploadUser}
 
@@ -4240,7 +4240,7 @@ def uploadOLD (opts, args, factory):
     subsystemsString = " ".join (subsystems)
 
     # FIXME: pick up from commandline
-    rsync="rsync -e ssh --progress --rsync-path=/usr/bin/rsync"
+    rsync="rsync -e ssh --rsync-path=/usr/bin/rsync"
     uploadUser=opts.uploadUser
     uploadServer=opts.uploadServer
     
