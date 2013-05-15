@@ -3139,7 +3139,11 @@ def checkPackageInCache(pkg, scheduler):
     scheduler.reschedule()
     return
   scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
-  scheduler.parallel("fetch-%s" % pkgName, [], fetchSourcesNew, pkg, scheduler)
+  fetchDependencies = []
+  if pkg.name == "cmssw-patch":
+    cmsswVersion = [d.version for d in pkg.fullDependencies if d.name == "cmssw"][0]
+    fetchDependencies = ["install-cms+cmssw+%s" % cmsswVersion]
+  scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
   installActionDependencies = ["build-%s" % pkgName]
   buildActionDependencies = ["install-%s" % d.pkgName() for d in pkg.fullDependencies if not isPackageInstalled(d)] + ["fetch-%s" % pkgName]
   scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
