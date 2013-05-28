@@ -3865,7 +3865,7 @@ def rpmCacheUpdate(opts):
 def setupAptEnvironment(environmentInitSh):  
   if not exists(environmentInitSh):
     fatal("Error while bootstrapping. File not found %s." % environmentInitSh)
-  lines = popen(". %s; env" % environmentInitSh).read()
+  lines = popen(". %s; unset module; env" % environmentInitSh).read()
   if not lines:
     fatal("Unable to source environment in %s" % environmentInitSh)
   lines = re.sub("\\\n".encode('string-escape'), '', lines)
