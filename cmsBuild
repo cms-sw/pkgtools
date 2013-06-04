@@ -4,7 +4,7 @@
 #
 
 from os.path import abspath, join, exists, isdir, basename, dirname
-from os import popen, makedirs, getenv, symlink, listdir, readlink, unlink, getpid
+from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
 from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
@@ -70,6 +70,13 @@ def isOnline(arch):
 def isDefaultRevision(rev):
     if rev == '1' or rev.startswith('1.'): return True
     return False
+
+# We have our own version rather than using the one from os
+# because the latter does not work seem to be thread safe.
+def makedirs(path):
+  returncode, out = getstatusoutput("mkdir -p %s" % (path,))
+  if returncode != 0:
+    raise OSError("makedirs() failed (return: %s):\n%s" % (returncode, out)) 
 
 # A recursive globbing helper.
 def recursive_glob(treeroot, pattern):
