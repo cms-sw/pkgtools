@@ -1,0 +1,15 @@
+The subcommand `cmsBuild build` can be used to build packages.
+
+## SYNOPSIS
+
+    cmsBuild [<additional options>] [-c <cmsdist-location>] -a <architecture> \
+             build <package> [<package2> .. <packageN>]
+
+## OPTIONS
+
+The main options which can be specified are:
+
+* `-c`: the location of the directory containing the spec files to be built.
+* `–a`: the architecture for which we are doing the build.
+
+Documentation about the `<additional options>` which can be specified can be obtained by passing `--help` on the command line.

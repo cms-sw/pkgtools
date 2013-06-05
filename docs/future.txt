@@ -2,18 +2,17 @@ Things which definitely need to be done.
 ----------------------------------------
 
 * Check support for BuildRequires.
-* Check support for split packages.
+* Check support for SubPackages.
 * Move cmsBuild to use parser.error in the case of wrong options / options
   combination.
 * Integrate the PackageManagement.pl script into cmsBuild.
-* Add support for online distributions. 
+* Rewrite the upload workflow to be failure safe.
 
 Possible features
 -----------------
-* llvm support.
+* Better support for non gcc compilers.
 * [distcc][] support.
-* [growl][] notifications support.
-* support for building LFS distribution.
+* [growl][] notifications support on Mac.
 
 [distcc]: http://distcc.samba.org
 [growl]: http://growl.info
