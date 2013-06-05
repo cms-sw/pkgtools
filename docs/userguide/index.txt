@@ -1,0 +1,35 @@
+Scope of this document:
+=======================
+
+This document is meant to be a walk-through guide for people who want to build 
+rpm packages from a pre-tagged `CMSDIST` area using `cmsBuild`.
+
+Before you start:
+-----------------
+
+Make sure you have a working building environment, which includes things like 
+make, perl, autoconf, X11 and their development packages. Notably you'll also 
+need the 32 bit compatibility environment if you plan to build 32bit over 64bit
+OS.
+
+Building packages using cmsBuild
+================================
+
+`cmsBuild` can be used with a workflow very similar to the one of the old 
+`install.sh`:
+
+* Setup some frequently used variables.
+* Bootstrap an area.
+* _source_ the environment (`init.sh`) for apt.
+* checkout PKGTOOLS
+* checkout CMSDIST
+* Invoke cmsBuild via 
+    
+        PKGTOOLS/cmsBuild
+
+
+See also:
+=========
+
+* [Reference Guide](../refguide/index.html)
+* [Developer Guide](../devguide/index.html)

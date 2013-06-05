@@ -1,0 +1,17 @@
+From: Giulio Eulisse
+Content-Type: text/x-markdown
+
+cmsBuild
+========
+
+deprecate-local
+---------------
+
+* Add an option to deprecate-local to remove the actual sources in `SOURCES/cache`
+  not only the %pkgrel link. This is rather useful when a tag was moved.
+
+Misc
+----
+
+* Implement deprecate-server
+

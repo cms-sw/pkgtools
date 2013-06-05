@@ -1,0 +1,39 @@
+cmsBuild is a build script for [CMS](http://cern.ch/cms) offline software, which works on Linux and Macosx.
+
+For more information on how to use within CMS please have a look at [here][aptinstaller].
+
+It builds software based on a set recipe find in a given directory, and can package the various products in binary packages ([RPMs][rpm]) so that they can be deployed (without need for root access) on multiple machine using apt-get (which is internally supported) or similar technologies.
+
+It supports having different version of the same package in parallel.
+
+After modifying one build recipe, cmsBuild is smart enough to (re)-build only the minimal set of packages that depends on such a change.
+
+cmsBuild is able to take advantage of powerful build machines by building non related packages in parallel.
+
+Getting the code
+================
+
+The latests version of PKGTOOLS can be obtained from the CMS CVS repository by doing:
+
+    cvs -d :pserver:anonymous@cmssw.cvs.cern.ch:/cvs/CMSSW login
+    cvs -d :pserver:anonymous@cmssw.cvs.cern.ch:/cvs/CMSSW co PKGTOOLS
+
+The repository can also be browsed via its [CVSweb interface](http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/PKGTOOLS/).
+
+Quick Start
+===========
+
+To build a given package, bootstrapping the area from the default CMS distribution:
+
+    cvs co -r <sometag> CMSDIST 
+    PKGTOOLS/cmsBuild -c CMSDIST -a <architecture> build <package>
+
+To build a package and upload it to the cms repository:
+
+    cvs co -r <sometag> CMSDIST
+    PKGTOOLS/cmsBuild -c CMSDIST -a <architecture> upload <package>
+
+[aptinstaller]: https://twiki.cern.ch/twiki/bin/view/CMSPublic/SDTCMSSW_aptinstaller
+[compatibility]: compatibility.html
+[apt-rpm]: http://www.apt-rpm.org
+[rpm]: http://www.rpm.org

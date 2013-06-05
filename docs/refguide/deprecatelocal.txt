@@ -1,0 +1,35 @@
+SYNOPSIS
+========
+
+    cmsBuild [options] deprecate-local <full-package-name>
+
+Where `<full-package-name>` is the name of the package including its group, 
+its version and it's label, e.g.:
+
+    cms+cmssw+CMSSW_1_2_3-CMS3
+
+DESCRIPTION
+===========
+
+The `deprecate-local` command removes any reference about a given package and 
+its dependencies from the local build area. This includes:
+
+* Any rpm packages in `RPMS` and `RPMS/cache`.
+* Any installed packages in the local rpm db.
+  
+The `deprecate-local` command is expected to be used in two occasions:
+
+* when a mistake is done and a new build of the same version of a given 
+  package has to be done using a slightly different spec/cmsBuild. This 
+  will usually trigger a new label because a package with a similar label 
+  but a different checksum is found. If the original package is not uploaded 
+  to the server, yet, using `deprecate-local` one can remove any reference 
+  to it hence the new package is allowed to reused the now unused label.
+
+* if two persons are working on different aspects of the same package and 
+  one of the uploads his package to the original server this will cause a 
+  conflict with the area of the other person which has already a packages 
+  named that way. The conflict can be resolved by deprecating the local 
+  package via `deprecate-local` and rebuilding: cmsBuild will now notice that 
+  the given label was already assigned to some package in the repository and
+  will use a new one.

@@ -1,0 +1,36 @@
+Reference Guide
+===============
+
+SYNOPSYS:
+---------
+
+    cmsBuild [general-options] <command> [command-options] [packages]
+
+Where `<command>` can be any of the following:
+
+* [build][]
+* [check][]
+* [deprecate-local][]
+* [upload][]
+* [bootstrap][]
+* [fetch][]
+
+Notice that `cmsBuild` can also be driven from configuration file by doing:
+
+    cmsBuild [general-options] --cfg <configuration-file> [optional-command-with-option] 
+
+### Additional documentation:
+
+* You can have a look [here][config] to see a detailed description on how the
+cfg files work.
+* You can have a look [here][spec-syntax] to get a description of the spec 
+file syntax.
+
+[build]: build.html
+[check]: check.html
+[deprecate-local]: deprecatelocal.html
+[upload]: upload.html
+[bootstrap]: bootstrap.html
+[config]: config.html
+[fetch]: fetch.html
+[spec-syntax]: spec-syntax.html

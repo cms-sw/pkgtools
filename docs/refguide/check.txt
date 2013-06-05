@@ -1,0 +1,15 @@
+SYNOPSIS
+========
+
+    cmsBuild [global-options] check <package-name>
+
+DESCRIPTION
+===========
+
+The check command is used to verify the integrity of the build area when
+considering a given package. It does so by figuring out what should have
+happened and what should have not in the building process (fetching of the
+sources, fetching of a pre build dependency). Notice that _package-name_ has
+to be the name of the package without the group and its version because
+`cmsBuild` will also make sure that the spec file that you have in CMSDIST is
+the same which was used to build the rpm.

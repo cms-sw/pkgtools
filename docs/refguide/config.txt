@@ -1,0 +1,85 @@
+cmsBuild Configuration files
+============================
+
+Configuration files are of the form
+
+    # Comment
+    # Optional section with global options.
+    [globals]
+    # Boolean option
+    globalOption1: True
+    # Numeric option
+    globalOption2: 1
+    # String option
+    globalOption3: Some string
+    [command1]
+    # Option relevant for command1 execution only 
+    option: value
+    [command2]
+    # Option relevant for command2 execution only 
+    option: anotherValue
+
+Notice that options defined in the `[globals]` section apply to all the other
+sections and override command-line ones (i.e. command-line options are for
+_untracked parameters_).
+
+Option specified in any other sections are specific to the section they are in
+and the override both command-line ones and the ones specified in the globals
+section .
+
+By default sections are all at the same level and the order they are specified
+is not necessarily the one in which `cmsBuild` will carry them out. If some
+sections need to be executed before others, you can specify it's priority by
+using the `priority` option. Lower values for priority get executed before any
+higher value one. No higher priority value sections will start before **all**
+the lower value are successfully completed.
+
+
+cmsBuild cfg file options:
+==========================
+
+Configuration file specific:
+----------------------------
+
+* **priority**: priority for a given section in a cfg file. Lower values get
+executed earlier.
+
+Build process specific
+----------------------
+
+* **compilingProcesses**: same as `--compiling-processes`, see [build documentation][build].
+* **workersPoolSize**: same as `--workers-pool-size`, see [build documentation][build].
+* **testTag**: same as `--test-tag`, see [build documentation][build].
+* **tag**: same as `--tag`, see [build documentation][build].
+* **systemCompiler**: same as `--use-system-compiler`, see [build documentation][build].
+* **doNotBuild**
+
+Upload specific:
+----------------
+* **uploadPort**: same as `--upload-port`, see [upload documentation][upload]
+* **syncBack**: same as --sync-back, see [upload documentation][upload].
+
+
+Bootstrap specific:
+-------------------
+
+* **onlyOnce**: execute the bootstrap only if not already done.
+
+Generic options:
+----------------
+
+* **pretend**: same as `--pretend`. Do not actually execute but just 
+* **assumeYes**: same as  ``--assume-yes`, `cmsBuild` does not prompt the 
+    user for choice and always assumes that the answer to all its question will 
+    be will be yes.
+* **debug**: same as `--debug`.
+* **trace**: same as `--trace`.
+* **doNotBootstrap**: do not execute the bootstrap.
+* **use32BitOn64**: same as `--use-32-bit-on-64`, prepend all the commands by the 
+    linux32 command.
+
+[build]: build.html
+[check]: check.html
+[deprecate-local]: deprecatelocal.html
+[upload]: upload.html
+[bootstrap]: bootstrap.html

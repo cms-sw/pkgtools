@@ -1,0 +1,81 @@
+Automatic rpm version tagging
+=============================
+
+A little bit of history
+-----------------------
+
+The old version of cmsBuild (AKA cmsBuild.sh, install.sh) while it was 
+able to spot when a given spec file was modified and could rebuild it if 
+explicitly requested, it was unable to notice that indirect dependencies 
+were changed and you could end up with weird behaviours:
+
+1. The installation of a given package could have brought in multiple version 
+  of given tool.
+2. A given tool might have not been rebuilt even if the spec was changed.
+
+To work around this problem we usually did the dependency checking by hand,
+adding a tag (e.g. `-CMSxyz`) whenever a given package needed to be rebuild
+and to all the dependent packages.
+All this was error prone and had to be done by hand. 
+
+Enter the new cmsBuild
+----------------------
+
+The new version of cmsBuild actually solves this problem by calculating a unique 
+hash per package build which takes into account the spec file of the package 
+and those of all its dependencies, including indirect ones, plus the default
+values/preamble for the spec file sections (which are embedded in cmsBuild 
+code itself). This means that when a package is modified, not only its hash is
+different but also the one of all its dependent packages is. Problems 1. and 2.
+are now non-issues. The hash is stored inside the rpm and if no option is specified
+is appended (like the old _tags_) to the version of the package. You could
+end up with packages like
+
+    external+gcc+4.0.0-722763f2066901692b0b4d9148ab06bf
+
+Human readable package names
+----------------------------
+
+While this solves a problem, the package naming it's now obviously non-intuitive.
+To solve this problem the new cmsBuild adds two new options: `--tag` and 
+`--test-tag`.
+The first one allows the package builder to specify a human readable tag (e. g.
+`cms`) which gets mapped to the hash of a given, correctly built, package.
+so if you were to build gcc using:
+
+    cmsBuild <global-options> build --test-tag --tag cms gcc
+    
+The system rather than building:
+
+    external+gcc+4.0.0-722763f2066901692b0b4d9148ab06bf
+
+will build
+    
+    external+gcc+4.0.0-cms
+
+and will keep the association between `722763f2066901692b0b4d9148ab06bf` and 
+`cms` so that, whenever the hash calculated for gcc matches the one above, `cms`
+is used instead. The --test-tag option is used to *always* add the tag, even 
+if it was the first time that a given package version was build (and therefore, 
+in principle, no tag was actually necessary).
+If we now modify and rebuild gcc, using the same command as above, the system 
+will notice that the hash for it is actually different and will automatically 
+call the new package:
+
+    external+gcc+4.0.0-cms2
+
+A few remarks on the tagging implementation
+-------------------------------------------
+
+A given hash to tag relationship is not actually global, but local to the 
+remote repository used and to the local build area. Which means that two persons
+working in two different work are could get the same tag for different hash 
+of the same package. 
+What keeps the system consistent is the upload to the central repository, which 
+is serialized and will therefore spot the fact that someone has already used 
+a given tag when the second comer will try to upload his/her package. 
+In that case, the system will complain and the developer will be asked to use 
+the  `deprecate-local` command in order to remove all the conflicting builds
+from his local area and then `build` again. This time the system will spot 
+upfront the other conflicting package (because it's in the same repository) and 
+provide a non conflicting tag for it.
