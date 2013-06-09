@@ -41,6 +41,10 @@ def fatal(message):
 def die(message):
   fatal(message)
 
+# Minimal string sanitization.
+def sanitize(s):
+  return re.sub("[^a-zA-Z_0-9*./-]", "", s)
+
 def log (message, level=0):
     """ Asynchronous printouts method. Level should be NORMAL when a message 
 is intended to be seen by the user, DEBUG, when it's intended to be seen only 
@@ -194,6 +198,9 @@ def parseGitUrl(url):
   if not "output" in args:
     args["output"] = args["export"] + ".tar.gz"
     args ["gitroot"] = gitroot
+  if not "filter" in args:
+    args["filter"] = "*"
+  args["filter"] = sanitize(args["filter"]);
   return protocol, gitroot, args
 
 def createTempDir (workDir, subDir):
@@ -300,10 +307,10 @@ def downloadTc (source, dest, options):
   ok = executeWithErrorCheck (command, message)
   return ok and packCheckout (args["tempdir"], args["dest"], "src")
 
-# Download a files from a git url.
-# We do not clone the remote reposiotory, but we simply pull the branch we
-# are interested in and then we drop all the git information while creating a tarball.
-# The syntax to define a repository is the following:
+# Download a files from a git url.  We do not clone the remote reposiotory, but
+# we simply pull the branch we are interested in and then we drop all the git
+# information while creating a tarball.  The syntax to define a repository is
+# the following:
 #
 # git:/local/repository?obj=BRANCH/TAG
 # git://remote-repository?obj=BRANCH/TAG
@@ -313,6 +320,11 @@ def downloadTc (source, dest, options):
 # If "obj" is not specified, it will be "master/HEAD" by default.
 # By default export is the <basename of the url without ".git">-TAG unless it is HEAD,
 # in which case it will be  <basename of the url without .git>-BRANCH.
+# One can specify an additional parameter
+#
+#     filter=<some-path>
+#
+# which will be used to pack only a subset of the checkout.
 def downloadGit(source, dest, options):
   protocol, gitroot, args = parseGitUrl(source)
   tempdir = createTempDir(options.workDir, options.tempDirPrefix)
@@ -328,7 +340,12 @@ def downloadGit(source, dest, options):
                "gitroot": gitroot, "dest": dest,
                "exportpath": exportpath})
   makedirs(exportpath)
-  command = """cd %(exportpath)s && git init && git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s && git reset --hard %(tag)s && rm -rf .git .gitattributes .gitignore"""
+  command = format("cd %(exportpath)s &&"
+                   "git init &&"
+                   "git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s &&"
+                   "git reset --hard %(tag)s &&"
+                   "find . ! -path '%(filter)s' -delete &&"
+                   "rm -rf .git .gitattributes .gitignore", **args)
   error, output = getstatusoutput(command % args)
   if error:
     log("Error while downloading sources from %s using git.\n\n"
