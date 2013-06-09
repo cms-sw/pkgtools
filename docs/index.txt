@@ -1,71 +1,39 @@
-Introduction:
-=============
+cmsBuild is a build script for [CMS](http://cern.ch/cms) offline software, which works on Linux and Macosx.
 
-cmsBuild is a python rewrite of the old [install.sh][installsh] script. It retains 
-almost [100% compatibility][compatibility] with the old script and 
-fixes all the design bugs of the old version.
+For more information on how to use within CMS please have a look at [here][aptinstaller].
 
-Nomenclature:
--------------
+It builds software based on a set recipe find in a given directory, and can package the various products in binary packages ([RPMs][rpm]) so that they can be deployed (without need for root access) on multiple machine using apt-get (which is internally supported) or similar technologies.
 
-Before you read, a little bit of nomenclature:
+It supports having different version of the same package in parallel.
 
-  * _package group_ refers to the first item in the `### RPM` header of the spec file
-  * _package name_ refers to the second item in the `### RPM` and it's usually the
-                   name of the software being packaged (e.g. gcc, python, root) 
-  * _package version_ refers to the third item in the `### RPM` header and it's
-                   the version of the software as provided by the original author,
-                   *without* any cms appended label.
-  * _package label_ is an additional label appended to the package version, which
-                   identifies different builds of the same version of the software
-                   (e.g. -CMS2, -CMS3, -XXX, -wt).
-                   While in the past it was user decided, now the system is able
-                   to automatically determine which is the best label to use.
+After modifying one build recipe, cmsBuild is smart enough to (re)-build only the minimal set of packages that depends on such a change.
 
-New Features:
--------------
+cmsBuild is able to take advantage of powerful build machines by building non related packages in parallel.
 
-  * Correct detection of which packages have to be rebuild and which not after
-    a given spec is modified.
-  * Configuration management.
-  * Automatic labels for packages with same version but different spec. 
-  * Consistency checks for the build area.
-  * Integrated upload command.
-  * Parallel build of externals.
-  * Build can be driven from configuration files.
-  
-Solved issues:
---------------
+Getting the code
+================
 
-  * Now sources can be shared among different packages with same version but 
-    different labels  
+The latests version of PKGTOOLS can be obtained from the CMS CVS repository by doing:
 
-Documentation:
-==============
+    cvs -d :pserver:anonymous@cmssw.cvs.cern.ch:/cvs/CMSSW login
+    cvs -d :pserver:anonymous@cmssw.cvs.cern.ch:/cvs/CMSSW co PKGTOOLS
 
-[The cmsBuild userguide][userguide] addresses how you use cmsBuild with a pre-tagged CMSDIST
-area. 
-If you are interested in developing new specs you probably want to look 
-at the [cmsBuild Developer Guide][devguide]
-There is also a [cmsBuild Reference Guide][refguide] which contains a summary 
-of all the cmsBuild commands and a description of all the options that can be 
-specified in a configuration file. 
+The repository can also be browsed via its [CVSweb interface](http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/PKGTOOLS/).
 
-Extra information:
-==================
+Quick Start
+===========
 
-* [To-do list][todo]
-* [Future plans][future]
+To build a given package, bootstrapping the area from the default CMS distribution:
 
-[installsh]: https://twiki.cern.ch/twiki/bin/view/CMS/CMSSW_installsh
+    cvs co -r <sometag> CMSDIST 
+    PKGTOOLS/cmsBuild -c CMSDIST -a <architecture> build <package>
+
+To build a package and upload it to the cms repository:
+
+    cvs co -r <sometag> CMSDIST
+    PKGTOOLS/cmsBuild -c CMSDIST -a <architecture> upload <package>
+
+[aptinstaller]: https://twiki.cern.ch/twiki/bin/view/CMSPublic/SDTCMSSW_aptinstaller
 [compatibility]: compatibility.html
-[devguide]: devguide/index.html
-[userguide]: userguide/index.html
-[refbootstrap]: refguide/bootstrap.html
-[refguide]: refguide/index.html
-[refbuild]: refguide/build.html
-[refcheck]: refguide/check.html
-[refupload]: refguide/upload.html
-[refdeprecatelocal]: refguide/deprecatelocal.html
-[todo]: todo.html
-[future]: future.html
+[apt-rpm]: http://www.apt-rpm.org
+[rpm]: http://www.rpm.org

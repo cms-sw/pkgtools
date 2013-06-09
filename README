@@ -1,5 +1,3 @@
-$Id: README,v 1.6 2012/02/16 21:11:32 eulisse Exp $
-
 The PKGTOOLS package contains the scripts needed for handling the 
 packaging of software packages built and distributed as part of the cms 
 software/computing. The spec files describing how to build any given
@@ -16,3 +14,17 @@ build an initial rpm to build a bootstrap kit. This can be done by using the
 `build_rpm.sh` script, e.g.:
 
   PKGTOOLS/build_rpm.sh --prefix /usr/local
+
+DOCUMENTATION
+=============
+
+Documentation is found in the docs directory, in the form of a bunch of 
+markdown formatted text files. For an HTML version, simply open the 
+`PKGTOOLS/docs/index.html` file. Deployment of web pages on the server can be 
+done by simply copying the docs directory in some web area.
+
+LICENSE
+=======
+
+This software is provided under FERMILAB variation of the BSD license. For the
+full disclaimer see docs/license.txt
