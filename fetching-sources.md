@@ -53,7 +53,7 @@ The full syntax is:
 
 You can checkout from git by using one of the following syntax:
 
-    Source<X>: git<transfer-protocol>://<server>/<path-to-repository>?obj=<branch>/<sha1>&
+    Source<X>: git<transfer-protocol>://<server>/<path-to-repository>?obj=<branch>/<sha1>[&<other-options>]
 
 Where 
 
@@ -64,3 +64,9 @@ Where
 * `<server>` is the git server which hosts the repository.
 * `<branch>` is the branch from which to checkout.
 * `<sha1>` is the unique id of the commit object to checkout.
+
+Other options can be one of the followings:
+
+* `filter=<some-filter>`: only the files matching the filter will be kept. E.g:
+
+      filter=./DQM/DQMGui*
