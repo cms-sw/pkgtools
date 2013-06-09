@@ -1,0 +1,155 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <title>cmsBuild</title>
+  <style>
+  a {color: blue;}
+  body,
+  html {
+    font-family: sans-serif;
+    margin:0;
+    padding:0;
+    color:#000;
+    background:#ffffff;
+  }
+  #wrap {
+    width:950px;
+    margin:0 auto;
+    background:#ffffff;
+  }
+  #header {
+    text-align: center;
+    padding:5px 10px;
+    background:#ffffff;
+  }
+  h1 {
+      margin:0;
+    }
+  #nav {
+    text-align: center;
+    padding:5px 10px;
+    background:#ffffff;
+  }
+  #nav ul {
+    margin:0;
+    padding:0;
+    list-style:none;
+  }
+  #nav li {
+    display:inline;
+    margin:0;
+    padding:0 2px;
+  }
+  #main {
+    float:left;
+    width:680px;
+    padding:10px;
+    background:#ffffff;
+  }
+  h2 {
+    margin:0 0 0.2em;
+  }
+  #sidebar {
+    float:right;
+    width:230px;
+    padding:10px;
+    background:#ffffff;
+  }
+  #footer {
+    clear:both;
+    padding:5px 10px;
+    background:#ffffff;
+    font-size: 50%;
+    text-align: center;
+  }
+  #footer p {
+    margin:0;
+    }
+  * html #footer {
+    height:1px;
+  }
+  .selected {
+    color: red;
+  }
+  </style>
+  <script type="text/javascript" src="jquery-1.5.1.min.js"></script>
+  <script type="text/javascript" src="jquery.ba-hashchange.min.js"></script>
+  <script type="text/javascript" src="showdown.js"></script>
+  <script type="text/javascript">
+
+var converter = new Showdown.converter();
+
+function createUpdater(request)
+{
+  return function (d)
+    {
+      $(".selected").removeClass("selected");
+      $("#"+request).addClass("selected");
+      $("#main").html(converter.makeHtml(d));
+    }
+}
+
+function hashChangedHandler()
+{
+  var state = window.location.hash.substring(1);
+  
+//  console.log(!state);
+  
+  if (! state)
+  {
+    window.location.hash = "#index";
+    return;
+  }
+  // Sanitize hash
+  var request = state.replace(/^#/, '').replace("[^a-zA-Z-]", "-");
+  $.ajax({url: request + ".txt", success: createUpdater(request) });
+}
+
+$(document).ready(function() {
+  $(window).hashchange(function() {
+    // Alerts every time the hash changes!
+    hashChangedHandler();
+  });
+  hashChangedHandler();
+  }
+);
+  </script>
+</head>
+<body>
+  <div id="wrap">
+  <div id="header"><h1>cmsBuild</h1></div>
+  <div id="nav">
+  <ul>
+  <li><a id="index" href="#index">Top</a></li>
+  <li><a href="http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/PKGTOOLS/">Source</a></li>
+  <li><a href="https://savannah.cern.ch/projects/cmspackaging/">Bugs</a></li>
+  <li><a id="contributors" href="#contributors">Contributors</a></li>
+  <li><a id="license" href="#license">License</a></li>
+  </ul>
+  </div>
+  <div id="main">
+  </div>
+  <div id="sidebar">
+  <h3>User guide</h3>
+  <ul>
+    <li><a id="index" href="#index">Introduction</a></li>
+    <li><a id="build" href="#build">Building packages</a></li>
+    <li><a id="upload" href="#upload">Uploading packages</a></li>
+  </ul>
+  <h3>Developer Guide</h3>
+  <ul>
+    <li><a id="spec-syntax" href="#spec-syntax">Spec file syntax</a></li>
+    <li><a id="future" href="#future">Future</a></li>
+  </ul>
+  <h3>Internals</h3>
+  <ul>
+  <li><a id="bootstrap-internals" href="#bootstrap-internals">Bootstrap internals</a></li>
+  <li><a id="multiple-revisions" href="#multiple-revisions">Multiple revisions handling</a></li>
+  </ul>
+  </div>
+  <div id="footer">
+  <p>Copyright 2006-2011 FERMI NATIONAL ACCELERATOR LABORATORY All rights reserved.</p>
+  </div>
+  </div>
+</body>
+</html>
