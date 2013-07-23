@@ -179,6 +179,9 @@ def die(msg):
 def deleteCVSFolders(treeroot):
   map(shutil.rmtree, recursive_glob(treeroot, 'CVS'))
 
+def deleteGITFolders(treeroot):
+  map(shutil.rmtree, recursive_glob(treeroot, '.git'))
+
 def parseJSONTag(tag):
   if tag == 'null':
     return None
@@ -482,73 +485,23 @@ def cmd_frombase(args):
   baserelease = args[1]
   project = args[2]
 
-
-  print "Getting tags from TagCollector..."
-  tags = getReleasesTags([release], False)
-  tagsdict = dict(tags)
-  difftags = getReleasesTags([release, baserelease], True)
-  # Check that no package was removed and warn if a package was added
-  for tag in difftags:
-    if tag[1] is None:
-      die('Error: The base release contains the ' + tag[0] + ' package but the release does not (i.e. the package was removed).')
-    if tag[2] is None:
-      print 'Warning: The release contains the ' + tag[0] + ' package but the base release does not (i.e. the package was added).'
-  # We only need the release's tags, not baserelease's tags
-  difftags = dict((x[0], x[1]) for x in difftags)
-  print "Getting tags from TagCollector... DONE"
-
-  # If additional tagsets are specified, we replace them int the final list of tags
-  # and in the tags to be checked out.
-  additionalTagSets = [x for x in opts.additionalTagSetsSpec.split("+") if x]
-  extraTagsetTags = getTagSetTags(additionalTagSets)
-  tags = dict(tags)
-  tags.update(extraTagsetTags)
-  tags = tags.items()
-  tags.sort()
-  difftags.update(extraTagsetTags)
-
   if opts.dryrun:
-    # Open the file before doing anything else to catch errors earlier
-    dumper = TagsDumper(opts.dumptags)
-    dumper.dump(tags)
     sys.exit(0)
     
   print "Running scram project..."
   popen(['scram', 'p', 'CMSSW', project])
   os.chdir(project)
-  os.chdir('src')
   print "Running scram project... DONE"
-  
-  print "Checking out diff tags..."
-  checkoutTags(difftags.items(), opts.nthreads, False, False, opts.cvsroot)
-  print "Checking out diff tags... DONE"
 
-  print "Running checkdeps..."
-  deps = popen('export CVSROOT=%s && eval `scram run -sh` && checkdeps' % opts.cvsroot, False, True)
-  deps = deps.splitlines()
-  deps_tags = []
-  for dep in deps:
-    # XXX FIXME Use a proper way to get the correct lines. Maybe make checkdeps print to stderr the info messages.
-    if '(' not in dep:
-      continue
-    package = dep.split('(')[0].strip()
-    tag = tagsdict[package]
-    deps_tags.append([package, tag])
-  print "Running checkdeps... DONE"
-
-  print "Checking out dependencies..."
-  checkoutTags(deps_tags, opts.nthreads, False, False, opts.cvsroot)
-  print "Checking out dependencies... DONE"
-
+  print "Running cms-sparse-checkout..."
+  popen('eval `scram run -sh` && git cms-addpkg FWCore/Version && cd src && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -a' % (baserelease, release, release), False, True)
+  print "Running cms-sparse-checkout... DONE"
   if opts.export:
-    deleteCVSFolders('.')
+    deleteGITFolders('src')
 
-  os.chdir('..')
   os.chdir('..')
   shutil.move(os.path.join(project, 'src'), 'src')
   shutil.rmtree(project)
-  dumper = TagsDumper(opts.dumptags)
-  dumper.dump(tags)
 
 def cmd_query(args):
   parser = optparse.OptionParser(usage="cmspm query <release>")
