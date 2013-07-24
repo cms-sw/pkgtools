@@ -254,6 +254,7 @@ def popen(args, merge_stderr = True, shell = False):
   stderr = None
   if merge_stderr:
     stderr = subprocess.STDOUT
+  print args
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, shell=shell)
   r = p.communicate()[0]
   if p.returncode != 0:
@@ -494,7 +495,7 @@ def cmd_frombase(args):
   print "Running scram project... DONE"
 
   print "Running cms-sparse-checkout..."
-  popen('eval `scram run -sh` && git cms-addpkg FWCore/Version && cd src && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -a' % (baserelease, release, release), False, True)
+  popen('eval `scram run -sh` && git cms-addpkg FWCore/Version %s && cd src && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -a' % (release, baserelease, release, release), False, True)
   print "Running cms-sparse-checkout... DONE"
   if opts.export:
     deleteGITFolders('src')
