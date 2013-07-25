@@ -281,9 +281,7 @@ def downloadTc (source, dest, options):
   tempdir = createTempDir (options.workDir, options.tempDirPrefix)
   args["tempdir"] = tempdir
   args["dest"] = join(dest, args["output"].lstrip("/"))
-  args["pmLocation"] = [x for x in [join(options.cmsdist,"cmspm.file"),
-                                    abspath(join (dirname(cmsBuildFilename), 'cmspm'))]
-                        if exists(x)][0]
+  args["pmLocation"] = abspath(join (dirname(cmsBuildFilename), 'cmspm'))
   if "extratags" in args:
     args["extratags"] = "--additional-tags " + args["extratags"]
   else:
