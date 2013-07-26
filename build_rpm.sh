@@ -76,7 +76,7 @@ esac
 
 [ "X${ARCH}" = X ] && echo "Please specify an architecture via --arch flag" && exit 1 
 case ${ARCH} in
-  *_amd64_*)
+  *_amd64_*|*_mic_*)
     NSPR_CONFIGURE_OPTS="--enable-64bit"
     NSS_USE_64=1
   ;;
