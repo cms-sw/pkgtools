@@ -3197,7 +3197,7 @@ def buildSpecsNew(topLevelPackages):
   scheduler = Scheduler(pkg.options.workersPoolSize)
 
   for p in packages:
-    scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, p, scheduler)
+    scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
 
   # We create before hand since we know they are going to be needed. This
   # is to avoid having parallel threads creating them at the same time with
@@ -3246,13 +3246,18 @@ def build(opts, args, factory):
   buildSpecsNew(packages)
 
 def isPackageInstalled(pkg):
-    pkgName = pkg.pkgName ()
-    if rpm_db_cache.has_key(pkgName):
-        if not isDefaultRevision(pkg.pkgRevision):
-            if rpm_db_cache[pkgName] < pkg.pkgRevision:
-                return False
-        log ("Package %s with same/newer revision %s is already installed" % (pkgName, str(rpm_db_cache[pkgName])), DEBUG)
-        return True
+    if pkg.options.bootstrap:
+        pkgName = pkg.pkgName ()
+        if rpm_db_cache.has_key(pkgName):
+            if not isDefaultRevision(pkg.pkgRevision):
+                if rpm_db_cache[pkgName] < pkg.pkgRevision:
+                    return False
+            log ("Package %s with same/newer revision %s is already installed" % (pkgName, str(rpm_db_cache[pkgName])), DEBUG)
+            return True
+    else:
+        instDir = join(pkg.options.workDir, pkg.pkgrel)
+        if exists(join(instDir, ".package-checksum")):
+            return True
     return False
 
 def fetch (opts, args, factory):

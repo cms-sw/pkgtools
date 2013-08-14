@@ -4,7 +4,16 @@
 
 PREFIX=/usr/local/bin
 BUILDPROCESSES=2
-CONFIG_BUILD=auto
+case ${ARCH} in
+  osx*)
+    # Darwin is not RPM based, explicitly go for quessing the triplet
+    CONFIG_BUILD=quess
+    ;;
+  *)
+    # Assume Linux distro is RPM based and fetch triplet from RPM
+    CONFIG_BUILD=auto
+    ;;
+esac
 
 while [ $# -gt 0 ]
 do
@@ -67,7 +76,7 @@ esac
 
 [ "X${ARCH}" = X ] && echo "Please specify an architecture via --arch flag" && exit 1 
 case ${ARCH} in
-  *_amd64_*)
+  *_amd64_*|*_mic_*)
     NSPR_CONFIGURE_OPTS="--enable-64bit"
     NSS_USE_64=1
   ;;
@@ -127,7 +136,7 @@ CONFIG_HOST=$CONFIG_BUILD
 # Fetch the sources.
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/nspr/releases/v4.9.5/src/nspr-4.9.5.tar.gz | tar xvz
 curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
-[ ! $IS_ONLINE ] && curl -k -s -S http://zlib.net/zlib-1.2.7.tar.bz2 | tar xvj
+[ ! $IS_ONLINE ] && curl -k -s -S http://zlib.net/zlib-1.2.8.tar.gz | tar xvz
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_3_RTM/src/nss-3.14.3.tar.gz | tar xvz
 curl -k -s -S ftp://ftp.fu-berlin.de/unix/tools/file/file-5.13.tar.gz | tar xvz
 curl -k -s -S http://download.oracle.com/berkeley-db/db-4.5.20.tar.gz | tar xvz
@@ -136,7 +145,7 @@ curl -k -s -S http://ftp.gnu.org/gnu/cpio/cpio-2.11.tar.bz2 | tar xvj
 
 # Build required externals.
 if [ ! $IS_ONLINE ]; then
-cd $HERE/zlib-1.2.7
+cd $HERE/zlib-1.2.8
 CFLAGS="-fPIC -O3 -DUSE_MMAP -DUNALIGNED_OK -D_LARGEFILE64_SOURCE=1" \
   ./configure --prefix $PREFIX --static
 make -j $BUILDPROCESSES && make install
