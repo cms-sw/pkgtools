@@ -166,6 +166,8 @@ class Scheduler(object):
     self.resultsQueue.put((threading.currentThread(), commandSpec))
 
   def serial(self, taskId, deps, *commandSpec):
+    if taskId in self.pendingJobs:    
+      self.log("Double task %s" % taskId)
     spec = [self.doSerial, taskId, deps] + list(commandSpec)
     self.resultsQueue.put((threading.currentThread(), spec))
     self.jobs[taskId] = {"scheduler": "serial", "deps": deps, "spec": spec}
