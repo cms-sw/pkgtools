@@ -3197,7 +3197,7 @@ def buildSpecsNew(topLevelPackages):
   scheduler = Scheduler(pkg.options.workersPoolSize)
 
   for p in packages:
-    scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, p, scheduler)
+    scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
 
   # We create before hand since we know they are going to be needed. This
   # is to avoid having parallel threads creating them at the same time with
