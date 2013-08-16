@@ -2852,7 +2852,8 @@ def buildPackage(pkg, scheduler):
     "specdir": pkg.specdir,
     "builddir": pkg.builddir,
     "makeprocesses": "",
-    "ignoreCompileErrors": ""
+    "ignoreCompileErrors": "",
+    "nodeps": ""
   }
 
   rpmsCacheDir = dirname(join(abspath ("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename))
@@ -2876,13 +2877,15 @@ def buildPackage(pkg, scheduler):
   optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                       "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
                       "extraRpmDefines": pkg.options.rpmQueryDefines})
+  if not pkg.options.bootstrap:
+    optionsDict["nodeps"] = "--nodeps"
 
   # FIXME: should be done only once!
   err, out = getstatusoutput("rpmbuild --version")
   if err:
     return "ERROR: unable to find working rpmbuild"
  
-  rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+  rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                     " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                     " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
   rpmbuildCommand = rpmbuildCommand.strip()
