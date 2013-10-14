@@ -137,7 +137,7 @@ CONFIG_HOST=$CONFIG_BUILD
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/nspr/releases/v4.9.5/src/nspr-4.9.5.tar.gz | tar xvz
 curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
 [ ! $IS_ONLINE ] && curl -k -s -S http://zlib.net/zlib-1.2.8.tar.gz | tar xvz
-curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_12_9_RTM/src/nss-3.12.9.tar.gz | tar xvz
+curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_3_RTM/src/nss-3.14.3.tar.gz | tar xvz
 curl -k -s -S ftp://ftp.fu-berlin.de/unix/tools/file/file-5.13.tar.gz | tar xvz
 curl -k -s -S http://download.oracle.com/berkeley-db/db-4.5.20.tar.gz | tar xvz
 curl -k -s -S http://rpm.org/releases/rpm-4.8.x/rpm-4.8.0.tar.bz2 | tar xvj
@@ -161,8 +161,8 @@ cd $HERE/nspr-4.9.5/mozilla/nsprpub
             --prefix $PREFIX $NSPR_CONFIGURE_OPTS
 make -j $BUILDPROCESSES && make install
 
-cd $HERE/nss-3.12.9
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/nss-3.12.9-add-ZLIB-LIBS-DIR-and-ZLIB-INCLUDE-DIR.patch?view=co" | patch -p1
+cd $HERE/nss-3.14.3
+curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/nss-3.14.3-add-ZLIB-LIBS-DIR-and-ZLIB-INCLUDE-DIR.patch?view=co" | patch -p1
 export USE_64=$NSS_USE_64
 export NSPR_INCLUDE_DIR=$PREFIX/include/nspr
 export NSPR_LIB_DIR=$PREFIX/lib
