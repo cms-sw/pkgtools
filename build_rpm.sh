@@ -166,17 +166,12 @@ curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/nss-3.12.9-add-ZLI
 export USE_64=$NSS_USE_64
 export NSPR_INCLUDE_DIR=$PREFIX/include/nspr
 export NSPR_LIB_DIR=$PREFIX/lib
+export FREEBL_LOWHASH=1
 export USE_SYSTEM_ZLIB=1
 if [ ! $IS_ONLINE ]; then
   export ZLIB_INCLUDE_DIR="$PREFIX/include"
   export ZLIB_LIBS_DIR="-L$PREFIX/lib"
 fi
-case $ARCH in
-  slc[345]*|osx*) ;;
-  *)
-export FREEBL_NO_DEPEND=1
-  ;;
-esac
  
 make -C ./mozilla/security/coreconf clean
 make -C ./mozilla/security/dbm clean
