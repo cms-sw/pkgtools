@@ -592,6 +592,14 @@ def parseNoCompilerLine(specLines):
             return True
     return False
 
+def parseBuildRequireToolfileLine(specLines):
+
+    findBRToolfileRe = re.compile ("^## BUILDREQUIRE-TOOLFILE")
+    for line in specLines:
+        if findBRToolfileRe.match(line):
+            return True
+    return False
+
 class PkgInfo (object):
     """ Minimal information about a package.
     """
@@ -1783,6 +1791,7 @@ class Package (object):
         self.dependencies = []
         self.origDependencies = []
         self.buildDependencies = []
+        self.droppedToolfileDependencies = []
         self.origBuildDependencies = []
         self.fullDependencies = []
         self.origSpec = []
@@ -1794,6 +1803,7 @@ class Package (object):
         self.__requiresCache = None
         self.__syntax = None
         self.__preamble = ""
+        self.buildRequireToolfile = False
    
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -1845,6 +1855,7 @@ class Package (object):
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append (self.compiler)
                 self.origDependencies.append (self.compiler)
+        self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
         self.compilerRealVersion = self.compiler.realVersion
         self.generateInitEnv ()
@@ -2099,6 +2110,20 @@ class Package (object):
         """
         for require in self.origRequires:
             self.updateDependencies(require, self.origDependencies, self.dependencies)
+        if self.buildRequireToolfile:
+	    deps = self.dependencies[:]
+            for pkg in deps:
+                dep = pkg.name
+                if not dep.endswith("-toolfile"):  continue
+                if not self.__packageCache.has_key(dep.replace("-toolfile","")): continue
+                if not dep in self.droppedToolfileDependencies: self.droppedToolfileDependencies.append(dep)
+                if not dep in self.origBuildRequires: self.origBuildRequires.append(dep)
+                if pkg in self.origDependencies: self.origDependencies.remove(pkg)
+                self.dependencies.remove(pkg)
+                self.fullDependencies.remove(pkg)
+        for pkg in self.dependencies:
+            for dep in pkg.droppedToolfileDependencies:
+                if not dep in self.origBuildRequires: self.origBuildRequires.append(dep)
         for require in self.origBuildRequires:
             self.updateDependencies(require, self.origBuildDependencies, self.buildDependencies, True)
         for dep in self.dependencies:
@@ -3162,9 +3187,12 @@ def checkPackageInCache(pkg, scheduler):
     return
   scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
   fetchDependencies = []
-  if pkg.name == "cmssw-patch":
-    cmsswVersion = [d.version for d in pkg.fullDependencies if d.name == "cmssw"][0]
-    fetchDependencies = ["install-cms+cmssw+%s" % cmsswVersion]
+  if pkg.name.endswith("-patch"):
+    baseTool = pkg.name[:-6]
+    baseToolVersion = [d.version for d in pkg.fullDependencies if d.name == baseTool]
+    if len(baseToolVersion)>0:
+      baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
+      if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
   installActionDependencies = ["build-%s" % pkgName]
   buildActionDependencies = ["install-%s" % d.pkgName() for d in pkg.fullDependencies if not isPackageInstalled(d)] + ["fetch-%s" % pkgName]
