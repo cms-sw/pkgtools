@@ -109,8 +109,7 @@ class Scheduler(object):
     self.parallelThreads -= 1
 
   def parallel(self, taskId, deps, *spec):
-    if taskId in self.pendingJobs:
-      self.log("Double task %s" % taskId)
+    if self.jobs.has_key(taskId): return
     self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec}
     self.pendingJobs.append(taskId)
     self.finalJobDeps.append(taskId)
@@ -166,6 +165,7 @@ class Scheduler(object):
     self.resultsQueue.put((threading.currentThread(), commandSpec))
 
   def serial(self, taskId, deps, *commandSpec):
+    if self.jobs.has_key(taskId): return
     spec = [self.doSerial, taskId, deps] + list(commandSpec)
     self.resultsQueue.put((threading.currentThread(), spec))
     self.jobs[taskId] = {"scheduler": "serial", "deps": deps, "spec": spec}
@@ -243,6 +243,16 @@ if __name__ == "__main__":
   scheduler.parallel("test", [], scheduler.log, "This is england");
   scheduler.run()
 
+  scheduler = Scheduler(1)
+  for x in xrange(10):
+    scheduler.parallel("test", [], dummyTask)
+    scheduler.serial("test", [], dummyTask)
+  scheduler.run()
+  # Notice we have only 2 jobs because there is always a toplevel one
+  # which depends on all the others.
+  assert(len(scheduler.brokenJobs) == 0)
+  assert(len(scheduler.jobs) == 2)
+  
   scheduler = Scheduler(10)
   for x in xrange(50):
     scheduler.parallel("test" + str(x), [], dummyTask)
