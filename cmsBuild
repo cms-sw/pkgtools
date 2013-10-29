@@ -2111,7 +2111,7 @@ class Package (object):
         for require in self.origRequires:
             self.updateDependencies(require, self.origDependencies, self.dependencies)
         if self.buildRequireToolfile:
-	    deps = self.dependencies[:]
+            deps = self.dependencies[:]
             for pkg in deps:
                 dep = pkg.name
                 if not dep.endswith("-toolfile"):  continue
