@@ -592,6 +592,14 @@ def parseNoCompilerLine(specLines):
             return True
     return False
 
+def parseBuildRequireToolfileLine(specLines):
+
+    findBRToolfileRe = re.compile ("^## BUILDREQUIRE-TOOLFILE")
+    for line in specLines:
+        if findBRToolfileRe.match(line):
+            return True
+    return False
+
 class PkgInfo (object):
     """ Minimal information about a package.
     """
@@ -1794,6 +1802,7 @@ class Package (object):
         self.__requiresCache = None
         self.__syntax = None
         self.__preamble = ""
+        self.buildRequireToolfile = False
    
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -1845,6 +1854,7 @@ class Package (object):
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append (self.compiler)
                 self.origDependencies.append (self.compiler)
+        self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
         self.compilerRealVersion = self.compiler.realVersion
         self.generateInitEnv ()
@@ -2087,7 +2097,6 @@ class Package (object):
         self.updateChildDependencies(pkg, dependencies, pkg.dependencies)
         if buildRequires:
             self.updateChildDependencies(pkg, dependencies, pkg.buildDependencies)
-        self.updateChildDependencies(pkg, self.fullDependencies, pkg.fullDependencies)
 
     def parseRequires (self):
         """This function is responsible for finding all the required dependencies for a given spec.
@@ -2099,11 +2108,21 @@ class Package (object):
         """
         for require in self.origRequires:
             self.updateDependencies(require, self.origDependencies, self.dependencies)
+        if self.buildRequireToolfile:
+	    deps = self.dependencies[:]
+            for pkg in deps:
+                dep = pkg.name
+                if not dep.endswith("-toolfile"):  continue
+                if not self.__packageCache.has_key(dep.replace("-toolfile","")): continue
+                if not dep in self.origBuildRequires: self.origBuildRequires.append(dep)
+                if pkg in self.origDependencies: self.origDependencies.remove(pkg)
+                self.dependencies.remove(pkg)
         for require in self.origBuildRequires:
             self.updateDependencies(require, self.origBuildDependencies, self.buildDependencies, True)
         for dep in self.dependencies:
             if dep in self.origBuildDependencies: self.origBuildDependencies.remove(dep)
             if dep in self.buildDependencies:     self.buildDependencies.remove(dep)
+        self.fullDependencies = self.dependencies + self.buildDependencies
         for dep in self.fullDependencies:
             dep.dependentCounter += 1
         self.dependencies.sort ()
@@ -2768,10 +2787,19 @@ def scheduleInstallPackage(pkg, scheduler):
     return True
   if checkIfOnServer (pkg):
     scheduler.log("%s is available from remote apt-get repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository))
-    scheduler.serial(actionName, [], installApt, pkg)
+    aptPackageInstallDeps = []
+    for dep in pkg.dependencies + [pkg]:
+       aptPackageInstallDeps.append("downloadrpm-%s" % dep.pkgName())
+       scheduler.parallel(aptPackageInstallDeps[-1], [], downloadRpmsForApt, dep)
+    scheduler.serial(actionName, aptPackageInstallDeps, installApt, pkg)
     return True
   return False
   
+def downloadRpmsForApt(pkg):
+  src = "%s/%s/RPMS/%s" % (pkg.options.server.rstrip ("/"), pkg.options.repository, pkg.rpmfilename)
+  des= "%s/%s/var/lib/cache/%s" % (pkg.options.workDir, pkg.cmsplatf,pkg.cmsplatf)
+  downloadUrllib2(src,des,pkg.options)
+
 def rpmGetCached (pkg):
     """ This helper function is used to download packages from the apt repository.
         Returns True if the package can be downloaded/installed, False otherwise.
@@ -3162,12 +3190,20 @@ def checkPackageInCache(pkg, scheduler):
     return
   scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
   fetchDependencies = []
-  if pkg.name == "cmssw-patch":
-    cmsswVersion = [d.version for d in pkg.fullDependencies if d.name == "cmssw"][0]
-    fetchDependencies = ["install-cms+cmssw+%s" % cmsswVersion]
+  if pkg.name.endswith("-patch"):
+    baseTool = pkg.name[:-6]
+    baseToolVersion = [d.version for d in pkg.origDependencies if d.name == baseTool]
+    if len(baseToolVersion)>0:
+      baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
+      if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
+  buildActionDependencies = []
+  for p in pkg.fullDependencies:
+    if not isPackageInstalled(p):
+      scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
+      buildActionDependencies.append("install-%s" % p.pkgName())
+  buildActionDependencies.append("fetch-%s" % pkgName)
   installActionDependencies = ["build-%s" % pkgName]
-  buildActionDependencies = ["install-%s" % d.pkgName() for d in pkg.fullDependencies if not isPackageInstalled(d)] + ["fetch-%s" % pkgName]
   scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
   scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
   scheduler.serial("install-%s" % pkgName, installActionDependencies, installPackage, pkg, scheduler)
@@ -3184,18 +3220,10 @@ def uniq(input):
 # New version using the new scheduler.
 def buildSpecsNew(topLevelPackages):
   from scheduler import Scheduler
-  packages = []
-  allPackages = {}
+  scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize)
   for pkg in topLevelPackages:
-    for p in pkg.fullDependencies + [pkg]:
-      allPackages[p.name] = p
-  
-  packages = [p for p in allPackages.itervalues() if not isPackageInstalled(p)]
-
-  scheduler = Scheduler(pkg.options.workersPoolSize)
-
-  for p in packages:
-    scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, p, scheduler)
+    if not isPackageInstalled(pkg):
+      scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, pkg, scheduler)
 
   # We create before hand since we know they are going to be needed. This
   # is to avoid having parallel threads creating them at the same time with
