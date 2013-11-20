@@ -2111,7 +2111,7 @@ class Package (object):
         for require in self.origRequires:
             self.updateDependencies(require, self.origDependencies, self.dependencies)
         if self.buildRequireToolfile:
-	    deps = self.dependencies[:]
+            deps = self.dependencies[:]
             for pkg in deps:
                 dep = pkg.name
                 if not dep.endswith("-toolfile"):  continue
@@ -2752,7 +2752,7 @@ def installRpm (pkg, bootstrap):
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via rpm.", DEBUG)
 
-def installApt (pkg):
+def installApt (pkg, scheduler):
     command = "apt-get -y install %s" % pkg.pkgName ()
     error, output = getstatusoutput (command)
     log ("About to install %s using apt..." % pkg.pkgName (), DEBUG)
@@ -2760,6 +2760,9 @@ def installApt (pkg):
         log ("Command:\n %(command)s failed with the following message: %(output)s" % locals (), DEBUG)
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via apt.", DEBUG)
+    for dep in pkg.dependencies:
+      scheduler.forceDone("check-%s" % dep.pkgName())
+      scheduler.forceDone("install-%s" % dep.pkgName())
 
 def scheduleInstallPackage(pkg, scheduler):
   if pkg.name == "system-compiler":
@@ -2791,9 +2794,10 @@ def scheduleInstallPackage(pkg, scheduler):
     scheduler.log("%s is available from remote apt-get repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository))
     aptPackageInstallDeps = []
     for dep in pkg.dependencies + [pkg]:
-       aptPackageInstallDeps.append("downloadrpm-%s" % dep.pkgName())
-       scheduler.parallel(aptPackageInstallDeps[-1], [], downloadRpmsForApt, dep)
-    scheduler.serial(actionName, aptPackageInstallDeps, installApt, pkg)
+       if not checkIfInstalled(dep):
+         aptPackageInstallDeps.append("downloadrpm-%s" % dep.pkgName())
+         scheduler.parallel(aptPackageInstallDeps[-1], [], downloadRpmsForApt, dep)
+    scheduler.serial(actionName, aptPackageInstallDeps, installApt, pkg, scheduler)
     return True
   return False
   
@@ -2801,45 +2805,6 @@ def downloadRpmsForApt(pkg):
   src = "%s/%s/RPMS/%s" % (pkg.options.server.rstrip ("/"), pkg.options.repository, pkg.rpmfilename)
   des= "%s/%s/var/lib/cache/%s" % (pkg.options.workDir, pkg.cmsplatf,pkg.cmsplatf)
   downloadUrllib2(src,des,pkg.options)
-
-def rpmGetCached (pkg):
-    """ This helper function is used to download packages from the apt repository.
-        Returns True if the package can be downloaded/installed, False otherwise.
-    """
-    if pkg.name == "system-compiler":
-        return False
-
-    bootstrapped = pkg.options.bootstrap
-   
-    instDir = join (pkg.options.workDir, pkg.pkgrel)
-    if not bootstrapped and exists (join (instDir, ".package-checksum")):
-        log ("Package already built into %s. Not building." % instDir, DEBUG)
-        # subpackages were already built as part of the main package, but the RPMs still need to be symlinked
-        return checkCanInstallRpm(pkg)
-    
-    if not bootstrapped:
-        return False
-
-    log ("Checking if %s is cached." % pkg.name, DEBUG)
-    # FIXME: this is evaluated twice!! look at rpmBuild
-
-    if checkIfInstalled (pkg):
-        log ("%s already in rpm database. Not building." % pkg.name, DEBUG)
-        return True
-
-    log ("%s is not found in the rpm database." % pkg.name, DEBUG)
-
-    if checkCanInstallRpm (pkg):
-        log ("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName (), DEBUG)
-        installRpm (pkg, bootstrapped)
-        log ("%s is now installed." % pkg.pkgName (), DEBUG)
-        return True
-    
-    if bootstrapped and checkIfOnServer (pkg):
-        log ("%s is available from remote apt-get repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository), DEBUG)
-        installApt (pkg)
-        log ("%s is now installed." % pkg.name, DEBUG)
-        return True
 
 def getCommandPrefix (options):
     linux32RE = "slc[^_]+_ia32_gcc[^_]+"
@@ -3036,37 +3001,6 @@ def rpmBuild (pkg, tracker):
     f.write (pkg.checksum)
     f.close ()
 
-def buildSpec (pkg, tracker):
-    # make sure subpackages are properly up-to-date with the definitions in their parents
-    if pkg.parent:
-      pkg.updateFromParent()
-
-    pkgName = pkg.pkgName ()
-    tracker.postMessage ("PACKAGE", {"pkgName": pkgName})
-    sourcedir = pkg.sourcedir
-    if not exists (sourcedir):
-        log ("Creating directory %s" % sourcedir, DEBUG)
-        makedirs (sourcedir)
-        pkg.dumpCmsos ()
-    # Serialize package installation/check via apt.
-    tracker.postMessage ("PACKAGE_CACHED", {"pkgName": pkgName})
-    log ("Acquiring lock", TRACE)
-    tracker.globalLock.acquire ()
-    log ("Lock acquired", TRACE)
-    if rpmGetCached (pkg):
-        tracker.globalLock.release ()
-        tracker.postMessage ("/PACKAGE_CACHED-FOUND", {"pkgName": pkgName})
-        tracker.postMessage ("/PACKAGE", {"pkgName": pkgName})
-        return
-    tracker.globalLock.release ()
-    tracker.postMessage ("/PACKAGE_CACHED-NOT_FOUND", {"pkgName": pkgName})
-    tracker.postMessage ("FETCH_SOURCES", {"pkgName": pkgName})
-    fetchSources (pkg)
-    tracker.postMessage ("/FETCH_SOURCES", {"pkgName": pkgName})
-    rpmBuild (pkg, tracker)
-    tracker.postMessage ("/BUILD_PKG", {"pkgName": pkgName})
-    tracker.postMessage ("/PACKAGE", {"pkgName": pkgName})
-
 from time import sleep
 
 class ActionFactory (object):
@@ -3197,13 +3131,13 @@ def checkPackageInCache(pkg, scheduler):
   fetchDependencies = []
   if pkg.name.endswith("-patch"):
     baseTool = pkg.name[:-6]
-    baseToolVersion = [d.version for d in pkg.origDependencies if d.name == baseTool]
+    baseToolVersion = [d.version for d in pkg.dependencies if d.name == baseTool]
     if len(baseToolVersion)>0:
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
   buildActionDependencies = []
-  for p in pkg.fullDependencies:
+  for p in pkg.origDependencies + pkg.origBuildDependencies:
     if not isPackageInstalled(p):
       scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
       buildActionDependencies.append("install-%s" % p.pkgName())
