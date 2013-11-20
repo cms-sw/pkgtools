@@ -164,6 +164,12 @@ class Scheduler(object):
   def notifyMaster(self, *commandSpec):
     self.resultsQueue.put((threading.currentThread(), commandSpec))
 
+  def forceDone(self, taskId):
+    if taskId in self.doneJobs: return
+    if not self.jobs.has_key(taskId): self.jobs[taskId]={}
+    if not taskId in self.pendingJobs: self.pendingJobs.append(taskId)
+    transition(taskId, self.pendingJobs, self.doneJobs)
+    
   def serial(self, taskId, deps, *commandSpec):
     if self.jobs.has_key(taskId): return
     spec = [self.doSerial, taskId, deps] + list(commandSpec)
@@ -187,14 +193,15 @@ class Scheduler(object):
       self.resultsQueue.put((threading.currentThread(), [self.doSerial, taskId, deps] + list(commandSpec)))
       return
     # No broken dependencies and no pending ones. Run the job.
-    transition(taskId, self.pendingJobs, self.runningJobs)
-    try:
-      result = commandSpec[0](*commandSpec[1:])
-    except Exception, e:
-      s = StringIO()
-      traceback.print_exc(file=s)
-      result = s.getvalue()
-    self.__updateJobStatus(taskId, result)
+    if not (taskId in self.doneJobs):
+      transition(taskId, self.pendingJobs, self.runningJobs)
+      try:
+        result = commandSpec[0](*commandSpec[1:])
+      except Exception, e:
+        s = StringIO()
+        traceback.print_exc(file=s)
+        result = s.getvalue()
+      self.__updateJobStatus(taskId, result)
     # Remember to do the scheduling again!
     self.notifyMaster(self.__rescheduleParallel)
   
