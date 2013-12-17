@@ -257,6 +257,7 @@ def popen(args, merge_stderr = True, shell = False):
   print args
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, shell=shell)
   r = p.communicate()[0]
+  print r
   if p.returncode != 0:
     raise CalledProcessError(p.returncode, ' '.join(args))
   return r
