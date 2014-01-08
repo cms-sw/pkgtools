@@ -3135,7 +3135,7 @@ def checkPackageInCache(pkg, scheduler):
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
   buildActionDependencies = []
-  for p in pkg.origDependencies + pkg.origBuildDependencies:
+  for p in pkg.fullDependencies:
     if not isPackageInstalled(p):
       scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
       buildActionDependencies.append("install-%s" % p.pkgName())
