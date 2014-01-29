@@ -162,7 +162,7 @@ cd $HERE/nspr-4.9.5/mozilla/nsprpub
 make -j $BUILDPROCESSES && make install
 
 cd $HERE/nss-3.14.3
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/nss-3.14.3-add-ZLIB-LIBS-DIR-and-ZLIB-INCLUDE-DIR.patch?view=co" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/nss-3.14.3-add-ZLIB-LIBS-DIR-and-ZLIB-INCLUDE-DIR.patch" | patch -p1
 export USE_64=$NSS_USE_64
 export NSPR_INCLUDE_DIR=$PREFIX/include/nspr
 export NSPR_LIB_DIR=$PREFIX/lib
@@ -199,20 +199,20 @@ make -j $BUILDPROCESSES && make install
 # Build the actual rpm distribution.
 cd $HERE/rpm-4.8.0
 rm -rf lib/rpmhash.*
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-case-insensitive-sources.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-add-missing-__fxstat64.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-case-insensitive-fixes.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-fix-glob_pattern_p.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-fix-arm.patch?view=co" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-remove-chroot-check.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-remove-strndup.patch?revision=1.1" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-allow-empty-buildroot.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-fix-missing-libgen.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-fix-find-provides.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-increase-line-buffer.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-increase-macro-buffer.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-fix-fontconfig-provides.patch?revision=HEAD" | patch -p1
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch?revision=HEAD" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-case-insensitive-sources.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-add-missing-__fxstat64.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-case-insensitive-fixes.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-glob_pattern_p.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-arm.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-remove-chroot-check.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-remove-strndup.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-allow-empty-buildroot.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-missing-libgen.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-find-provides.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-increase-line-buffer.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-increase-macro-buffer.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-fontconfig-provides.patch" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch" | patch -p1
 
 case `uname` in
   Darwin)
@@ -250,7 +250,7 @@ ln -sf $PREFIX/bin/rpm $PREFIX/bin/rpmquery
 
 # Install GNU cpio
 cd $HERE/cpio-2.11
-curl "http://cmssw.cvs.cern.ch/cgi-bin/cmssw.cgi/COMP/CMSDIST/cpio-2.11-stdio.in-gets.patch?view=co" | patch -p1
+curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/cpio-2.11-stdio.in-gets.patch" | patch -p1
 
 # For Mac OS X patch cpio, otherwise compilation will fail
 # NOTE: This patch should not be needed for newer GNU cpio
