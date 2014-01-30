@@ -2293,10 +2293,10 @@ def parseOptions ():
     parser.add_option ("--unsafe",
                        dest="unsafeMode",
                        action="store_true")
-    parser.add_option ("--compiling-processes",
+    parser.add_option ("-j","--compiling-processes",
                        dest="compilingProcesses",
                        default=0)
-    parser.add_option ("--ignore-compile-errors",
+    parser.add_option ("-k","--ignore-compile-errors",
                        dest="ignoreCompileErrors",
                        action="store_true",
                        default=False)
@@ -2333,7 +2333,7 @@ def parseOptions ():
     parser.add_option ("--repository",
                        dest="repository",
                        default="cms")
-    parser.add_option ("--workers-pool-size",
+    parser.add_option ("--builders","--workers-pool-size",
                        dest="workersPoolSize",
                        default=1,
                        type="int")
