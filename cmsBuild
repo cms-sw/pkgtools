@@ -491,8 +491,11 @@ def download (source, dest, options):
     checksum = getUrlChecksum (source)
     filename = rsplit (source, "/", 1)[1]
     downloadDir = join (cacheDir, checksum)
-    if not exists (downloadDir):
-        makedirs (downloadDir)
+    try:
+      makedirs (downloadDir)
+    except OSError, e:
+      if not exists(downloadDir):
+        raise downloadDir 
     realFile = join (downloadDir,filename)
     if exists (realFile) and not exists (join (dest, filename)):
         symlink (realFile, join (dest, filename))
