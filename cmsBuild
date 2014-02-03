@@ -4170,215 +4170,6 @@ def upload(opts, args, factory):
   log("Upload successfully finished")
   return True
 
-def uploadOLD (opts, args, factory):
-    """ The method is responsible for uploading packages to the repository.
-        what it does is the following.
-        1. Check that all the packages that are getting uploaded match the 
-           spec files that are currently in the directory.
-        2. Make sure that the build process would have resulted in stuff to 
-           upload.
-        3. To be written...
-    """
-    if not args:
-        upload_help ()
-        return False
-
-    pkgs = [factory.createWithSpec (specName) for specName in args]
-    if len (pkgs) !=  len (args):
-        log ("ERROR! Error while parsing spec.")
-        return False
-    # expand subpackages to be uploaded
-    pkgs = factory.expandSubpackages(pkgs)
-
-    cmsplatf = pkgs[0].cmsplatf
-    fullPackageList = []
-    fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
-    
-    def checkIfValid (p):
-        return p not in fullPackageList and exists (p.rpmLocation())
-        
-    for pkg in fullPackageList:
-        fullPackageList += [ dep for dep in pkg.fullDependencies 
-                             if checkIfValid (dep)]
-
-    for pkg in pkgs:
-        checker = BuildChecker (pkg)
-        if not checker.checkConsistency ():
-            log ("ERROR: Build area not consistent. Not uploading.")
-            return False
-        if not checker.checkIfUploadable ():
-            log ("Nothing needs to be uploaded for %s." % pkg.pkgName ())
-            return True
-    
-    log ("Ready to upload.")
-    localUser = getLocalUserName ()
-
-    if localUser is "unknown": 
-        log ("ERROR: Unable to detect user name. Aborting.")
-        return False
-    rules = []
-    try:
-        rulesUrl = "%s/%s" % (opts.server.rstrip ("/"),"UploadRules.txt")
-        uploadRules = urlopen (rulesUrl)
-        for rule in uploadRules.readlines ():
-            rule = rule.strip ("\n").split ("#",1)[0]
-            try:
-                packageMatcher = rule.split (":")[0].strip (" ")
-                users = rule.split (":")[1].split (",")
-                if localUser in users: rules.append (packageMatcher)
-            except IndexError:
-                log ("Malformed configuration file in line:\n%(rule)s") % locals ()
-                return False
-    except URLError, e:
-        if opts.syncBack:
-            log ("ERROR %(rulesUrl)s not found. Cannot decide wether or not you are allowed to upload packages." % locals ())
-            return False
-            
-    def canUploadPackage (package):
-        for rule in rules:
-            if re.match (rule, package):
-                return True
-        return False
-
-    brokenPackages = " ".join ([package.pkgName () 
-                                for package in fullPackageList 
-                                if not canUploadPackage (package)]).strip (" ")
-    userRepository = opts.server.rstrip ("/") + "/%s.%s" % (opts.repository, localUser)
-    repositoryDir = join (opts.uploadRootDirectory, "%s.%s" % (opts.repository, localUser))
-    officialRepositoryDir = join (opts.uploadRootDirectory, opts.repository)
-
-    officialRepo = Repository (opts.repository, opts, fullPackageList)
-    personalRepo = officialRepo.clone (opts.uploadTmpRepository, fullPackageList)
-    localRepo = Repository (abspath ("."), opts, fullPackageList)
-    
-    subsystems = {}
-    for pkg in fullPackageList:
-        subsystems[pkg.pkgName ().split ("+")[0]] = True
-    subsystems = subsystems.keys ()
-    subsystemsString = " ".join (subsystems)
-
-    # FIXME: pick up from commandline
-    rsync="rsync -e ssh --rsync-path=/usr/bin/rsync"
-    uploadUser=opts.uploadUser
-    uploadServer=opts.uploadServer
-    
-    remoteExec = RemoteExecutor (opts)
-    remoteScript = Script (name="Repository creation", 
-                           pretend=opts.pretend, 
-                           executor=remoteExec)
-    syncBackScript = Script (name="Do sync back", pretend=opts.pretend, executor=remoteExec)
-    uploadScript = Script (name="Upload", pretend=opts.pretend,executor=LocalExecutor (opts))
-
-    syncBackScript.do (personalRepo.lockParent ())
-    
-    remoteScript.do (personalRepo.remove ())
-    remoteScript.do (personalRepo.create ())
-    remoteScript.do (personalRepo.createSubsystems ())
-    syncBackScript.do (officialRepo.createSubsystems ())
-    remoteScript.do (personalRepo.cloneParent ())
-    
-    remoteScript.do ("# Check consistency of repository structure.")
-    for pkg in fullPackageList:
-        rpmfilename = pkg.rpmfilename
-        cmsplatf = pkg.cmsplatf
-        # We check that the RPM is not already there in the official repository
-        # (and therefore is there in the private one via symlink). 
-        filename = join ("RPMS", rpmfilename)
-        remoteScript.do (officialRepo.checkNotFile (filename))
-        architecture, subsystem, rest = re.match ("(.*)/([^+]*)(.*)", rpmfilename).groups ()
-        rpmName = subsystem + rest
-        filename = "apt/%(cmsplatf)s/RPMS.%(subsystem)s/%(subsystem)s%(rest)s" % locals ()
-        # FIXME: should check that more files are not there.
-        remoteScript.do (officialRepo.checkNotFile (filename))
-        remoteScript.do (personalRepo.createPackageDir (pkg))
-    log ("Creating temporary repository.")
-    ok = remoteScript.execute ()
-    
-    if not ok: 
-        log ("ERROR: Error while initialising the private repository on server.")
-        return False
-    
-    createLinks = Script (name="Create links", pretend=opts.pretend, executor=remoteExec)
-    checkSB = Script (name="Check syncBack", pretend=opts.pretend, executor=remoteExec)
-    
-    createLinks.do ("# Link real files in cache to their userfrienly path.")
-    uploadScript.do ("# Copy RPMS, SRPMS, SOURCES and patches to the server.")
-    uploadDir = abspath (".")
-    uploadPort = opts.uploadPort
-    remoteSourceRE=re.compile (".*:.*/.*")
-    for pkg in [pkg for pkg in fullPackageList if exists (pkg.rpmLocation())]:
-        checksum = pkg.checksum
-        rpmName = pkg.rpmfilename
-        rpmGroup = pkg.group
-        rpmNameOnly = basename (rpmName)
-        cmsplatf = pkg.cmsplatf
-        pkgRel = pkg.pkgrel
-        cachedRpmFilename = join ("RPMS/cache", checksum, rpmName)
-        cachedSrpmFilename = join ("SRPMS/cache", checksum, rpmName)
-        uploadScript.do (localRepo.checkFile (cachedRpmFilename))
-        uploadScript.do (localRepo.uploadFileToRepository (cachedRpmFilename, personalRepo))
-        checkSB.do (personalRepo.checkFile (cachedRpmFilename))
-        syncBackScript.do (personalRepo.syncFileToParent (cachedRpmFilename))
-        sourceFiles = [ (rsplit (source, "/", 1)[1], getUrlChecksum (source))
-                        for source in pkg.sources 
-                        if remoteSourceRE.match (source) ]
-        for srcFilename, srcChecksum in sourceFiles:
-            cachedFilename = join ("SOURCES/cache", srcChecksum, srcFilename)
-            linkLocation = "../../../../../%(cachedFilename)s" % locals ()
-            fullSourcePath = join ("SOURCES", pkgRel)
-            fullSourceFilename = join (fullSourcePath, srcFilename)
-            fullCachedFilename = join (repositoryDir, cachedFilename)
-            cachedSourceFilename = join ("SOURCES/cache", srcChecksum, srcFilename)
-            uploadScript.do (localRepo.checkFile (cachedFilename))
-            uploadScript.do (localRepo.uploadFileToRepository (cachedFilename, personalRepo))
-            # We do not check cachedSourceFilename because multiple version of a given 
-            # package could use the same source and therefore the file could be already 
-            # there.
-            #checkSB.do (officialRepo.checkNotFile (cachedSourceFilename))
-            checkSB.do (personalRepo.checkFile (cachedSourceFilename))
-            checkSB.do (officialRepo.checkNotFile (fullSourcePath))
-            syncBackScript.do (personalRepo.syncFileToParent (cachedSourceFilename))
-        # Create links to the rpms in RPMS/<cmsplatf>/<cache>/ in apt/<cmsplatf>/RPMS.<group>/
-        # Create also the syncBack action.
-        createLinks.do (personalRepo.createPackageLinks (pkg))
-        rpmLinkPath = "apt/%(cmsplatf)s/RPMS.%(rpmGroup)s" % locals ()
-        checkSB.do (officialRepo.checkNotFile (join (rpmLinkPath, rpmNameOnly)))
-        checkSB.do (officialRepo.checkNotFile (join ("RPMS", pkg.rpmfilename)))
-        syncBackScript.do (officialRepo.createPackageLinks (pkg))
-    
-    log ("Uploading packages.")
-    ok = uploadScript.execute ()
-    if not ok:
-        log ("Error while uploading packages on server.")
-        return False
-    
-    ok = createLinks.execute ()
-    if not ok:
-        log ("Error while creating links.")
-        return False
-    
-    createRepository = Script (name="Create repository", pretend=opts.pretend, executor=remoteExec)
-    createRepository.do (personalRepo.syncCache (officialRepo))
-    createRepository.do (personalRepo.generateRepository ())
-    syncBackScript.do (officialRepo.syncCache (personalRepo))
-    log ("Regenerating apt db.")
-    ok = createRepository.execute ()
-    if not ok:
-        log ("ERROR! Error creating the repository.")
-        return False
-    if not opts.syncBack:
-        return True
-    
-    syncBackScript.do (personalRepo.unlockParent ())
-    checkSB.do ("echo Done")
-    ok = checkSB.execute ()
-    if not ok: return False
-    
-    ok = syncBackScript.execute ()
-    if not ok: return False
-    return True
-    
-            
 def remove_help ():
     log ("cmsBuild delete <package>")
 
@@ -4691,7 +4482,7 @@ or add the --do-not-bootstrap option to your command line arguments.""")
                                            if not "_" in item]), 
                                           DEBUG)
         factory = PackageFactory (self.opts)
-        commandHandlers[self.callbackName] (self.opts, self.args, factory)
+        return commandHandlers[self.callbackName] (self.opts, self.args, factory)
 
     def check (self):
         callbackName = self.callbackName
@@ -4788,7 +4579,15 @@ if __name__ == "__main__":
                          for command in commandList]))
         
         for command in commandList:
-            command.run ()
+            successfulTransaction = False
+            while not successfulTransaction:
+                successfulTransaction = True
+                if command.callbackName == "upload":
+                    successfulTransaction = command.run ()
+                    if not successfulTransaction:
+                        log("Looks like repository changed while we were building. Trying again.")
+                else:
+                    command.run ()
 
     except KeyboardInterrupt:
         log ("User requested to abort compilation. Exiting.")
