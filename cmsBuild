@@ -4006,6 +4006,7 @@ if __name__ == "__main__":
       # Tags cache always needs to be there.
       tags_cache = TagCacheAptImpl(opts)
       successfulTransaction = False 
+      successfulBootstrapEnv = False
       while not successfulTransaction:
         successfulTransaction = True 
         for command in commandSpec:
@@ -4020,7 +4021,9 @@ if __name__ == "__main__":
             if not exists(aptInitSh):
               environmentInitSh = bootstrap(opts)
               symlink(environmentInitSh.replace(opts.workDir, ".."), aptInitSh)
-            setupAptEnvironment(aptInitSh)
+            if not successfulBootstrapEnv:
+              setupAptEnvironment(aptInitSh)
+              successfulBootstrapEnv = True
             tags_cache.update()
           elif command == "build":
             build(opts, args[1:], factory)
