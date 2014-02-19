@@ -2053,7 +2053,7 @@ class Package (object):
             sets the pkgreq to point to their path.
         """
         requires, pkgreqs, directpkgreqs, requiredtools = self.generateRequires(self.dependencies, self.origDependencies)
-        bldrequires, bldpkgreqs, blddirectpkgreqs, bldrequiredtools = self.generateRequires(self.buildDependencies, self.origBuildDependencies)
+        bldrequires, bldpkgreqs, blddirectpkgreqs, bldrequiredtools = self.generateRequires(self.origBuildDependencies, self.origBuildDependencies)
         allDepsPkgs = " ".join([ "%s/%s/%s " % (pkg.group, pkg.name, pkg.version) 
                         for pkg in self.fullDependencies
                         if pkg.name != "system-compiler" ])
@@ -3054,7 +3054,7 @@ class BuildChecker (object):
         """ This class is used to perform various checks on the build procedure
             and its outcome.
         """
-        self.__packages = [pkg] + pkg.fullDependencies
+        self.__packages = [pkg]
         self.__actions = []
         for package in self.__packages:
             self.__actions.extend (createBuildActionLists (package))
@@ -3135,7 +3135,7 @@ def checkPackageInCache(pkg, scheduler):
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
   buildActionDependencies = []
-  for p in pkg.fullDependencies:
+  for p in pkg.origDependencies + pkg.origBuildDependencies:
     if not isPackageInstalled(p):
       scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
       buildActionDependencies.append("install-%s" % p.pkgName())
@@ -3485,7 +3485,7 @@ def upload(opts, args, factory):
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
                           deprecablePackages=deprecablePackages)
-  checkers = [BuildChecker(pkg) for pkg in pkgs]
+  checkers = [BuildChecker(pkg) for pkg in fullPackageList]
   for checker in checkers:
     if not checker.checkConsistency():
       result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
@@ -3875,7 +3875,7 @@ def setupAptEnvironment(environmentInitSh):
     fatal("Cannot find a working apt-get in bootstrapped area %s" % opts.workDir)
 
 if __name__ == "__main__":
-    # Stop processing is SCRAM runtime env is set to avoid picking up
+    # Stop processing if SCRAM runtime env is set to avoid picking up
     # python from cms external area
     if environ.has_key("SCRAMRT_SET"):
         fatal ("You have SCRAM runtime environment set. Please run it from a fresh shell.")
