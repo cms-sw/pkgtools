@@ -3524,8 +3524,8 @@ def upload(opts, args, factory):
     subsystems=subsystems)
   # Hard-link packages.
   hardLinkPackages = format(
-    "%(rsync)s -avm --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
-    "%(rsync)s -avm --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
+    "%(rsync)s -am --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
+    "%(rsync)s -am --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
     ,
     rsync="rsync --chmod=a+rX",
     workdir=opts.workDir,
@@ -3599,7 +3599,7 @@ def upload(opts, args, factory):
   tmpUploadDir = getResult(createUploadTmp)
   
   # Upload local repository to a temp area on the server.
-  upload = format("%(rsync)s -av %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/",
+  upload = format("%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/",
                   tmpdir=tmpdir,
                   tmpUploadDir=tmpUploadDir,
                   **repoInfo)
@@ -3641,25 +3641,25 @@ def upload(opts, args, factory):
     '  exit 1\n'
     'fi\n'
     '# First copy / link the old repository.\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/WEB/ $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
-    '%(rsync)s -av $PARENTDIR/apt/ $TMPREPO/apt/\n'
-    '%(rsync)s -av $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/WEB/ $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
+    '%(rsync)s -a $PARENTDIR/apt/ $TMPREPO/apt/\n'
+    '%(rsync)s -a $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
     '# Copy ancillary files from $UPLOADEDREPO first, so that newer builds override old.\n'
-    '%(rsync)s -av $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
+    '%(rsync)s -a $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
     '# Then copy the new one, ignoring existing files. This way we make sure no files can be overwritten.\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/SRPMS/ $TMPREPO/SRPMS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
-    '%(rsync)s -av --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/RPMS/ $TMPREPO/RPMS/\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/SRPMS/ $TMPREPO/SRPMS/\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
+    '%(rsync)s -a --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
     '# Web area will always be the latest one built,\n'
     '# however we still hardlink old, unchanged, content.\n'
-    '%(rsync)s -av --link-dest $PARENTDIR/WEB/ $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
+    '%(rsync)s -a --link-dest $PARENTDIR/WEB/ $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
     'CHILDHASH=`find $UPLOADREPO/RPMS/cache -type f -name "*.rpm" | sed -e "s|^.*/RPMS/cache||" | sort | sha256sum | cut -f1 -d\ `\n'
     'rm -rf $UPLOADREPO\n'
     '# Generate a new apt cache.\n'
