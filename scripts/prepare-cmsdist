@@ -46,5 +46,5 @@ pushd CMSDIST
   git reset --hard HEAD
   git clean -fxd
   git tag ${INITIALS}For${CMSSW_ORIG}-${ARCH}
-  git push origin --tags
+  SSH_ASKPASS= git push origin --tags
 popd
