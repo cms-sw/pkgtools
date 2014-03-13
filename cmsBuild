@@ -3589,22 +3589,37 @@ def upload(opts, args, factory):
               "uploadTmpRepository": opts.uploadTmpRepository,
               "rsync": format("rsync -e 'ssh -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
-              "user": opts.uploadUser}
+              "user": opts.uploadUser,
+              "parentHash": parentHash}
 
   # Create unique repository on server
   (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
-                                                "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/`", **repoInfo),
+                                                "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
                                          False)
   logAndDieOnError(err, "Error while creating temporary directory", createUploadTmp)
   tmpUploadDir = getResult(createUploadTmp)
   
-  # Upload local repository to a temp area on the server.
-  upload = format("%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/",
+  # Upload local repository to a temp area on the server.  Notice we refuse to
+  # upload if anyone else is already using the same parent hash.
+  upload = format(
+                  'PARENTHASH=%(originalParentHash)s\n'
+                  'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
+                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+                  '  rm -rf %(tmpUploadDir)s\n'
+                  '  sleep 60\n'
+                  '  exit 1\n'
+                  'fi\n'
+                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
                   tmpdir=tmpdir,
                   tmpUploadDir=tmpUploadDir,
+                  originalParentHash=parentHash,
                   **repoInfo)
   (err, msg) = executeScript(upload, True)
-  logAndDieOnError(err, "Error while uploading. No changes to repository.", msg)
+  if err:
+    log("Parallel upload session in progress. Starting uploading procedure from scratch. This will check again build area consistency.")
+    if opts.debug:
+      log(msg)
+    return False
   # Human readable repositories are symlinks to one called:
   # <prefix>.<parent>-<me>
   # 
@@ -3628,21 +3643,23 @@ def upload(opts, args, factory):
     'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
     'UPLOADREPO=%(tmpUploadDir)s\n'
     'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  mv $UPLOADREPO $UPLOADREPO.delme\n'
-    '  rm -rf $UPLOADREPO.delme\n'
-    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
+    '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
+    '  mv $UPLOADREPO $DELME\n'
+    '  rm -rf $DELME\n'
+    '  echo "Parent mismatch."\n'
     '  exit 1\n'
     'fi\n'
     '# Check if there are already more than 4 rsync running, \n'
     '# and try again in such a case.\n'
     'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
-    '  echo "Someone is already uploading to the same parent ($PARENTHASH). Avoid congestion by sleeping 1 minute and trying again."\n'
-    '  mv $UPLOADREPO $UPLOADREPO.delme\n'
-    '  rm -rf $UPLOADREPO.delme\n'
+    '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+    '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
+    '  mv $UPLOADREPO $DELME\n'
+    '  rm -rf $DELME\n'
     '  sleep 60\n'
     '  exit 1\n'
     'fi\n'
-    'TMPREPO=%(tmpUploadDir)s-${PARENTHASH}-target\n'
+    'TMPREPO=%(tmpUploadDir)s-target\n'
     'mkdir -p $TMPREPO/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
     '# First copy / link the old repository.\n'
     '%(rsync)s -a --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
