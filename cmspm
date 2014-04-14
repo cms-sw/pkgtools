@@ -495,7 +495,7 @@ def cmd_frombase(args):
   print "Running scram project... DONE"
 
   print "Running cms-sparse-checkout..."
-  popen('eval `scram run -sh` && git cms-addpkg FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -a' % (release, baserelease, release, release), False, True)
+  popen('eval `scram run -sh` && git cms-addpkg FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -A -a' % (release, baserelease, release, release), False, True)
   print "Running cms-sparse-checkout... DONE"
   if opts.export:
     deleteGITFolders('src')
