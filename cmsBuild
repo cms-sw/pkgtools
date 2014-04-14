@@ -288,16 +288,10 @@ def downloadTc (source, dest, options):
   else:
     args["extratags"] = ""
 
-  cvspassFilename = join(tempdir, "cvspass")
-  f=open(join (tempdir, "cvspass"), "w")
-  f.write("/1 %(cvsroot)s %(passwd)s\n" % args)
-  f.close()
-  args["passexport"] = "CVSROOT=%s CVS_PASSFILE=%s" % (args["cvsroot"], cvspassFilename)
-
   if 'baserel' not in args:
-    command="""cd %(tempdir)s && %(passexport)s %(pmLocation)s corel %(tag)s """
+    command="""cd %(tempdir)s && %(pmLocation)s corel %(tag)s """
   else:
-    command='. '+options.workDir+"""/cmsset_default.sh && cd %(tempdir)s && %(passexport)s %(pmLocation)s frombase %(tag)s %(baserel)s %(baserelver)s """
+    command='. '+options.workDir+"""/cmsset_default.sh && cd %(tempdir)s && %(pmLocation)s frombase %(tag)s %(baserel)s %(baserelver)s """
   command +=""" %(extratags)s -e -o src/PackageList.cmssw"""
   command=command % args
   log("Downloading %(tag)s from cmsTC." % args, DEBUG)
