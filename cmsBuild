@@ -224,12 +224,13 @@ def executeWithErrorCheck (command, errorMessage):
     log (output, DEBUG)
     return True
 
-def packCheckout (tempdir, dest, export):
+def packCheckout (tempdir, dest, *exports):
     """ Use this helper method when download protocol is like cvs/svn/git
         where the code is checked out in a temporary directory and then tarred 
         up.
     """
-    packCommand ="""cd %(tempdir)s; tar -zcf "%(dest)s" "%(export)s" """
+    export = " ".join(['"%s"' % x for x in exports])
+    packCommand ="""cd %(tempdir)s; tar -zcf "%(dest)s" %(export)s """
     packCommand = packCommand % locals ()
     errorMessage = "Error while creating a tar archive for checked out area"
     return executeWithErrorCheck (packCommand, errorMessage)
@@ -297,7 +298,9 @@ def downloadTc (source, dest, options):
   log("Downloading %(tag)s from cmsTC." % args, DEBUG)
   message = "Error while downloading sources using tag collector information."
   ok = executeWithErrorCheck (command, message)
-  return ok and packCheckout (args["tempdir"], args["dest"], "src")
+  dirs = ["src"]
+  if exists("/".join([args["tempdir"], "poison"])): dirs.append("poison")
+  return ok and packCheckout (args["tempdir"], args["dest"], *dirs)
 
 # Download a files from a git url.  We do not clone the remote reposiotory, but
 # we simply pull the branch we are interested in and then we drop all the git
