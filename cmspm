@@ -503,6 +503,8 @@ def cmd_frombase(args):
 
   os.chdir('..')
   shutil.move(os.path.join(project, 'src'), 'src')
+  if os.path.exists (os.path.join(project, 'poison')):
+    shutil.move(os.path.join(project, 'poison'), 'poison')
   shutil.rmtree(project)
 
 def cmd_query(args):
