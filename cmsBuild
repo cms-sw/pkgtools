@@ -22,6 +22,7 @@ import fnmatch
 from shutil import rmtree
 import urllib2
 from glob import glob
+import itertools
 
 logLevel = 10 
 NORMAL=10
@@ -666,7 +667,7 @@ class TagCacheAptImpl (object):
         self.options = options
     
     def update (self):
-      if hasattr (self.options, "bootstrap") and self.options.bootstrap == True :
+      if self.options.bootstrap:
         aptGetUpdateCommand = "apt-get update -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0"
         error, output = getstatusoutput (aptGetUpdateCommand)
         if error:
@@ -702,16 +703,27 @@ class TagCacheAptImpl (object):
                 tempTag = name.replace(pkgInfo.id (), "").strip ("-")
                 tags[tempTag] = checksum
         for package in listdir (join ("RPMS", pkgInfo.cmsplatf)): 
-            if pkgInfo.id () not in package:
+            if pkgInfo.id() not in package:
                 continue
             linkName = join ("RPMS", pkgInfo.cmsplatf, package)
             checksum = getPkgChecksumFile (linkName, self.options)
             tempTag = getPkgName(package).replace (pkgInfo.id (), "").strip ("-")
             tags[tempTag] = checksum
-        for i in xrange(INITIAL_ID, 9999):
+        for i in itertools.count(INITIAL_ID):
             finalTag = idToTag (i, tag)
             if finalTag not in tags:
-                return finalTag
+                break
+        return finalTag
+
+    def registerTag(self, pkgInfo, finalTag):
+        if self.options.bootstrap:
+            # register the tag we just allocated in the cache
+            if finalTag:
+                fullId = pkgInfo.id() + '-' + finalTag
+            else:
+                fullId = pkgInfo.id()
+            self.cache[fullId] = pkgInfo.checksum
+            self.checksumCache[pkgInfo.checksum] = fullId
     
     def getTag (self, pkg):
         """ getTag looks up for a tag associated to an md5 sum the following way.
@@ -2888,6 +2900,11 @@ def buildPackage(pkg, scheduler):
     return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (pkg.name, logfile, "".join(logLines[-20:]))
   if output:
     return output
+
+  # register the newly built package in the checksum cache
+  pkgInfo = PkgInfo(pkg)
+  tags_cache.registerTag(pkgInfo, pkg.version)
+
   scheduler.log("Build successful.")
   
   # link the RPM from the unique name to the friendly name
