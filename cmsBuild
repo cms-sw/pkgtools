@@ -3619,7 +3619,7 @@ def upload(opts, args, factory):
                                                 "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
                                          False)
   logAndDieOnError(err, "Error while creating temporary directory.")
-  tmpUploadDir = getResult(createUploadTmp)
+  tmpUploadDir = getResult(createUploadTmp, "RESULT:")
   
   # Upload local repository to a temp area on the server.  Notice we refuse to
   # upload if anyone else is already using the same parent hash.
