@@ -752,8 +752,8 @@ class TagCacheAptImpl (object):
         if "-" not in fullVersion:
             return ""
         tag = fullVersion.rsplit("-", 1)[1]
-        # Handle the cases where -NNN is actually part of the realversion
-        if re.search('^'+self.options.tag+'\d*$',tag,re.IGNORECASE):
+        # Return tag if it is not part of realVersion
+        if not pkg.realVersion.endswith("-"+tag):
             return tag
         return ""
     
@@ -2358,6 +2358,11 @@ def parseOptions():
                       metavar="NAME",
                       help="Name of the repository directory on server. E.g. 'cms'.",
                       default="cms")
+    parser.add_option("--tag",
+                      dest="tag",
+                      metavar="NAME",
+                      help="Name of the tag. Default is constructed from the --repository <repo>.",
+                      default="")
     parser.add_option("--builders",
                       dest="workersPoolSize",
                       metavar="N",
@@ -2500,9 +2505,10 @@ def parseOptions():
     if re.match(".*[\\\+[*$].*", opts.workDir):
       parser.error("Please avoid '\\+[*$' in --work-dir path.")
     
-    # The tag will always match the repository (minus the various .pre bits, 
-    # like for comp.pre)
-    opts.tag = opts.repository.split(".")[0]
+    # If --tag is not provided via command line then tag will always match the
+    # repository (minus the various .pre bits, like for comp.pre)
+    if not opts.tag:
+      opts.tag = opts.repository.split(".")[0]
     
     setLogLevel (opts)
     if len(args) < 2:
@@ -3395,8 +3401,8 @@ def upload(opts, args, factory):
     return False
 
   # A few helpers
-  def getResult(s):
-    return [x.replace("RESULT:","") for x in s.split("\n") if x.startswith("RESULT:")][0]
+  def getResult(s, k):
+    return [x.replace(k,"") for x in s.split("\n") if x.startswith(k)][0]
   
   def executeScript(dumpedScript, local=True):
     if local:
@@ -3423,12 +3429,10 @@ def upload(opts, args, factory):
       log(out)
     return (err, out)
 
-  def logAndDieOnError(err, msg, out):
+  def logAndDieOnError(err, msg):
     if not err:
       return
     log(msg)
-    if opts.debug:
-      log(out)
     sys.exit(1)
 
   migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
@@ -3449,12 +3453,14 @@ def upload(opts, args, factory):
                        '  ln -sf $PARENTDIR %(uploadDir)s/%(repository)s\n'
                        'fi\n'
                        'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
+                       'echo PARENTDIR:$PARENTDIR\n'
                        'echo RESULT:$PARENTHASH',
                        uploadDir=opts.uploadRootDirectory,
                        repository=opts.repository)
   (err, parentHashResult) = executeScript(migrateRepo, False)
-  logAndDieOnError(err, "Error while migrating repository structure.", parentHashResult)
-  parentHash = getResult(parentHashResult)
+  logAndDieOnError(err, "Error while migrating repository structure.")
+  parentDirectory = getResult(parentHashResult, "PARENTDIR:")
+  parentHash      = getResult(parentHashResult, "RESULT:")
 
   pkgs = [factory.createWithSpec(specName) for specName in args]
   if len(pkgs) !=  len(args):
@@ -3474,7 +3480,7 @@ def upload(opts, args, factory):
   deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
   deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
   deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
-                          "for p in %(deprecableRPMS)s; do\n"
+                          "for x in %(deprecableRPMS)s; do\n"
                           '  realfile=`readlink RPMS/$x`\n'
                           '  rm -rf RPMS/$x\n'
                           '  rm $realfile\n'
@@ -3499,6 +3505,25 @@ def upload(opts, args, factory):
 
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
   pkgChecksums = [p.checksum for p in fullPackageList]
+
+  # Check if checksum directories are already there on server. If yes then this
+  # means someone has already built and uploaded this package
+  checkServerRpms = format("cd %(parentDirectory)s\n"
+                           "err=0\n"
+                           "for d in %(checksums)s; do\n"
+                           "  if [ -e RPMS/cache/$d/%(architecture)s ] ; then\n"
+                           "    echo Error, some one already have upload RPMs with same checksum: $d\n"
+                           "    ls -l RPMS/cache/$d/%(architecture)s\n"
+                           "    err=1\n"
+                           "  fi\n"
+                           "done\n"
+                           "exit $err",
+                           parentDirectory=parentDirectory,
+                           checksums=" ".join(pkgChecksums),
+                           architecture=opts.architecture)
+  (err, out) = executeScript(checkServerRpms, False)
+  logAndDieOnError(err, "Error while checking RPMs available on server for same checksum.")
+
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
   subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
   # Create an area locally which has to be merged with the remote repository.
@@ -3579,7 +3604,7 @@ def upload(opts, args, factory):
   
 
   (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
-  logAndDieOnError(err, "Error while creating the local repository.", out)
+  logAndDieOnError(err, "Error while creating the local repository.")
 
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
@@ -3593,7 +3618,7 @@ def upload(opts, args, factory):
   (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
                                                 "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
                                          False)
-  logAndDieOnError(err, "Error while creating temporary directory", createUploadTmp)
+  logAndDieOnError(err, "Error while creating temporary directory.")
   tmpUploadDir = getResult(createUploadTmp)
   
   # Upload local repository to a temp area on the server.  Notice we refuse to
