@@ -3484,8 +3484,9 @@ def upload(opts, args, factory):
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
                           deprecablePackages=deprecablePackages)
-  checkers = [BuildChecker(pkg) for pkg in fullPackageList]
-  for checker in checkers:
+  uploadablePackages = []
+  for pkg in fullPackageList:
+    checker = BuildChecker(pkg)
     if not checker.checkConsistency():
       result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
       if opts.debug:
@@ -3494,9 +3495,13 @@ def upload(opts, args, factory):
         executeScript(deprecateLocal)
         return result
     if not checker.checkIfUploadable():
-      return statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
+      statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
                                 name=pkg.pkgName())
-
+      continue
+    uploadablePackages.append(pkg)
+  fullPackageList = uploadablePackages
+  if not fullPackageList:
+    return statusAndLog(True, "Nothing needs to be uploaded")
   log("Ready to upload.")
 
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
