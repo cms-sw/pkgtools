@@ -2358,6 +2358,11 @@ def parseOptions():
                       metavar="NAME",
                       help="Name of the repository directory on server. E.g. 'cms'.",
                       default="cms")
+    parser.add_option("--tag",
+                      dest="tag",
+                      metavar="NAME",
+                      help="Name of the tag. Default is constructed from the --repository <repo>.",
+                      default="")
     parser.add_option("--builders",
                       dest="workersPoolSize",
                       metavar="N",
@@ -2500,9 +2505,10 @@ def parseOptions():
     if re.match(".*[\\\+[*$].*", opts.workDir):
       parser.error("Please avoid '\\+[*$' in --work-dir path.")
     
-    # The tag will always match the repository (minus the various .pre bits, 
-    # like for comp.pre)
-    opts.tag = opts.repository.split(".")[0]
+    # If --tag is not provided via command line then tag will always match the
+    # repository (minus the various .pre bits, like for comp.pre)
+    if not opts.tag:
+      opts.tag = opts.repository.split(".")[0]
     
     setLogLevel (opts)
     if len(args) < 2:
