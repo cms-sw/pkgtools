@@ -3622,24 +3622,39 @@ def upload(opts, args, factory):
   logAndDieOnError(err, "Error while creating temporary directory.")
   tmpUploadDir = getResult(createUploadTmp, "RESULT:")
   
-  # Upload local repository to a temp area on the server.  Notice we refuse to
-  # upload if anyone else is already using the same parent hash.
+  # Before uploading the rpms to server temp area, make sure no one is using
+  # the same parent
   upload = format(
-                  'PARENTHASH=%(originalParentHash)s\n'
-                  'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
-                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+                  'err=0\n'
+                  'while pgrep -f %(originalParentHash)s 2>&1 >/dev/null; do\n'
+                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping and trying again."\n'
+                  '  sleep 30\n'
+                  '  err=1\n'
+                  'done\n'
+                  'if [ $err = 1 ] ; then\n'
                   '  rm -rf %(tmpUploadDir)s\n'
-                  '  sleep 60\n'
                   '  exit 1\n'
-                  'fi\n'
-                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
+                  'fi\n',
                   tmpdir=tmpdir,
                   tmpUploadDir=tmpUploadDir,
                   originalParentHash=parentHash,
                   **repoInfo)
-  (err, msg) = executeScript(upload, True)
+  (err, msg) = executeScript(upload, False)
   if err:
     log("Parallel upload session in progress. Starting uploading procedure from scratch. This will check again build area consistency.")
+    if opts.debug:
+      log(msg)
+    return False
+
+  # Upload local repository to a temp area on the server.
+  upload = format(
+                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
+                  tmpdir=tmpdir,
+                  tmpUploadDir=tmpUploadDir,
+                  **repoInfo)
+  (err, msg) = executeScript(upload, True)
+  if err:
+    log("Something went wrong while uploading the rpms to server temp area.")
     if opts.debug:
       log(msg)
     return False
@@ -3674,12 +3689,16 @@ def upload(opts, args, factory):
     'fi\n'
     '# Check if there are already more than 4 rsync running, \n'
     '# and try again in such a case.\n'
-    'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
+    'err=0\n'
+    'while pgrep -f $PARENTHASH 2>&1 >/dev/null; do\n'
     '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+    '  sleep 30\n'
+    '  err=1\n'
+    'done\n'
+    'if [ $err = 1 ] ; then\n'
     '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
     '  mv $UPLOADREPO $DELME\n'
     '  rm -rf $DELME\n'
-    '  sleep 60\n'
     '  exit 1\n'
     'fi\n'
     'TMPREPO=%(tmpUploadDir)s-target\n'
