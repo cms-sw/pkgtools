@@ -764,8 +764,8 @@ class TagCacheAptImpl (object):
         if "-" not in fullVersion:
             return ""
         tag = fullVersion.rsplit("-", 1)[1]
-        # Handle the cases where -NNN is actually part of the realversion
-        if re.search('^'+self.options.tag+'\d*$',tag,re.IGNORECASE):
+        # Return tag if it is not part of realVersion
+        if not pkg.realVersion.endswith("-"+tag):
             return tag
         return ""
     
@@ -3415,8 +3415,8 @@ def upload(opts, args, factory):
     return False
 
   # A few helpers
-  def getResult(s):
-    return [x.replace("RESULT:","") for x in s.split("\n") if x.startswith("RESULT:")][0]
+  def getResult(s, k):
+    return [x.replace(k,"") for x in s.split("\n") if x.startswith(k)][0]
   
   def executeScript(dumpedScript, local=True):
     if local:
@@ -3443,12 +3443,10 @@ def upload(opts, args, factory):
       log(out)
     return (err, out)
 
-  def logAndDieOnError(err, msg, out):
+  def logAndDieOnError(err, msg):
     if not err:
       return
     log(msg)
-    if opts.debug:
-      log(out)
     sys.exit(1)
 
   migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
@@ -3469,12 +3467,14 @@ def upload(opts, args, factory):
                        '  ln -sf $PARENTDIR %(uploadDir)s/%(repository)s\n'
                        'fi\n'
                        'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
+                       'echo PARENTDIR:$PARENTDIR\n'
                        'echo RESULT:$PARENTHASH',
                        uploadDir=opts.uploadRootDirectory,
                        repository=opts.repository)
   (err, parentHashResult) = executeScript(migrateRepo, False)
-  logAndDieOnError(err, "Error while migrating repository structure.", parentHashResult)
-  parentHash = getResult(parentHashResult)
+  logAndDieOnError(err, "Error while migrating repository structure.")
+  parentDirectory = getResult(parentHashResult, "PARENTDIR:")
+  parentHash      = getResult(parentHashResult, "RESULT:")
 
   pkgs = [factory.createWithSpec(specName) for specName in args]
   if len(pkgs) !=  len(args):
@@ -3494,7 +3494,7 @@ def upload(opts, args, factory):
   deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
   deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
   deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
-                          "for p in %(deprecableRPMS)s; do\n"
+                          "for x in %(deprecableRPMS)s; do\n"
                           '  realfile=`readlink RPMS/$x`\n'
                           '  rm -rf RPMS/$x\n'
                           '  rm $realfile\n'
@@ -3502,8 +3502,9 @@ def upload(opts, args, factory):
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
                           deprecablePackages=deprecablePackages)
-  checkers = [BuildChecker(pkg) for pkg in fullPackageList]
-  for checker in checkers:
+  uploadablePackages = []
+  for pkg in fullPackageList:
+    checker = BuildChecker(pkg)
     if not checker.checkConsistency():
       result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
       if opts.debug:
@@ -3512,13 +3513,36 @@ def upload(opts, args, factory):
         executeScript(deprecateLocal)
         return result
     if not checker.checkIfUploadable():
-      return statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
+      statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
                                 name=pkg.pkgName())
-
+      continue
+    uploadablePackages.append(pkg)
+  fullPackageList = uploadablePackages
+  if not fullPackageList:
+    return statusAndLog(True, "Nothing needs to be uploaded")
   log("Ready to upload.")
 
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
   pkgChecksums = [p.checksum for p in fullPackageList]
+
+  # Check if checksum directories are already there on server. If yes then this
+  # means someone has already built and uploaded this package
+  checkServerRpms = format("cd %(parentDirectory)s\n"
+                           "err=0\n"
+                           "for d in %(checksums)s; do\n"
+                           "  if [ -e RPMS/cache/$d/%(architecture)s ] ; then\n"
+                           "    echo Error, some one already have upload RPMs with same checksum: $d\n"
+                           "    ls -l RPMS/cache/$d/%(architecture)s\n"
+                           "    err=1\n"
+                           "  fi\n"
+                           "done\n"
+                           "exit $err",
+                           parentDirectory=parentDirectory,
+                           checksums=" ".join(pkgChecksums),
+                           architecture=opts.architecture)
+  (err, out) = executeScript(checkServerRpms, False)
+  logAndDieOnError(err, "Error while checking RPMs available on server for same checksum.")
+
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
   subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
   # Create an area locally which has to be merged with the remote repository.
@@ -3599,7 +3623,7 @@ def upload(opts, args, factory):
   
 
   (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
-  logAndDieOnError(err, "Error while creating the local repository.", out)
+  logAndDieOnError(err, "Error while creating the local repository.")
 
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
               "repository": opts.repository,
@@ -3613,27 +3637,42 @@ def upload(opts, args, factory):
   (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
                                                 "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
                                          False)
-  logAndDieOnError(err, "Error while creating temporary directory", createUploadTmp)
-  tmpUploadDir = getResult(createUploadTmp)
+  logAndDieOnError(err, "Error while creating temporary directory.")
+  tmpUploadDir = getResult(createUploadTmp, "RESULT:")
   
-  # Upload local repository to a temp area on the server.  Notice we refuse to
-  # upload if anyone else is already using the same parent hash.
+  # Before uploading the rpms to server temp area, make sure no one is using
+  # the same parent
   upload = format(
-                  'PARENTHASH=%(originalParentHash)s\n'
-                  'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
-                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+                  'err=0\n'
+                  'while pgrep -f %(originalParentHash)s 2>&1 >/dev/null; do\n'
+                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping and trying again."\n'
+                  '  sleep 30\n'
+                  '  err=1\n'
+                  'done\n'
+                  'if [ $err = 1 ] ; then\n'
                   '  rm -rf %(tmpUploadDir)s\n'
-                  '  sleep 60\n'
                   '  exit 1\n'
-                  'fi\n'
-                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
+                  'fi\n',
                   tmpdir=tmpdir,
                   tmpUploadDir=tmpUploadDir,
                   originalParentHash=parentHash,
                   **repoInfo)
-  (err, msg) = executeScript(upload, True)
+  (err, msg) = executeScript(upload, False)
   if err:
     log("Parallel upload session in progress. Starting uploading procedure from scratch. This will check again build area consistency.")
+    if opts.debug:
+      log(msg)
+    return False
+
+  # Upload local repository to a temp area on the server.
+  upload = format(
+                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
+                  tmpdir=tmpdir,
+                  tmpUploadDir=tmpUploadDir,
+                  **repoInfo)
+  (err, msg) = executeScript(upload, True)
+  if err:
+    log("Something went wrong while uploading the rpms to server temp area.")
     if opts.debug:
       log(msg)
     return False
@@ -3668,12 +3707,16 @@ def upload(opts, args, factory):
     'fi\n'
     '# Check if there are already more than 4 rsync running, \n'
     '# and try again in such a case.\n'
-    'if pgrep -f $PARENTHASH 2>&1 >/dev/null; then\n'
+    'err=0\n'
+    'while pgrep -f $PARENTHASH 2>&1 >/dev/null; do\n'
     '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
+    '  sleep 30\n'
+    '  err=1\n'
+    'done\n'
+    'if [ $err = 1 ] ; then\n'
     '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
     '  mv $UPLOADREPO $DELME\n'
     '  rm -rf $DELME\n'
-    '  sleep 60\n'
     '  exit 1\n'
     'fi\n'
     'TMPREPO=%(tmpUploadDir)s-target\n'
