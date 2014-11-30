@@ -3521,7 +3521,7 @@ def upload(opts, args, factory):
                            "  if [ -e RPMS/cache/$d/%(architecture)s ] ; then\n"
                            "    echo Error, some one already have upload RPMs with same checksum: $d\n"
                            "    ls -l RPMS/cache/$d/%(architecture)s\n"
-                           "    err=1\n"
+                           "    err=0\n"
                            "  fi\n"
                            "done\n"
                            "exit $err",
