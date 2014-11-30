@@ -3477,9 +3477,10 @@ def upload(opts, args, factory):
   deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
   deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
                           "for x in %(deprecableRPMS)s; do\n"
+                          '  [ -e RPMS/$x ] || continue\n'
                           '  realfile=`readlink RPMS/$x`\n'
-                          '  rm -rf RPMS/$x\n'
-                          '  rm $realfile\n'
+                          '  rm -f RPMS/$x\n'
+                          '  rm -f $realfile\n'
                           "done",
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
@@ -3515,7 +3516,7 @@ def upload(opts, args, factory):
                            "  if [ -e RPMS/cache/$d/%(architecture)s ] ; then\n"
                            "    echo Error, some one already have upload RPMs with same checksum: $d\n"
                            "    ls -l RPMS/cache/$d/%(architecture)s\n"
-                           "    err=0\n"
+                           "    err=1\n"
                            "  fi\n"
                            "done\n"
                            "exit $err",
@@ -3523,7 +3524,10 @@ def upload(opts, args, factory):
                            checksums=" ".join(pkgChecksums),
                            architecture=opts.architecture)
   (err, out) = executeScript(checkServerRpms, False)
-  logAndDieOnError(err, "Error while checking RPMs available on server for same checksum.")
+  if err:
+    statusAndLog(False, "ERROR: Build area not consistent. Not uploading, RPMS with same checksum already available.")
+    executeScript(deprecateLocal)
+    return False
 
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
   subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
