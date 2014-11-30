@@ -3493,7 +3493,9 @@ def upload(opts, args, factory):
 
   deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
   deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
+  deprecatedSrc  = " ".join(["SOURCES/"+p.pkgdir for p in fullPackageList])
   deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
+                          'rm -rf %(deprecatedSrc)s\n'
                           "for x in %(deprecableRPMS)s; do\n"
                           '  [ -e RPMS/$x ] || continue\n'
                           '  realfile=`readlink RPMS/$x`\n'
@@ -3502,17 +3504,15 @@ def upload(opts, args, factory):
                           "done",
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
+                          deprecatedSrc=deprecatedSrc,
                           deprecablePackages=deprecablePackages)
   uploadablePackages = []
   for pkg in fullPackageList:
     checker = BuildChecker(pkg)
     if not checker.checkConsistency():
-      result = statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
-      if opts.debug:
-        sys.exit(1)
-      else:
-        executeScript(deprecateLocal)
-        return result
+      statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
+      executeScript(deprecateLocal)
+      return False
     if not checker.checkIfUploadable():
       statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
                                 name=pkg.pkgName())
