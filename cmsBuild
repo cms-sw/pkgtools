@@ -1022,10 +1022,8 @@ class ArchitectureDecorator (object):
     def __call__ (self, name):
         return self.__architecture + name
 
-package_cache = {}
-requires_cache = {}
+global checksums_cache
 checksums_cache = {}
-visits = {}
 
 # Silence the deprecation warning until we move completely to 2.6.X
 import warnings
@@ -1128,6 +1126,8 @@ class CmsOSDumper (object):
 
 class PackageFactory (object):
     def __init__ (self, options, cmsosDumperClass=CmsOSDumper):
+        self.__package_cache = {}
+        self.__requires_cache = {}
         self.__syntax = MetaSpecSyntax ()
         self.__options = options
         self.__cacheKeyDecorator = ArchitectureDecorator (options.architecture)
@@ -1187,9 +1187,9 @@ class PackageFactory (object):
     def create (self):
         pkg = Package (self.__options)
         pkg._Package__syntax = self.__syntax
-        pkg._Package__packageCache = CacheProxy (package_cache, 
+        pkg._Package__packageCache = CacheProxy (self.__package_cache, 
                                                  self.__cacheKeyDecorator)
-        pkg._Package__requiresCache = CacheProxy (requires_cache, 
+        pkg._Package__requiresCache = CacheProxy (self.__requires_cache, 
                                                   self.__cacheKeyDecorator)
         pkg._Package__preamble = self.__preamble
         pkg._Package__sectionOptions = self.__sectionOptions
@@ -1448,6 +1448,11 @@ class InstallFromServer (BuilderAction):
         if not self.pkg.options.bootstrap:
             return False
         self.called = True
+        pkgName     = self.pkg.pkgName ()
+        pkgInfo     = PkgInfo (self.pkg)
+        pkgRealName = pkgInfo.id()
+        pkgsWithSameHash = [p for (p,h) in tags_cache.cache.iteritems() if (h == pkgInfo.checksum) and p.startswith(pkgRealName) and (pkgName != p) ]
+
         # If a file exists on server we return True
         pkgNameApt = self.pkg.pkgName ().replace ("+", "\\+")         
         aptCommand = """apt-cache showpkg %(pkgNameApt)s""" % locals ()
@@ -1465,7 +1470,7 @@ class InstallFromServer (BuilderAction):
             return False
         if error:
             return False
-        return evalExistsOnServer ()
+        return pkgsWithSameHash or evalExistsOnServer ()
     
     def doExpectedResults (self):
         # In order for a download to be successful we expect:
@@ -3464,6 +3469,9 @@ def upload(opts, args, factory):
   parentDirectory = getResult(parentHashResult, "PARENTDIR:")
   parentHash      = getResult(parentHashResult, "RESULT:")
 
+  #Once we have established the parent then we should update the apt cache
+  tags_cache.update()
+
   pkgs = [factory.createWithSpec(specName) for specName in args]
   if len(pkgs) !=  len(args):
     return statusAndLog(False, "ERROR: Error while parsing spec.")
@@ -3482,8 +3490,11 @@ def upload(opts, args, factory):
   deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
   deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
   deprecatedSrc  = " ".join(["SOURCES/"+p.pkgdir for p in fullPackageList])
+  deprecatedDir  = " ".join([p.pkgrel for p in fullPackageList])
   deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
+                          'cd %(workDir)s\n'
                           'rm -rf %(deprecatedSrc)s\n'
+                          'rm -rf %(deprecatedDir)s\n'
                           "for x in %(deprecableRPMS)s; do\n"
                           '  [ -e RPMS/$x ] || continue\n'
                           '  realfile=`readlink RPMS/$x`\n'
@@ -3493,6 +3504,8 @@ def upload(opts, args, factory):
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
                           deprecatedSrc=deprecatedSrc,
+                          workDir=opts.workDir,
+                          deprecatedDir=deprecatedDir,
                           deprecablePackages=deprecablePackages)
   uploadablePackages = []
   for pkg in fullPackageList:
@@ -3513,27 +3526,6 @@ def upload(opts, args, factory):
 
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
   pkgChecksums = [p.checksum for p in fullPackageList]
-
-  # Check if checksum directories are already there on server. If yes then this
-  # means someone has already built and uploaded this package
-  checkServerRpms = format("cd %(parentDirectory)s\n"
-                           "err=0\n"
-                           "for d in %(checksums)s; do\n"
-                           "  if [ -e RPMS/cache/$d/%(architecture)s ] ; then\n"
-                           "    echo Error, some one already have upload RPMs with same checksum: $d\n"
-                           "    ls -l RPMS/cache/$d/%(architecture)s\n"
-                           "    err=1\n"
-                           "  fi\n"
-                           "done\n"
-                           "exit $err",
-                           parentDirectory=parentDirectory,
-                           checksums=" ".join(pkgChecksums),
-                           architecture=opts.architecture)
-  (err, out) = executeScript(checkServerRpms, False)
-  if err:
-    statusAndLog(False, "ERROR: Build area not consistent. Not uploading, RPMS with same checksum already available.")
-    executeScript(deprecateLocal)
-    return False
 
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
   subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
@@ -4072,14 +4064,14 @@ if __name__ == "__main__":
       environ["SCRAM_ARCH"] = opts.architecture
       environ["VO_CMS_SW_DIR"] = opts.workDir
       
-      factory = PackageFactory(opts)
-      
       # Tags cache always needs to be there.
       tags_cache = TagCacheAptImpl(opts)
       successfulTransaction = False 
       successfulBootstrapEnv = False
       while not successfulTransaction:
         successfulTransaction = True 
+        checksums_cache = {}
+        factory = PackageFactory(opts)
         for command in commandSpec:
           if command == "bootstrap":
             # If the apt-init.sh file is missing, do the bootstrap,
