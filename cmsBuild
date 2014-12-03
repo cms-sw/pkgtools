@@ -22,6 +22,7 @@ import fnmatch
 from shutil import rmtree
 import urllib2
 from glob import glob
+import itertools
 
 logLevel = 10 
 NORMAL=10
@@ -666,7 +667,7 @@ class TagCacheAptImpl (object):
         self.options = options
     
     def update (self):
-      if hasattr (self.options, "bootstrap") and self.options.bootstrap == True :
+      if self.options.bootstrap:
         aptGetUpdateCommand = "apt-get update -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0"
         error, output = getstatusoutput (aptGetUpdateCommand)
         if error:
@@ -675,7 +676,7 @@ class TagCacheAptImpl (object):
         error, output = getstatusoutput(aptCacheCommand)
         if error:
           die("Error while executing apt-cache search SpecCheckum.\n%s" % output)
-        lines = [line for line in output.split("\n") if line] 
+        lines = [line for line in output.split("\n") if line]
         chksumRE = re.compile("\s+-\s+.*?SpecChecksum:")
         pairs = [chksumRE.sub(' ',line).split() for line in lines]
         try:
@@ -702,16 +703,17 @@ class TagCacheAptImpl (object):
                 tempTag = name.replace(pkgInfo.id (), "").strip ("-")
                 tags[tempTag] = checksum
         for package in listdir (join ("RPMS", pkgInfo.cmsplatf)): 
-            if pkgInfo.id () not in package:
+            if pkgInfo.id() not in package:
                 continue
             linkName = join ("RPMS", pkgInfo.cmsplatf, package)
             checksum = getPkgChecksumFile (linkName, self.options)
             tempTag = getPkgName(package).replace (pkgInfo.id (), "").strip ("-")
             tags[tempTag] = checksum
-        for i in xrange(INITIAL_ID, 9999):
+        for i in itertools.count(INITIAL_ID):
             finalTag = idToTag (i, tag)
             if finalTag not in tags:
-                return finalTag
+                break
+        return finalTag
     
     def getTag (self, pkg):
         """ getTag looks up for a tag associated to an md5 sum the following way.
@@ -1053,7 +1055,7 @@ def calculateHumanReadableVersion (pkg):
     log ("%s has checksum %s" % (pkg.name, pkg.checksum), DEBUG)
     tag = tags_cache.getTag (pkg)
     if tag != None:
-        log ("%s is aliased to\' %s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
+        log ("%s is aliased to \'%s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
     elif pkg.options.tag:
         pkgInfo = PkgInfo (pkg)
         tag = tags_cache.requestTag (pkgInfo, pkg.options.tag)
@@ -1223,9 +1225,7 @@ class PackageFactory (object):
         for pkg in packages:
             out.add(pkg)
             out.update(pkg.subpackages)
-        out = list(out)
-        out.sort()
-        return out
+        return sorted(out)
 
 class MetaSpecSyntax (object):
     SPEC_HEADER = property (lambda self : self.__SPEC_HEADER)
@@ -1680,7 +1680,7 @@ class SubPackage (object):
         self.origDependencies = [ self.parent ] + self.parent.origDependencies
         self.buildDependencies = [ self.parent ] + self.parent.buildDependencies
         self.origBuildDependencies = [ self.parent ] + self.parent.origBuildDependencies
-        self.fullDependencies = [ self.parent ] + self.parent.origDependencies
+        self.fullDependencies = [ self.parent ] + self.parent.fullDependencies
         self.dependentCounter = 0
         self.patches        = self.parent.patches
         self.rpmdir         = self.parent.rpmdir
@@ -1688,12 +1688,11 @@ class SubPackage (object):
         self.srpmfilename   = self.parent.srpmfilename
         self.pkginstroot    = self.parent.pkginstroot
 
-    def dumpSpecFragment(self,computeSpecChecksum = False):
+    def dumpSpecFragment(self):
         importName = 'subpackage-%s.file' % self.subname
         importFilename = join (self.options.cmsdist, importName)
         spec = open (importFilename, 'r').read()
-        if computeSpecChecksum:
-            spec = re.compile(r'^Summary:.*$', re.M).sub(r'\g<0> SpecChecksum:%s' % self.checksum, spec)
+        spec = re.compile(r'^Summary:.*$', re.M).sub(r'\g<0> SpecChecksum:%s' % self.checksum, spec)
         return spec
 
     def pkgName (self):
@@ -2130,11 +2129,11 @@ class Package (object):
         self.fullDependencies = self.dependencies + self.buildDependencies
         for dep in self.fullDependencies:
             dep.dependentCounter += 1
-        self.dependencies.sort ()
-        self.origDependencies.sort ()
-        self.buildDependencies.sort ()
-        self.origBuildDependencies.sort ()
-        self.fullDependencies.sort ()
+        self.dependencies           = self.__factory.expandSubpackages(self.dependencies)
+        self.origDependencies       = self.__factory.expandSubpackages(self.origDependencies)
+        self.buildDependencies      = self.__factory.expandSubpackages(self.buildDependencies)
+        self.origBuildDependencies  = self.__factory.expandSubpackages(self.origBuildDependencies)
+        self.fullDependencies       = self.__factory.expandSubpackages(self.fullDependencies)
 
     def dumpSpec (self):
         self.spec = "\n".join([self.specPreHeader, 
@@ -2150,7 +2149,7 @@ class Package (object):
 
         for subpackage in self.subpackages:
             subpackage.updateFromParent()
-            self.spec += '\n\n' + subpackage.dumpSpecFragment(isOnline(self.cmsplatf))
+            self.spec += '\n\n' + subpackage.dumpSpecFragment()
 
     def __getTmpSpecName (self):
         # FIXME: make this static? Should not change over the whole period.
@@ -2832,9 +2831,9 @@ def handleStaleFiles (files, noCleanup):
         unlink (staleFile)
 
 def buildPackage(pkg, scheduler):
-  """ This helper function is responsible for building/installing a given spec and it's associated
-      rpm. What it does is the following (TODO):
-      * Checks if the rpm is already installed in the RPM DB. If yes, exists.
+  """ This helper function is responsible for building/installing a given spec and it's associated rpm.
+      What it does is the following (TODO):
+      * Checks if the rpm is already installed in the RPM DB. If yes, exits.
       * Checks if the rpm is already available in the local area. If yes, installs it.
       * Checks if the rpm is already available on the apt server. If yes, downloads, installs and returns.
       If any of the above is true it:
@@ -2843,6 +2842,11 @@ def buildPackage(pkg, scheduler):
   if pkg.name == "system-compiler":
     return
   
+  # if this is a subpackge do not try to build it, it should have been built as part of its parent
+  if pkg.parent:
+    scheduler.log("Not building Subpackage %s, it should have been built as part of Package %s." % (pkg.name, pkg.parent.name))
+    return
+
   scheduler.log("Creating directory %s if not existing." % pkg.builddir)
   if not exists (pkg.builddir):
     makedirs (pkg.builddir)
