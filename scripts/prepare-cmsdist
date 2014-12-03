@@ -37,14 +37,14 @@ perl -p -i -e "s/### RPM cms fwlite.*/### RPM cms fwlite ${CMSSW_X_Y_Z}_FWLITE/"
 MSG="Prepared for ${CMSSW_X_Y_Z} on ${ARCH}"
 if [ ! "X$CMSSW_PATCH" = X ]; then
   perl -p -i -e "s/### RPM cms cmssw-patch.*/### RPM cms cmssw-patch $CMSSW_PATCH/" CMSDIST/cmssw-patch.spec
+  perl -p -i -e "s/### RPM cms cmssw-patch-tool-conf .+/### RPM cms cmssw-patch-tool-conf $CMSSW_X_Y_Z/" CMSDIST/cmssw-patch-tool-conf.spec
+  perl -p -i -e "s/### RPM cms cmssw-toolfile .+/### RPM cms cmssw-toolfile $CMSSW_X_Y_Z/" CMSDIST/cmssw-toolfile.spec
   MSG="Prepared for ${CMSSW_PATCH} (based on ${CMSSW_X_Y_Z}) on ${ARCH}"
 fi
 
 echo $MSG
 pushd CMSDIST
-  git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec
+  git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec cmssw-patch-tool-conf.spec cmssw-toolfile.spec
   git reset --hard HEAD
   git clean -fxd
-  git tag ${INITIALS}For${CMSSW_ORIG}-${ARCH}
-  SSH_ASKPASS= git push origin --tags
 popd

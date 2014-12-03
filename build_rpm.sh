@@ -199,20 +199,21 @@ make -j $BUILDPROCESSES && make install
 # Build the actual rpm distribution.
 cd $HERE/rpm-4.8.0
 rm -rf lib/rpmhash.*
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-case-insensitive-sources.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-add-missing-__fxstat64.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-case-insensitive-fixes.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-glob_pattern_p.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-arm.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-remove-chroot-check.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-remove-strndup.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-allow-empty-buildroot.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-missing-libgen.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-find-provides.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-increase-line-buffer.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-increase-macro-buffer.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-fix-fontconfig-provides.patch" | patch -p1
-curl -s -S "https://raw.github.com/cms-sw/cmsdist/IB/CMSSW_7_1_X/stable/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch" | patch -p1
+REPO=https://raw.githubusercontent.com/cms-sw/cmsdist/IB/CMSSW_7_2_X/stable
+curl -s -S "$REPO/rpm-4.8.0-case-insensitive-sources.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-add-missing-__fxstat64.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-case-insensitive-fixes.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-fix-glob_pattern_p.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-fix-arm.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-remove-chroot-check.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-remove-strndup.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-allow-empty-buildroot.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-fix-missing-libgen.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-fix-find-provides.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-increase-line-buffer.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-increase-macro-buffer.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-fix-fontconfig-provides.patch" | patch -p1
+curl -s -S "$REPO/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch" | patch -p1
 
 case `uname` in
   Darwin)

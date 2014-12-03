@@ -2163,7 +2163,7 @@ class Package (object):
         f.write (self.__factory.postProcessSpec (self.spec).replace('%%', '%'))
         f.close ()
         commandPrefix = getCommandPrefix (self.options)
-        evalCommand = "%s rpm -q --specfile %s -i %s" % (commandPrefix,
+        evalCommand = "%s rpm -q --specfile %s --info %s" % (commandPrefix,
                                                       self.tmpspec, self.options.rpmQueryDefines)
         log (evalCommand, DEBUG)
         error, output = getstatusoutput (evalCommand)
@@ -2284,7 +2284,7 @@ class Package (object):
         localSources = []
         localPatches = []
         buildDeps    = []
-        queryCommand = "%s rpm -qi --specfile %s %s 2>/dev/null" % (getCommandPrefix (self.options),
+        queryCommand = "%s rpm -q --info --specfile %s %s 2>/dev/null" % (getCommandPrefix (self.options),
                                                                   self.tmpspec, self.options.rpmQueryDefines)
         regexps = self.__headerMatchingRegexp
         matchers = [(regexps.REQUIRES_REGEXP, deps),
