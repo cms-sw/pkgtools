@@ -1672,6 +1672,7 @@ class SubPackage (object):
         self.name           = '%s-%s' % (self.parent.name, self.subname)
         self.group          = self.parent.group
         self.version        = self.parent.version
+        self.realVersion    = self.parent.realVersion
         self.pkgRevision    = self.parent.pkgRevision
         self.pkgrel         = self.parent.pkgrel
         self.pkgdir         = self.parent.pkgdir
