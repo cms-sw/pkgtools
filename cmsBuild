@@ -1906,6 +1906,7 @@ class Package (object):
         """This function is responsible for finding and parsing all the IMPORT and SUBPACKAGE directives for a given spec.
         """
         imports = []
+        subpackages = {}
         self.subpackages = []
         for line in self.origSpec:
             imatch = self.__syntax.IMPORT.match (line)
@@ -1913,10 +1914,7 @@ class Package (object):
             if imatch:
                 imports.append (imatch.group (1).strip (" \n") + ".file")
             elif smatch:
-                subpackageName = smatch.group(1)
-                condition = smatch.group(3)
-                if not condition or self.isSymbolDefined(condition):
-                    self.subpackages.append( SubPackage(self, subpackageName) )
+                subpackages[smatch.group(1)] = smatch.group(3)
             else:
                 self.spec.append (line)
         try:
@@ -1926,6 +1924,12 @@ class Package (object):
                 self.imports.append (importFilename) 
         except IOError, e:
             raise FileNotFound (importFilename)
+
+        # Check for sub-packages after all processing all the imports
+        for subpackageName in subpackages:
+            condition = subpackages[subpackageName]
+            if not condition or self.isSymbolDefined(condition):
+                self.subpackages.append( SubPackage(self, subpackageName) )
 
     def isSymbolDefined(self, symbol):
         """This function checks if a symbol is defined in the current spec file. That is, if rpmbuild evaluates %symbol to a non-empty string. 
