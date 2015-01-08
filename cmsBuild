@@ -2921,7 +2921,7 @@ def buildPackage(pkg, scheduler):
 def installPackage(pkg, scheduler):
   if not checkCanInstallRpm (pkg):
     raise RpmBuildFailed (pkg)
-  scheduler.log("Trying to install the rpm package just built.")
+  scheduler.log("Trying to install the rpm package %s just built." % pkg.pkgName ())
   installRpm(pkg, pkg.options.bootstrap)
   scheduler.log("Done")
   #print scheduler.jobs
@@ -3163,6 +3163,10 @@ def checkPackageInCache(pkg, scheduler):
   scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
   scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
   scheduler.serial("install-%s" % pkgName, installActionDependencies, installPackage, pkg, scheduler)
+  #Install sub-packages too if any
+  subinstallActionDependencies = ["install-%s" % pkgName]
+  for subpkg in pkg.subpackages:
+    scheduler.serial("install-%s" % subpkg.pkgName(), subinstallActionDependencies, installPackage, subpkg, scheduler)
   scheduler.reschedule()
 
 # Helper to find an unique list 
@@ -3202,8 +3206,7 @@ def build(opts, args, factory):
   if err:
     fatal("unable to find a working rpm.")
   packages = [factory.createWithSpec(pkgName) for pkgName in args]
-  # expand subpackegs to be built
-  packages = factory.expandSubpackages(packages)
+  packages.sort()
   for pkg in packages:
     logMessage = "Package %s requested." % pkg.pkgName ()
     if not isDefaultRevision(pkg.pkgRevision):
