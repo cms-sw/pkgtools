@@ -2133,11 +2133,11 @@ class Package (object):
         self.fullDependencies = self.dependencies + self.buildDependencies
         for dep in self.fullDependencies:
             dep.dependentCounter += 1
-        self.dependencies           = self.__factory.expandSubpackages(self.dependencies)
-        self.origDependencies       = self.__factory.expandSubpackages(self.origDependencies)
-        self.buildDependencies      = self.__factory.expandSubpackages(self.buildDependencies)
-        self.origBuildDependencies  = self.__factory.expandSubpackages(self.origBuildDependencies)
-        self.fullDependencies       = self.__factory.expandSubpackages(self.fullDependencies)
+        self.dependencies.sort()
+        self.origDependencies.sort()
+        self.buildDependencies.sort()
+        self.origBuildDependencies.sort()
+        self.fullDependencies.sort()
 
     def dumpSpec (self):
         self.spec = "\n".join([self.specPreHeader, 
