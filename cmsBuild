@@ -2536,10 +2536,10 @@ def parseOptions():
     if len(args) < 2:
       fatal("Wrong number of arguments.")
     
-    if not args[0] in ["build", "upload"]:
+    if not args[0] in ["build", "upload", "deprecate-local"]:
       fatal("Unknown command %s. Alternatives are build, upload." % args[0])
     
-    if opts.syncBack and args[0] == "build":
+    if opts.syncBack and args[0] != "upload":
       fatal("--sync-back option is available only when uploading.")
 
     if "-cache" in opts.repository or "-cache" in opts.uploadTmpRepository:
@@ -3368,6 +3368,82 @@ def statusAndLog(status, s, **kwds):
   log(s % kwds)
   return status
 
+def executeScript(opts, dumpedScript, local=True):
+  if local:
+    executionCmd="sh -e %(debug)s %(filename)s"
+  else:
+    executionCmd="ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+  # Run (or print-out) the script
+  if not opts.pretend:
+    fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
+    f = os.fdopen(fd, "w")
+  else:
+    f = sys.stderr
+  f.write(dumpedScript)
+  f.close()
+  if not opts.pretend:
+    script = format(executionCmd,
+                    debug=opts.debug and "-x" or "",
+                    filename=filename,
+                    cmdServer=opts.uploadServer,
+                    cmdUser=opts.uploadUser,
+                    cmdPort=opts.uploadPort)
+    err, out = getstatusoutput(script)
+  if opts.debug:
+    log(out)
+  return (err, out)
+
+def allPackagesToUpload (args, factory):
+  pkgs = [factory.createWithSpec(specName) for specName in args]
+  if len(pkgs) !=  len(args):
+    return statusAndLog(False, "ERROR: Error while parsing spec.")
+
+  pkgs = factory.expandSubpackages(pkgs)
+  fullPackageList = []
+  fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
+  def checkIfValid (p):
+    return p not in fullPackageList and exists (p.rpmLocation())
+
+  for pkg in fullPackageList:
+    fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
+    fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
+  return fullPackageList
+
+def  deprecateLocalCommand(opts, fullPackageList):
+  if not fullPackageList: return "true"
+  deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
+  deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
+  deprecatedSrc  = " ".join(["SOURCES/"+p.pkgdir for p in fullPackageList])
+  deprecatedDir  = " ".join([p.pkgrel for p in fullPackageList])
+  deprecatedSRPM = " ".join(["SRPMS/cache/*/"+p.pkgName()+"*" for p in fullPackageList])
+  deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
+                          'cd %(workDir)s\n'
+                          'rm -rf %(deprecatedDir)s\n'
+                          "for x in %(deprecableRPMS)s; do\n"
+                          '  [ -e RPMS/$x ] || continue\n'
+                          '  realfile=`readlink RPMS/$x`\n'
+                          '  rm -f RPMS/$x\n'
+                          '  rm -f $realfile\n'
+                          "done\n"
+                          "for x in %(deprecatedSrc)s; do\n"
+                          '  [ -d $x ] || continue\n'
+                          "  for f in $x/*; do\n"
+                          '    realfile=`readlink $f || true`\n'
+                          '    [ "$realfile" ] || continue \n'
+                          '    rm -f $realfile\n'
+                          "  done\n"
+                          '  rm -rf $x\n'
+                          "done\n"
+                          "rm -rf %(deprecatedSRPM)s\n",
+                          architecture=opts.architecture,
+                          deprecableRPMS=deprecableRPMS,
+                          deprecatedSrc=deprecatedSrc,
+                          workDir=opts.workDir,
+                          deprecatedDir=deprecatedDir,
+                          deprecatedSRPM=deprecatedSRPM,
+                          deprecablePackages=deprecablePackages)
+  return deprecateLocal
+
 def upload(opts, args, factory):
   """New upload method. Updates using this are atomic and it should
      automatically retry when parallel updates happen.
@@ -3423,31 +3499,6 @@ def upload(opts, args, factory):
   def getResult(s, k):
     return [x.replace(k,"") for x in s.split("\n") if x.startswith(k)][0]
   
-  def executeScript(dumpedScript, local=True):
-    if local:
-      executionCmd="sh -e %(debug)s %(filename)s"
-    else:
-      executionCmd="ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
-    # Run (or print-out) the script
-    if not opts.pretend:
-      fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
-      f = os.fdopen(fd, "w")
-    else:
-      f = sys.stderr
-    f.write(dumpedScript)
-    f.close()
-    if not opts.pretend:
-      script = format(executionCmd,
-                      debug=opts.debug and "-x" or "",
-                      filename=filename,
-                      cmdServer=opts.uploadServer,
-                      cmdUser=opts.uploadUser,
-                      cmdPort=opts.uploadPort)
-      err, out = getstatusoutput(script)
-    if opts.debug:
-      log(out)
-    return (err, out)
-
   def logAndDieOnError(err, msg):
     if not err:
       return
@@ -3476,55 +3527,21 @@ def upload(opts, args, factory):
                        'echo RESULT:$PARENTHASH',
                        uploadDir=opts.uploadRootDirectory,
                        repository=opts.repository)
-  (err, parentHashResult) = executeScript(migrateRepo, False)
+  (err, parentHashResult) = executeScript(opts, migrateRepo, False)
   logAndDieOnError(err, "Error while migrating repository structure.")
   parentDirectory = getResult(parentHashResult, "PARENTDIR:")
   parentHash      = getResult(parentHashResult, "RESULT:")
 
   #Once we have established the parent then we should update the apt cache
   tags_cache.update()
-
-  pkgs = [factory.createWithSpec(specName) for specName in args]
-  if len(pkgs) !=  len(args):
-    return statusAndLog(False, "ERROR: Error while parsing spec.")
-
-  pkgs = factory.expandSubpackages(pkgs)
-  cmsplatf = pkgs[0].cmsplatf
-  fullPackageList = []
-  fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
-  def checkIfValid (p):
-    return p not in fullPackageList and exists (p.rpmLocation())
-      
-  for pkg in fullPackageList:
-    fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
-    fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
-
-  deprecablePackages = " ".join([pkg.pkgName() for pkg in fullPackageList])
-  deprecableRPMS = " ".join([p.rpmfilename for p in fullPackageList])
-  deprecatedSrc  = " ".join(["SOURCES/"+p.pkgdir for p in fullPackageList])
-  deprecatedDir  = " ".join([p.pkgrel for p in fullPackageList])
-  deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
-                          'cd %(workDir)s\n'
-                          'rm -rf %(deprecatedSrc)s\n'
-                          'rm -rf %(deprecatedDir)s\n'
-                          "for x in %(deprecableRPMS)s; do\n"
-                          '  [ -e RPMS/$x ] || continue\n'
-                          '  realfile=`readlink RPMS/$x`\n'
-                          '  rm -f RPMS/$x\n'
-                          '  rm -f $realfile\n'
-                          "done",
-                          architecture=opts.architecture,
-                          deprecableRPMS=deprecableRPMS,
-                          deprecatedSrc=deprecatedSrc,
-                          workDir=opts.workDir,
-                          deprecatedDir=deprecatedDir,
-                          deprecablePackages=deprecablePackages)
+  fullPackageList = allPackagesToUpload (args, factory)
+  cmsplatf = fullPackageList[0].cmsplatf
   uploadablePackages = []
   for pkg in fullPackageList:
     checker = BuildChecker(pkg)
     if not checker.checkConsistency():
       statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
-      executeScript(deprecateLocal)
+      executeScript(opts, deprecateLocalCommand(opts, fullPackageList))
       return False
     if not checker.checkIfUploadable():
       statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
@@ -3618,7 +3635,7 @@ def upload(opts, args, factory):
         checksum=checksum)
   
 
-  (err, out) = executeScript("\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
+  (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
   logAndDieOnError(err, "Error while creating the local repository.")
 
   repoInfo = {"uploadDir": opts.uploadRootDirectory,
@@ -3630,7 +3647,7 @@ def upload(opts, args, factory):
               "parentHash": parentHash}
 
   # Create unique repository on server
-  (err, createUploadTmp) = executeScript(format("mkdir -p  %(uploadDir)s/tmp\n"
+  (err, createUploadTmp) = executeScript(opts, format("mkdir -p  %(uploadDir)s/tmp\n"
                                                 "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
                                          False)
   logAndDieOnError(err, "Error while creating temporary directory.")
@@ -3653,7 +3670,7 @@ def upload(opts, args, factory):
                   tmpUploadDir=tmpUploadDir,
                   originalParentHash=parentHash,
                   **repoInfo)
-  (err, msg) = executeScript(upload, False)
+  (err, msg) = executeScript(opts, upload, False)
   if err:
     log("Parallel upload session in progress. Starting uploading procedure from scratch. This will check again build area consistency.")
     if opts.debug:
@@ -3666,7 +3683,7 @@ def upload(opts, args, factory):
                   tmpdir=tmpdir,
                   tmpUploadDir=tmpUploadDir,
                   **repoInfo)
-  (err, msg) = executeScript(upload, True)
+  (err, msg) = executeScript(opts, upload, True)
   if err:
     log("Something went wrong while uploading the rpms to server temp area.")
     if opts.debug:
@@ -3795,7 +3812,7 @@ def upload(opts, args, factory):
     syncBack=opts.syncBack,
     originalParentHash=parentHash,
     **repoInfo)
-  (err, msg) = executeScript(createRepo, False)
+  (err, msg) = executeScript(opts, createRepo, False)
   if err:
     log("Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
     if opts.debug:
@@ -3810,68 +3827,9 @@ def remove_help ():
 allOk = lambda x,y: x and y
 someOk = lambda x,y: x or y
 
-def removePackage (packageName, workdir):
-    if len (packageName.split ("+")) != 3:
-        log ("""Bad package name %s: 
-make sure you specified the full name, complete with group and version.
-e.g.: external+gcc+3.4.5-CMS3""" % packageName)
-        return False
-    def do (command):
-        log ("Doing: %s" % command, DEBUG)
-        error, output = getstatusoutput (command)
-        log ("Result: %s\n %s" % (error, output), DEBUG)
-        return (error, output)
-    def getDeps (packageName):
-        rpmTestRemove = """rpm -e --test %s""" % packageName
-        error, output = do (rpmTestRemove)
-        dependentPkgs = [getPkgName (line.rsplit(" ", 1)[1])
-                         for line in output.split ("\n")
-                         if "is needed by" in line]
-        return dependentPkgs
-    brokenPkg = [pkg for pkg in getDeps (packageName) if not removePackage (pkg)]
-    if brokenPkg:
-        log ("The following packages could not be removed: ")
-        for pkg in brokenPkg : log ("* %s" % pkg)
-    uninstallRpm = """rpm -e %(packageName)s || true""" % locals ()
-    srpmsDir = join (workdir, "SRPMS")
-    rpmsDir = join (workdir, "RPMS")
-    sourceDir = join (workdir, "SOURCES", *packageName.split ("+"))
-    packageRE = packageName.replace("+", "[+]")
-    removeRpms = "find %(rpmsDir)s %(srpmsDir)s -regex '.*/%(packageRE)s-1-[0-9][0-9]*[.].*' -exec rm '{}' \;" % locals()
-    removeSources = "rm -rf %s" % sourceDir
-    commands = [uninstallRpm, removeSources, removeRpms]
-    for cmd in commands: log (cmd, DEBUG)
-    commandsWithErrors = [cmd for cmd in commands if do (cmd)[0] != 0]
-    if commandsWithErrors:
-        log ("The following commands returned with error: ")
-        for cmd in commandsWithErrors: log ("* %s" % cmd)
-    return not commandsWithErrors
-
-def deprecateLocal (opts, args, factory):
-    """ Removes a package and all the references to it. Including:
-        1) Deinstalling it and the packages dependent on it
-        2) Deleting the rpm for it and dependent packages from RPMS.
-        3) Deleting the srpms for it and dependent packages from SRPMS.
-        4) Deleting its sources and ones for depending packages from SOURCES.
-    """
-    if not args:
-        remove_help ()
-        return
-    brokenPkgs = [ pkg for pkg in args if not removePackage (pkg, opts.workDir) ]
-    if brokenPkgs:
-        log ("Error while removing packages.")
-        for pkg in brokenPkgs: log (pkg)
-
-commandHandlers = {
-'help': help,
-'build': build,
-'sources': sources,
-'fetch': fetch,
-'bootstrap': bootstrap,
-'upload': upload,
-'deprecate-local': deprecateLocal,
-'check': check
-}
+def doDeprecateLocal (opts, args, factory):
+  fullPackageList = allPackagesToUpload(args, factory)
+  executeScript(opts, deprecateLocalCommand(opts, fullPackageList))
 
 def getSpecRepository (url, options):
     destTmpDir = abspath (options.tempDirPrefix)
@@ -3963,12 +3921,13 @@ if __name__ == "__main__":
     packages = {}
     #tags_cache = TagCacheAptImpl (opts)
     try:
-      # We only support two different workflows:
+      # We only support three different workflows:
       #
       # * cmsBuild [--no-bootstrap] build <package> [<additional packages>]
       # * cmsBuild [--no-bootstrap] [--sync-back] upload <package> [<additional packages>]
+      # * cmsBuild [--no-bootstrap] deprecate-local <package> [<additional packages>]
       #
-      # where both workflows include a bootstrap step (unless --no-bootstrap) is
+      # where all workflows include a bootstrap step (unless --no-bootstrap) is
       # specified and upload implies building the same packages.
       commandSpec = []
       
@@ -3979,11 +3938,12 @@ if __name__ == "__main__":
         cmsdist = abspath(opts.cmsdist)
         fatal("Wrong path specified for CMSDIST: %s.\nNothing done." % cmsdist)
 
-      commandSpec.append("build")
+      if args[0] != "deprecate-local":
+        commandSpec.append("build")
 
-      if args[0] == "upload":
-        commandSpec.append("upload")
-        
+      if args[0] != "build":
+        commandSpec.append(args[0])
+
       log("The following commands will be executed:\n %s" % 
           "\n".join (["* %s" % spec for spec in commandSpec]), DEBUG)
         
@@ -4100,6 +4060,8 @@ if __name__ == "__main__":
               setupAptEnvironment(aptInitSh)
               successfulBootstrapEnv = True
             tags_cache.update()
+          elif command == "deprecate-local":
+            doDeprecateLocal(opts, args[1:], factory)
           elif command == "build":
             build(opts, args[1:], factory)
           elif command == "upload":
