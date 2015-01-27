@@ -470,6 +470,53 @@ def cmd_corel(args):
   os.chdir(folder)
   checkoutTags(tags, opts.nthreads, opts.export, opts.dryrun, opts.cvsroot)
 
+def getSCRAMVariable(variable):
+  err, out = getstatusoutput("scram build -f echo_%s | grep %s | sed 's|^%s\s*=\s*||'" % (variable, variable, variable))
+  return out
+
+def checkBigProducts(release):
+  arch = getenv("SCRAM_ARCH")
+  err, releaseTop = getstatusoutput("cat .SCRAM/%s/Environment | sed 's|^RELEASETOP=||'" % arch)
+  releaseTop = releaseTop.rstrip()
+  if not releaseTop:
+    raise Exception("Error: Unable to find the base release path.")
+
+  if not os.path.exists(releaseTop):
+    raise Exception("Error: Release top does not exist: %s" % releaseTop)
+
+  if not os.path.exists(os.path.join(releaseTop, ".SCRAM" , arch, "subpackage-debug")):
+    return
+
+  print "Checking for Big products packages..."
+  getstatusoutput("scram build -r echo_CXX")
+  doReadTree=False
+  for bigprod in getSCRAMVariable("ALL_BIGPRODS").split(" "):
+    if not bigprod: continue
+    print "Checking big product "+bigprod
+    checkout_all=False
+    pkgs = []
+    for pkg in getSCRAMVariable(bigprod+"_PACKAGES").split(" "):
+      if (not pkg) or (not "/" in pkg): continue
+      if os.path.exists (os.path.join("src",pkg)):
+        checkout_all=True
+        print "  Rebuild all packages of big product %s due to %s" % (bigprod, pkg)
+      else:
+        pkgs.append(pkg)
+
+    if checkout_all:
+      if not pkgs:
+        print "  All packages for %s are already checked out" % bigprod
+        continue
+      doReadTree=True
+      f=open ("src/.git/info/sparse-checkout", "a")
+      for pkg in pkgs:
+        print pkg+"\n"
+        f.write(pkg+"\n")
+      f.close()
+  if doReadTree:
+    popen('eval `scram run -sh` && cd src && git read-tree -mu %s' % (release), False, True)
+  print "Checking for Big products packages... DONE"
+
 def cmd_frombase(args):
   parser = optparse.OptionParser(usage="cmspm frombase <base-release> <release> <project>")
   parser.add_option("-e", "--export", action="store_true", dest="export", default=False)
@@ -498,6 +545,9 @@ def cmd_frombase(args):
   print "Running cms-sparse-checkout..."
   popen('eval `scram run -sh` && git cms-addpkg -y FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -A -a' % (release, baserelease, release, release), False, True)
   print "Running cms-sparse-checkout... DONE"
+
+  checkBigProducts(release)
+
   if opts.export:
     deleteGITFolders('src')
 
