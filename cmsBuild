@@ -3400,12 +3400,11 @@ def allPackagesToUpload (args, factory):
 
   pkgs = factory.expandSubpackages(pkgs)
   fullPackageList = []
-  fullPackageList += [pkg for pkg in pkgs if pkg not in fullPackageList]
   def checkIfValid (p):
     return p not in fullPackageList and exists (p.rpmLocation())
 
-  for pkg in fullPackageList:
-    fullPackageList += [dep for dep in pkg.fullDependencies if checkIfValid(dep)]
+  for pkg in pkgs:
+    fullPackageList += [dep for dep in [pkg]+pkg.fullDependencies if checkIfValid(dep)]
     fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
   return fullPackageList
 
