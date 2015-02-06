@@ -3396,14 +3396,11 @@ def allPackagesToUpload (args, factory):
   if len(pkgs) !=  len(args):
     return statusAndLog(False, "ERROR: Error while parsing spec.")
 
-  pkgs = factory.expandSubpackages(pkgs)
   fullPackageList = []
-  def checkIfValid (p):
-    return p not in fullPackageList and exists (p.rpmLocation())
-
   for pkg in pkgs:
-    fullPackageList += [dep for dep in [pkg]+pkg.fullDependencies if checkIfValid(dep)]
-    fullPackageList += [sub for sub in pkg.subpackages if checkIfValid(sub)]
+    for dep in [pkg]+pkg.fullDependencies:
+      if dep not in fullPackageList and exists (dep.rpmLocation()):
+        fullPackageList.extend(factory.expandSubpackages([dep]))
   return fullPackageList
 
 def  deprecateLocalCommand(opts, fullPackageList):
