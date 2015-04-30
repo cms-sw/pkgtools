@@ -4,16 +4,6 @@
 
 PREFIX=/usr/local/bin
 BUILDPROCESSES=2
-case ${ARCH} in
-  osx*)
-    # Darwin is not RPM based, explicitly go for quessing the triplet
-    CONFIG_BUILD=quess
-    ;;
-  *)
-    # Assume Linux distro is RPM based and fetch triplet from RPM
-    CONFIG_BUILD=auto
-    ;;
-esac
 
 while [ $# -gt 0 ]
 do
@@ -64,6 +54,17 @@ do
     ;;
   esac
 done
+
+case ${ARCH} in
+  osx*)
+    # Darwin is not RPM based, explicitly go for guessing the triplet
+    CONFIG_BUILD=guess
+    ;;
+  *)
+    # Assume Linux distro is RPM based and fetch triplet from RPM
+    CONFIG_BUILD=auto
+    ;;
+esac
 
 set -e
 
