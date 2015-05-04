@@ -681,7 +681,6 @@ class TagCacheAptImpl (object):
         pairs = [chksumRE.sub(' ',line).split() for line in lines]
         try:
           self.cache = dict(pairs)
-          self.checksumCache = dict([(v,k) for (k,v) in pairs])
         except:
           die("Malformed apt-cache output.")
        
@@ -722,8 +721,17 @@ class TagCacheAptImpl (object):
         """
         output = ""
         if self.options.bootstrap:
-          if pkg.checksum  in self.checksumCache:
-            output = self.checksumCache[pkg.checksum]
+          matchingPackages = [n for n in self.cache if self.cache[n]==pkg.checksum]
+          if len(matchingPackages)>1:
+            orderedPackages = []
+            for n in matchingPackages:
+              if exists("%s/RPMS/cache/" % self.options.workDir + "%(checksum)s/%(cmsplatf)s/" % pkg.__dict__ + n + "-%(rpmVersion)s-%(pkgRevision)s.%(cmsplatf)s.rpm" % pkg.__dict__):
+                orderedPackages.insert(0,n)
+              else:
+                orderedPackages.append(n)
+            matchingPackages = orderedPackages
+          if len(matchingPackages):
+            output = matchingPackages[0]
           else:
             return None
         else:
