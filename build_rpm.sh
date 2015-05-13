@@ -4,6 +4,7 @@
 
 PREFIX=/usr/local/bin
 BUILDPROCESSES=2
+NEEDGCC=
 
 while [ $# -gt 0 ]
 do
@@ -44,8 +45,12 @@ do
       BUILDPROCESSES=$2 
       shift ; shift
     ;;
+    --buildgcc)
+      NEEDGCC=1
+      shift;
+    ;;
     --help)
-      echo "usage: build_rpm.sh --prefix PREFIX --arch SCRAM_ARCH [-j N]"
+      echo "usage: build_rpm.sh --prefix PREFIX --arch SCRAM_ARCH --buildgcc [-j N]"
       exit 1
     ;;
     *)
@@ -94,7 +99,7 @@ esac
 # became a Makefile internal one and needs to be passed on command line.  Keep
 # this in mind if we need to move to a newer NSS.
 case $ARCH in
-  osx10[0-6]*) ;;
+  osx10[4-6]*) ;;
   osx*) export NSS_USE_SYSTEM_SQLITE=1 ;;
 esac
 
@@ -133,7 +138,7 @@ case $CONFIG_BUILD in
 esac
 
 CONFIG_HOST=$CONFIG_BUILD
-
+ 
 # Fetch the sources.
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/nspr/releases/v4.9.5/src/nspr-4.9.5.tar.gz | tar xvz
 curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
@@ -141,15 +146,54 @@ curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_3_RTM/src/nss-3.14.3.tar.gz | tar xvz
 curl -k -s -S ftp://ftp.fu-berlin.de/unix/tools/file/file-5.13.tar.gz | tar xvz
 curl -k -s -S http://download.oracle.com/berkeley-db/db-4.5.20.tar.gz | tar xvz
-curl -k -s -S http://rpm.org/releases/rpm-4.8.x/rpm-4.8.0.tar.bz2 | tar xvj
+curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/rpm/rpm-4.8.0.tar.bz2/04b586910243cb2475ac16becd862731/rpm-4.8.0.tar.bz2 | tar xvj
 curl -k -s -S http://ftp.gnu.org/gnu/cpio/cpio-2.11.tar.bz2 | tar xvj
 
 # Build required externals.
+
 if [ ! $IS_ONLINE ]; then
 cd $HERE/zlib-1.2.8
 CFLAGS="-fPIC -O3 -DUSE_MMAP -DUNALIGNED_OK -D_LARGEFILE64_SOURCE=1" \
   ./configure --prefix $PREFIX --static
 make -j $BUILDPROCESSES && make install
+fi
+
+
+if [ $NEEDGCC ] ; then 
+cd $HERE
+curl -k -s -S http://gcc.petsads.us/releases/gcc-4.9.2/gcc-4.9.2.tar.bz2 | tar xvj
+
+cd $HERE/gcc-4.9.2
+
+curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/gmp/gmp-6.0.0a.tar.bz2/b7ff2d88cae7f8085bd5006096eed470/gmp-6.0.0a.tar.bz2 | tar xvj
+mv gmp-6.0.0 gmp || echo
+curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/mpfr/mpfr-3.1.2.tar.xz/e3d203d188b8fe60bb6578dd3152e05c/mpfr-3.1.2.tar.xz | tar xvJ
+mv mpfr-3.1.2 mpfr || echo 
+curl -k -s -S http://pkgs.fedoraproject.org/repo/extras/libmpc/mpc-1.0.2.tar.gz/68fadff3358fb3e7976c7a398a0af4c3/mpc-1.0.2.tar.gz | tar xvz
+mv mpc-1.0.2 mpc || echo 
+curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/gcc/isl-0.12.2.tar.bz2/e039bfcfb6c2ab039b8ee69bf883e824/isl-0.12.2.tar.bz2 | tar xvj
+mv isl-0.12.2 isl || echo 
+curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/cross-gcc/cloog-0.18.1.tar.gz/e34fca0540d840e5d0f6427e98c92252/cloog-0.18.1.tar.gz | tar xvz
+mv cloog-0.18.1 cloog || echo
+./configure --prefix=${PREFIX}\
+                 --disable-libgcj \
+                 --enable-threads=posix \
+                 --enable-__cxa_atexit \
+                 --enable-languages=c,c++ \
+                 --with-system-zlib \
+                 --enable-libstdcxx-time=yes \
+                 --enable-stage1-checking \
+                 --enable-checking=release \
+                 --enable-lto \
+                 --enable-plugin
+
+make bootstrap MAKE="make -j $BUILDPROCESSES" -j "$BUILDPROCESSES" && make install
+export CC=$PREFIX/bin/gcc
+export CPP=$PREFIX/bin/cpp
+export LD=$PREFIX/bin/gcc
+export CXX=$PREFIX/bin/g++
+export DYLD_LIBRARY_PATH=${PREFIX}/lib64:${PREFIX}/lib
+export PATH=${PREFIX}:$PATH
 fi
 
 cd $HERE/file-5.13
@@ -215,11 +259,10 @@ curl -s -S "$REPO/rpm-4.8.0-increase-line-buffer.patch" | patch -p1
 curl -s -S "$REPO/rpm-4.8.0-increase-macro-buffer.patch" | patch -p1
 curl -s -S "$REPO/rpm-4.8.0-fix-fontconfig-provides.patch" | patch -p1
 curl -s -S "$REPO/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch" | patch -p1
-
+curl -s -S "https://raw.githubusercontent.com/gartung/cmsdist/rpm480-htonll-patch/rpm-4.8.0-htonll-fix.patch" | patch -p1
 case `uname` in
   Darwin)
     export DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
-    USER_CFLAGS=-fnested-functions
     USER_LIBS=-liconv
     LIBPATHNAME=DYLD_FALLBACK_LIBRARY_PATH
   ;;
