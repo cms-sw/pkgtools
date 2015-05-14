@@ -53,7 +53,7 @@ def trace_calls(frame, event, arg):
          caller_line_no, caller_filename)
     return
 
-sys.settrace(trace_calls)
+#sys.settrace(trace_calls)
 
 def fatal(message):
   print "ERROR: " + message
