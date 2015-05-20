@@ -242,7 +242,7 @@ cd $HERE/db-4.5.20/build_unix
 make -j $BUILDPROCESSES && make install
 
 # Build the actual rpm distribution.
-cd $HERE/rpm-cms-4.8.0
+cd $HERE/rpm-cms-v4.8.0
 case `uname` in
   Darwin)
     export DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
