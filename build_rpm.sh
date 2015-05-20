@@ -146,7 +146,7 @@ curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_3_RTM/src/nss-3.14.3.tar.gz | tar xvz
 curl -k -s -S ftp://ftp.fu-berlin.de/unix/tools/file/file-5.13.tar.gz | tar xvz
 curl -k -s -S http://download.oracle.com/berkeley-db/db-4.5.20.tar.gz | tar xvz
-curl -k -s -S -L https://github.com/cms-externals/rpm/archive/cms/v4.8.0.zip>rpm-cms-v4.8.0.zip && unzip rpm-cms-v4.8.0.zip && rm rpm-cms-v4.8.0.zip
+curl -k -s -S -L https://github.com/cms-externals/rpm/archive/cms/v4.8.0.tar.gz | tar xvz
 curl -k -s -S http://ftp.gnu.org/gnu/cpio/cpio-2.11.tar.bz2 | tar xvj
 
 # Build required externals.
