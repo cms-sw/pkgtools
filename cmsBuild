@@ -3412,7 +3412,7 @@ def allPackagesToUpload (args, factory):
 
   fullPackageList = []
   for pkg in pkgs:
-    for dep in [pkg]+pkg.fullDependencies:
+    for dep in allDeps(pkg, factory):
       if dep not in fullPackageList and exists (dep.rpmLocation()):
         fullPackageList.extend(factory.expandSubpackages([dep]))
   return fullPackageList
