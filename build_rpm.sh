@@ -4,7 +4,6 @@
 
 PREFIX=/usr/local/bin
 BUILDPROCESSES=2
-NEEDGCC=
 
 while [ $# -gt 0 ]
 do
@@ -45,12 +44,8 @@ do
       BUILDPROCESSES=$2 
       shift ; shift
     ;;
-    --buildgcc)
-      NEEDGCC=1
-      shift;
-    ;;
     --help)
-      echo "usage: build_rpm.sh --prefix PREFIX --arch SCRAM_ARCH --buildgcc [-j N]"
+      echo "usage: build_rpm.sh --prefix PREFIX --arch SCRAM_ARCH [-j N]"
       exit 1
     ;;
     *)
@@ -156,44 +151,6 @@ cd $HERE/zlib-1.2.8
 CFLAGS="-fPIC -O3 -DUSE_MMAP -DUNALIGNED_OK -D_LARGEFILE64_SOURCE=1" \
   ./configure --prefix $PREFIX --static
 make -j $BUILDPROCESSES && make install
-fi
-
-
-if [ $NEEDGCC ] ; then 
-cd $HERE
-curl -k -s -S http://gcc.petsads.us/releases/gcc-4.9.2/gcc-4.9.2.tar.bz2 | tar xvj
-
-cd $HERE/gcc-4.9.2
-
-curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/gmp/gmp-6.0.0a.tar.bz2/b7ff2d88cae7f8085bd5006096eed470/gmp-6.0.0a.tar.bz2 | tar xvj
-mv gmp-6.0.0 gmp || echo
-curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/mpfr/mpfr-3.1.2.tar.xz/e3d203d188b8fe60bb6578dd3152e05c/mpfr-3.1.2.tar.xz | tar xvJ
-mv mpfr-3.1.2 mpfr || echo 
-curl -k -s -S http://pkgs.fedoraproject.org/repo/extras/libmpc/mpc-1.0.2.tar.gz/68fadff3358fb3e7976c7a398a0af4c3/mpc-1.0.2.tar.gz | tar xvz
-mv mpc-1.0.2 mpc || echo 
-curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/gcc/isl-0.12.2.tar.bz2/e039bfcfb6c2ab039b8ee69bf883e824/isl-0.12.2.tar.bz2 | tar xvj
-mv isl-0.12.2 isl || echo 
-curl -k -s -S http://pkgs.fedoraproject.org/repo/pkgs/cross-gcc/cloog-0.18.1.tar.gz/e34fca0540d840e5d0f6427e98c92252/cloog-0.18.1.tar.gz | tar xvz
-mv cloog-0.18.1 cloog || echo
-./configure --prefix=${PREFIX}\
-                 --disable-libgcj \
-                 --enable-threads=posix \
-                 --enable-__cxa_atexit \
-                 --enable-languages=c,c++ \
-                 --with-system-zlib \
-                 --enable-libstdcxx-time=yes \
-                 --enable-stage1-checking \
-                 --enable-checking=release \
-                 --enable-lto \
-                 --enable-plugin
-
-make bootstrap MAKE="make -j $BUILDPROCESSES" -j "$BUILDPROCESSES" && make install
-export CC=$PREFIX/bin/gcc
-export CPP=$PREFIX/bin/cpp
-export LD=$PREFIX/bin/gcc
-export CXX=$PREFIX/bin/g++
-export DYLD_LIBRARY_PATH=${PREFIX}/lib64:${PREFIX}/lib
-export PATH=${PREFIX}:$PATH
 fi
 
 cd $HERE/file-5.13
