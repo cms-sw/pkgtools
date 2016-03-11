@@ -25,7 +25,7 @@ case $CMSSW_X_Y_Z in
 esac
 
 case $ARCH in
-  osx*|slc*) ;;
+  osx*|slc*|fc*) ;;
   *) echo "Malformed architecture name." ; exit 1 ;;
 esac
 
@@ -47,5 +47,4 @@ pushd CMSDIST
   git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec cmssw-patch-tool-conf.spec cmssw-toolfile.spec
   git reset --hard HEAD
   git clean -fxd
-  git tag ${INITIALS}For${CMSSW_ORIG}-${ARCH}
 popd
