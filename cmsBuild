@@ -485,11 +485,15 @@ def download (source, dest, options):
     cachedFile = "%s/%s/SOURCES/cache/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
     downloadOptions = DownloadOptions(options)
     log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
+    getstatusoutput ("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
     success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions, True)
     if not success:
       log ("Trying to fetch source file: %s" % source, DEBUG)
       success = downloadHandler (source, downloadDir, downloadOptions)
     if success:
+        if '/github.com/' in source:
+            r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
+            r.close ()
         f=open (join (downloadDir, "url"), 'w')
         f.write ("%s\n" % source)
         f.close ()
