@@ -2617,7 +2617,7 @@ def fetchLocal (pkg, sourceFilename):
     except Exception, e:
         return (sourceFilename, False)
 
-def fetchSourcesNew(pkg, scheduler):
+def fetchSources(pkg, scheduler):
   scheduler.log("Fetching sources for %s" % pkg.name)
   sourcedir = pkg.sourcedir
   downloadables = pkg.sources + pkg.patches
@@ -2640,38 +2640,6 @@ def fetchSourcesNew(pkg, scheduler):
     if not success:
       return "Unable to download %s" % url
     scheduler.log("Done fetching %s" % url)
-
-def fetchSources (pkg):
-    log ("Fetching sources for %s" % pkg.name, DEBUG)
-    sourcedir = pkg.sourcedir
-    if not sources and not patches:
-        log ("No sources to be downloaded found for packages %(name)s" % pkg.__dict__)
-    urlRe = re.compile (".*:.*/.*")
-
-    def doDownload (source):
-        log (source, DEBUG)
-        if urlRe.match (source):
-            result = download (source, sourcedir, pkg.options)
-            if not result:
-                raise UnableToDownload (source)
-        else:
-            output, success = fetchLocal (pkg, source)
-            if not success:
-                raise UnableToDownload (source)
-
-    if not exists (pkg.sourcedir):
-        log ("Creating directory %s" % sourcedir, DEBUG)
-        makedirs (sourcedir)
-
-    pkg.dumpCmsos ()
-    if pkg.patches:
-        log ("Fetching local patches:", DEBUG)
-        for url in pkg.patches : doDownload (url)
-        
-    if pkg.sources:
-        log ("Fetching sources: ", DEBUG)
-        for url in pkg.sources : doDownload (url)
-    return (pkg.name, True)
 
 def checkIfInstalled (pkg):
     """ Check if a given rpm is already in the db.
@@ -2813,7 +2781,6 @@ def scheduleInstallPackage(pkg, scheduler):
     return False
 
   scheduler.log("Checking if %s is cached." % pkg.name)
-  # FIXME: this is evaluated twice!! look at rpmBuild
   actionName = "install-%s" % pkg.pkgName()
   if checkIfInstalled(pkg):
     scheduler.log("%s already in rpm database. Not building." % pkg.name)
@@ -2951,94 +2918,6 @@ def installPackage(pkg, scheduler):
   f.close ()
   scheduler.reschedule()
 
-def rpmBuild (pkg, tracker):
-    """ This helper function is responsible for building/installing a given spec and it's associated
-        rpm. What it does is the following (TODO):
-        * Checks if the rpm is already installed in the RPM DB. If yes, exists.
-        * Checks if the rpm is already available in the local area. If yes, installs it.
-        * Checks if the rpm is already available on the apt server. If yes, downloads, installs and returns.
-        If any of the above is true it:
-        * Builds the rpm, if it fails, it aborts.
-        * Installs the rpm in the local db, if it fails, it aborts."""
-    if pkg.name == "system-compiler":
-        return
-    
-    log ("Creating directory %s if not existing." % pkg.builddir, DEBUG)
-    if not exists (pkg.builddir):
-        makedirs (pkg.builddir)
-    logfile = "%s/log" % pkg.builddir
-    
-    log ("Building %s. Log can be found in %s." % (pkg.name, logfile), DEBUG)
-    tracker.postMessage ("BUILD_PKG", {"pkgName": pkg.pkgName (),
-                                       "logFile": logfile})
-    optionsDict = {
-        "topdir": abspath("."),
-        "specdir": pkg.specdir,
-        "builddir": pkg.builddir,
-        "makeprocesses": "",
-        "ignoreCompileErrors": ""
-    }
-
-    rpmsCacheDir = dirname (join (abspath ("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename))
-    finalRpmCacheDir = dirname (join (abspath ("RPMS"), pkg.rpmfilename))
-    srpmsCacheDir = join (abspath ("SRPMS/cache/%s" % pkg.checksum))
-    
-    for directory in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir]:
-         if not exists (directory): makedirs (directory) 
-    
-    finalRpmFilename = join (abspath ("RPMS"), pkg.rpmfilename)
-    uniqueRpmFilename = join (abspath ("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename)
-
-    handleStaleFiles ([finalRpmFilename, uniqueRpmFilename], pkg.options.noCleanup)    
-    
-    if pkg.options.compilingProcesses:
-        optionsDict["makeprocesses"] = "--define \"compiling_processes %s\"" % pkg.options.compilingProcesses
-    if pkg.options.ignoreCompileErrors:
-        optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\"" 
-    
-    optionsDict["prefix"] = getCommandPrefix (pkg.options)
-    optionsDict["tmpdir"]    = join (opts.workDir, opts.tempDirPrefix)
-    optionsDict["buildRoot"] = join (optionsDict["tmpdir"], "BUILDROOT", pkg.checksum )
-    optionsDict["extraRpmDefines"] = pkg.options.rpmQueryDefines
-
-    err, out = getstatusoutput("rpmbuild --version")
-    if err:
-      fatal("ERROR: unable to find working rpmbuild")
- 
-    rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
-                      " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
-                      " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
-    rpmbuildCommand = rpmbuildCommand.strip ()
-    log (rpmbuildCommand, DEBUG)
-    error, output = getstatusoutput (rpmbuildCommand)
-    if error:
-        raise RpmBuildFailed (pkg)
-    if output:
-        log ("WARNING! Unexpected output:")
-        log ("%s" % output)
-    log ("Build successful.", DEBUG)
-   
-    # link the RPM from the unique name to the friendly name
-    symlink (uniqueRpmFilename, finalRpmFilename)
-    # link subpackages, if any
-    for subpackage in pkg.subpackages:
-        finalSubFilename = join (abspath ("RPMS"), subpackage.rpmfilename)
-        uniqueSubFilename = join (abspath ("RPMS/cache/%s" % subpackage.checksum), subpackage.rpmfilename)
-        symlink (uniqueSubFilename, finalSubFilename)
-    
-    if not checkCanInstallRpm (pkg):
-        raise RpmBuildFailed (pkg)
-    log ("Trying to install the rpm package just built.", DEBUG)
-    log ("Acquiring lock", TRACE)
-    tracker.globalLock.acquire ()
-    log ("Lock acquired", TRACE)
-    installRpm (pkg, pkg.options.bootstrap)
-    tracker.globalLock.release ()
-    log ("Done", DEBUG)
-    f = open (join (pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
-    f.write (pkg.checksum)
-    f.close ()
-
 from time import sleep
 
 class ActionFactory (object):
@@ -3173,7 +3052,7 @@ def checkPackageInCache(pkg, scheduler):
     if len(baseToolVersion)>0:
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
-  scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSourcesNew, pkg, scheduler)
+  scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
   buildActionDependencies = []
   for p in pkg.origDependencies + pkg.origBuildDependencies:
     if not isPackageInstalled(p):
@@ -3265,24 +3144,6 @@ def isPackageInstalled(pkg):
         if exists(join(instDir, ".package-checksum")):
             return True
     return False
-
-def fetch (opts, args, factory):
-    pkgList = []
-    for pkgName in args:
-        # do not care about subpackages, they come from the same sources as the master
-        pkg = factory.createWithSpec(pkgName)
-        createDirs(architecture=pkg.cmsplatf)
-        pkgList += pkg.fullDependencies + [pkg]
-    for pkg in pkgList:
-        fetchSources (pkg)
-
-def sources (opts, args, factory):
-    for pkgName in args:
-        # do not care about subpackages, they come from the same sources as the master
-        pkg = factory.createWithSpec (pkgName)
-        log ("The following files are going to be fetched for package %s." % pkg.name)
-        [log ("Source: %s" % source) for source in pkg.sources if source != "none"]
-        [log ("Patch: %s" % source) for source in pkg.patches if source != "none"]
 
 class PlatformDetectionError (Exception):
     pass
