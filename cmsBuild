@@ -94,7 +94,7 @@ def recursive_glob(treeroot, pattern):
 
 rpm_db_cache = {}
     
-def downloadUrllib2(source, destDir, options):
+def downloadUrllib2(source, destDir, options, cmscache=False):
     try:
       dest = "/".join([destDir.rstrip("/"), basename(source)])
       req = urllib2.Request(source, headers={"Cache-Control": "no-cache"})
@@ -110,11 +110,12 @@ def downloadUrllib2(source, destDir, options):
       f.close()
       os.rename(dest+".tmp",dest)
     except URLError, e:
-      if not "SOURCES/cache" in source:
+      if cmscache:
+        log("Internal cached file not available %s: %s" % (source, e), DEBUG)
+      else:
         log("Error while downloading %s: %s" % (source, e))
       return False
     except Exception, e:
-      print source, destDir
       log("Error while downloading %s: %s" % (source, e))
       return False
     return True
@@ -477,17 +478,17 @@ def download (source, dest, options):
         raise downloadDir 
 
     realFile = join (downloadDir,filename)
-    if exists (realFile) and not exists (join (dest, filename)):
-        symlink (realFile, join (dest, filename))
-        return True
     if exists (realFile):
-        return True
+      if not exists (join (dest, filename)):
+        symlink (realFile, join (dest, filename))
+      return True
     cachedFile = "%s/%s/SOURCES/cache/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
     downloadOptions = DownloadOptions(options)
     log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
-    success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions)
+    success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions, True)
     if not success:
-        success = downloadHandler (source, downloadDir, downloadOptions)
+      log ("Trying to fetch source file: %s" % source, DEBUG)
+      success = downloadHandler (source, downloadDir, downloadOptions)
     if success:
         f=open (join (downloadDir, "url"), 'w')
         f.write ("%s\n" % source)
