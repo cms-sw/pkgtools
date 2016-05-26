@@ -32,6 +32,7 @@ TRACE=30
 DEFAULT_CVS_SERVER=":pserver:anonymous@cmscvs.cern.ch:2401/local/reps/CMSSW"
 DEFAULT_CVS_PASSWORD="AA_:yZZ3e"
 DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
+SERVER_TMP_UPLOAD_DIRECTORY=None
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
@@ -3328,7 +3329,14 @@ def  deprecateLocalCommand(opts, fullPackageList):
                           deprecablePackages=deprecablePackages)
   return deprecateLocal
 
+def cleanup_server_upload(opts):
+  global SERVER_TMP_UPLOAD_DIRECTORY
+  if not SERVER_TMP_UPLOAD_DIRECTORY: return
+  cleanupCmd = format("rm -rf %(tmpdir)s", tmpdir=SERVER_TMP_UPLOAD_DIRECTORY)
+  executeScript(opts, cleanupCmd, False)
+
 def upload(opts, args, factory):
+  global SERVER_TMP_UPLOAD_DIRECTORY
   """New upload method. Updates using this are atomic and it should
      automatically retry when parallel updates happen.
      The workflow is the following.
@@ -3387,6 +3395,7 @@ def upload(opts, args, factory):
     if not err:
       return
     log(msg)
+    cleanup_server_upload(opts)
     sys.exit(1)
 
   migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
@@ -3538,6 +3547,7 @@ def upload(opts, args, factory):
                                          False)
   logAndDieOnError(err, "Error while creating temporary directory.")
   tmpUploadDir = getResult(createUploadTmp, "RESULT:")
+  SERVER_TMP_UPLOAD_DIRECTORY = tmpUploadDir 
   
   # Before uploading the rpms to server temp area, make sure no one is using
   # the same parent
