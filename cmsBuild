@@ -32,6 +32,7 @@ TRACE=30
 DEFAULT_CVS_SERVER=":pserver:anonymous@cmscvs.cern.ch:2401/local/reps/CMSSW"
 DEFAULT_CVS_PASSWORD="AA_:yZZ3e"
 DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
+CMSPKG_CMD="cmspkg"
 SERVER_TMP_UPLOAD_DIRECTORY=None
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
@@ -483,7 +484,7 @@ def download (source, dest, options):
       if not exists (join (dest, filename)):
         symlink (realFile, join (dest, filename))
       return True
-    cachedFile = "%s/%s/SOURCES/cache/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
+    cachedFile = "%s/SOURCES/%s/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
     downloadOptions = DownloadOptions(options)
     log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
     getstatusoutput ("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
@@ -675,21 +676,19 @@ class TagCacheAptImpl (object):
     
     def update (self):
       if self.options.bootstrap:
-        aptGetUpdateCommand = "apt-get update -o Acquire::http::No-Cache=true -o Acquire::http::Pipeline-Depth=0"
-        error, output = getstatusoutput (aptGetUpdateCommand)
+        error, output = getstatusoutput ("%s update" % CMSPKG_CMD)
         if error:
-          die("Error while executing apt-get update.\n%s" % output)
-        aptCacheCommand = "apt-cache search SpecChecksum"
-        error, output = getstatusoutput(aptCacheCommand)
+          die("Error while executing cmspkg update.\n%s" % output)
+        error, output = getstatusoutput("%s search" % CMSPKG_CMD)
         if error:
-          die("Error while executing apt-cache search SpecCheckum.\n%s" % output)
+          die("Error while executing cmspkg search.\n%s" % output)
         lines = [line for line in output.split("\n") if line]
         chksumRE = re.compile("\s+-\s+.*?SpecChecksum:")
         pairs = [chksumRE.sub(' ',line).split() for line in lines]
         try:
           self.cache = dict(pairs)
         except:
-          die("Malformed apt-cache output.")
+          die("Malformed cmspkg search output.")
        
     def requestTag (self, pkgInfo, tag):
         """ requestTag returns a unique tag (i.e. the mnemonic suffix at the 
@@ -704,7 +703,8 @@ class TagCacheAptImpl (object):
         """
         tags = {}
         if self.options.bootstrap:
-            matchingPackages = [(n, self.cache[n]) for n in self.cache if pkgInfo.id() in n]
+            matchingPackages = [(n, rpm_db_cache[n][1]) for n in rpm_db_cache if (pkgInfo.id() in n) and (not n in self.cache)]
+            matchingPackages += [(n, self.cache[n]) for n in self.cache if pkgInfo.id() in n]
             for name, checksum in matchingPackages:
                 tempTag = name.replace(pkgInfo.id (), "").strip ("-")
                 tags[tempTag] = checksum
@@ -723,12 +723,13 @@ class TagCacheAptImpl (object):
     
     def getTag (self, pkg):
         """ getTag looks up for a tag associated to an md5 sum the following way.
-        1) Look up in the cache apt-cache search results.
+        1) Look up in the cache cmspkg search results.
         2) Looks up in RPMS/cache/<checksum> to see if a package is already there.
         """
         output = ""
         if self.options.bootstrap:
           matchingPackages = [n for n in self.cache if self.cache[n]==pkg.checksum]
+          matchingPackages +=[n for n in rpm_db_cache if rpm_db_cache[n][1]==pkg.checksum]
           if len(matchingPackages)>1:
             orderedPackages = []
             for n in matchingPackages:
@@ -1469,23 +1470,12 @@ class InstallFromServer (BuilderAction):
         pkgsWithSameHash = [p for (p,h) in tags_cache.cache.iteritems() if (h == pkgInfo.checksum) and p.startswith(pkgRealName) and (pkgName != p) ]
 
         # If a file exists on server we return True
-        pkgNameApt = self.pkg.pkgName ().replace ("+", "\\+")         
-        aptCommand = """apt-cache showpkg %(pkgNameApt)s""" % locals ()
-        error, output = getstatusoutput (aptCommand)
-        try:
-          self.output = output.split("Versions:",1)[1].split('Reverse Depends:')[0]
-        except:
-          die("Error while parsing %s" % output)
-        def evalExistsOnServer ():
-            for line in self.output.split ("\n"): 
-                if not line.startswith("1-%s." % self.pkg.pkgRevision):
-                    continue
-                if "var/lib/apt/lists" in line:
-                    return True
-            return False
-        if error:
-            return False
-        return pkgsWithSameHash or evalExistsOnServer ()
+        cmsPkgCmd = CMSPKG_CMD
+        searchCommand = """%(cmsPkgCmd)s -f search %(pkgName)s; rpm -q %(pkgName)s""" % locals ()
+        error, output = getstatusoutput (searchCommand)
+        self.output = output
+        if error: return False
+        return pkgsWithSameHash or output.startswith(self.pkg.pkgName()+' - ')
     
     def doExpectedResults (self):
         # In order for a download to be successful we expect:
@@ -1496,9 +1486,9 @@ class InstallFromServer (BuilderAction):
             return False
         
         def onServerAndLocal ():
-            if "var/lib/apt/lists" in self.output and "var/lib/rpm/Packages" in self.output:
-                return True
-            return False 
+            if not self.output.startswith(self.pkg.pkgName()+' - '): return False
+            if "is not installed" in self.output: return False
+            return True
         rpmInstalled = onServerAndLocal ()
         rpmFilename = join (abspath (self.pkg.rpmdir), self.pkg.rpmfilename)
         return rpmInstalled and not exists (rpmFilename) 
@@ -2435,8 +2425,8 @@ def parseOptions():
     advancedBuildOptions.add_option("--server",
                                     dest="server",
                                     metavar="URL",
-                                    help="URL of apt repository. E.g. 'http://cmsrep.cern.ch/cmssw'",
-                                    default="http://cmsrep.cern.ch/cmssw")
+                                    help="URL of apt repository. E.g. 'http://cmsrep.cern.ch/cgi-bin/cmspkg'",
+                                    default="http://cmsrep.cern.ch/cgi-bin/cmspkg")
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
@@ -2649,7 +2639,7 @@ def checkIfInstalled (pkg):
         return False
     
     if not isDefaultRevision(pkg.pkgRevision):
-        revision = rpm_db_cache[pkg.pkgName()]
+        revision = rpm_db_cache[pkg.pkgName()][0]
         if revision >= pkg.pkgRevision:
             log("RPM %s found in RPM db with Revision %s (bigger than pkgRevision = %s)" % ( pkg.pkgName (),revision,pkg.pkgRevision), DEBUG)
             return True
@@ -2664,7 +2654,7 @@ def checkIfOnServer (pkg):
     log ("Checking if package %s can be downloaded from apt servers" % pkg.pkgName(), DEBUG)
     if tags_cache.cache.has_key(pkg.pkgName()) and isDefaultRevision(pkg.pkgRevision):
         return True
-    error, output = getstatusoutput ("apt-cache show %s" % pkg.pkgName())
+    error, output = getstatusoutput ("%s -f search %s" % (CMSPKG_CMD, pkg.pkgName()))
     if error or not output:
         log ("RPM %s not found in apt repository." % pkg.pkgName (), DEBUG)
         return False
@@ -2675,7 +2665,7 @@ def checkIfOnServer (pkg):
     assert(lines)
     for line in lines:
         key, value = [l.strip() for l in line.split(":", 1)]
-        log ("Parsing apt-cache show. key: %s,i value: %s." % (key,value), DEBUG)
+        log ("Parsing cmspkg show. key: %s,i value: %s." % (key,value), DEBUG)
         if key == "Package":
             pkgName = value
         if key == "Version":
@@ -2755,13 +2745,13 @@ def installRpm (pkg, bootstrap):
     log ("Done installing via rpm.", DEBUG)
 
 def installApt (pkg, scheduler):
-    command = "apt-get -y install %s" % pkg.pkgName ()
+    command = "%s -f -j %s install %s" % (CMSPKG_CMD, pkg.options.workersPoolSize, pkg.pkgName ())
     error, output = getstatusoutput (command)
-    log ("About to install %s using apt..." % pkg.pkgName (), DEBUG)
+    log ("About to install %s using cmspkg..." % pkg.pkgName (), DEBUG)
     if error:
         log ("Command:\n %(command)s failed with the following message: %(output)s" % locals (), DEBUG)
         raise RpmInstallFailed (pkg, output)
-    log ("Done installing via apt.", DEBUG)
+    log ("Done installing via cmspkg.", DEBUG)
     for dep in pkg.dependencies:
       scheduler.forceDone("check-%s" % dep.pkgName())
       scheduler.forceDone("install-%s" % dep.pkgName())
@@ -2792,21 +2782,11 @@ def scheduleInstallPackage(pkg, scheduler):
     scheduler.serial(actionName, [], installRpm, pkg, bootstrapped)
     return True
   if checkIfOnServer (pkg):
-    scheduler.log("%s is available from remote apt-get repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository))
-    aptPackageInstallDeps = []
-    for dep in pkg.dependencies + [pkg]:
-       if not checkIfInstalled(dep):
-         aptPackageInstallDeps.append("downloadrpm-%s" % dep.pkgName())
-         scheduler.parallel(aptPackageInstallDeps[-1], [], downloadRpmsForApt, dep)
-    scheduler.serial(actionName, aptPackageInstallDeps, installApt, pkg, scheduler)
+    scheduler.log("%s is available from remote repository \"%s\". Not building. Downloading and installing..." % (pkg.name, pkg.options.repository))
+    scheduler.serial(actionName, [], installApt, pkg, scheduler)
     return True
   return False
   
-def downloadRpmsForApt(pkg):
-  src = "%s/%s/RPMS/%s" % (pkg.options.server.rstrip ("/"), pkg.options.repository, pkg.rpmfilename)
-  des= "%s/%s/var/lib/cache/%s" % (pkg.options.workDir, pkg.cmsplatf,pkg.cmsplatf)
-  downloadUrllib2(src,des,pkg.options)
-
 def getCommandPrefix (options):
     linux32RE = "slc[^_]+_ia32_gcc[^_]+"
     returnString=""
@@ -3079,7 +3059,7 @@ def uniq(input):
   return output
 
 # New version using the new scheduler.
-def buildSpecsNew(topLevelPackages):
+def buildSpecs(topLevelPackages):
   from scheduler import Scheduler
   scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize)
   for pkg in topLevelPackages:
@@ -3106,6 +3086,7 @@ def build(opts, args, factory):
   err, out = getstatusoutput("rpm --version")
   if err:
     fatal("unable to find a working rpm.")
+  rpmCacheUpdate(opts)
   packages = [factory.createWithSpec(pkgName) for pkgName in args]
   packages.sort()
   for pkg in packages:
@@ -3127,18 +3108,16 @@ def build(opts, args, factory):
   if opts.pretend:
       log ("Option --pretend specified. Not building.")
       return
-  
-  rpmCacheUpdate(opts)
-  buildSpecsNew(packages)
+  buildSpecs(packages)
 
 def isPackageInstalled(pkg):
     if pkg.options.bootstrap:
         pkgName = pkg.pkgName ()
         if rpm_db_cache.has_key(pkgName):
             if not isDefaultRevision(pkg.pkgRevision):
-                if rpm_db_cache[pkgName] < pkg.pkgRevision:
+                if rpm_db_cache[pkgName][0] < pkg.pkgRevision:
                     return False
-            log ("Package %s with same/newer revision %s is already installed" % (pkgName, str(rpm_db_cache[pkgName])), DEBUG)
+            log ("Package %s with same/newer revision %s is already installed" % (pkgName, str(rpm_db_cache[pkgName][0])), DEBUG)
             return True
     else:
         instDir = join(pkg.options.workDir, pkg.pkgrel)
@@ -3164,12 +3143,12 @@ def callCmsos (opts):
 # @return the location of the init.sh script to be sourced when building 
 #         or uploading.
 def bootstrap(opts):
-  bootstrapUrl = "%s/%s/bootstrap.sh" % (opts.server, opts.repository)
+  bootstrapUrl = "%s/file/%s/%s/%s" % (opts.server, opts.repository,  opts.architecture, "bootstrap.sh")
   try:
     f=urlopen(bootstrapUrl)
     bootstrapContents = f.read()
   except:
-    log("Unable to fetch file %s. Mispelled architecture name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
+    log("Unable to fetch file %s. Mispelled architecture/repository name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
     sys.exit (1)
   bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
   bootstrapFile = open(bootstrapFilename, "w")
@@ -3177,13 +3156,8 @@ def bootstrap(opts):
   bootstrapFile.close()
       
   log("Bootstrapping from server %s" % opts.server, DEBUG)
-  boostrapServer = opts.server.replace("http://","").replace("https://","")
-  parts = boostrapServer.split("/", 1) 
-  if len(parts) == 2:
-    bootstrapServer = parts[0]
-    bootstrapServerPath = "-server-path " + parts[1]
-  else:
-    bootstrapServerPath = ""
+  bootstrapServer = opts.server.replace("http://","").replace("https://","").split("/",1)[0]
+  bootstrapServerPath = ""
   options = ["-server", bootstrapServer, 
              bootstrapServerPath,
              "-arch",  opts.architecture,
@@ -3203,14 +3177,14 @@ def bootstrap(opts):
   if error:
     fatal("unsuccessful bootstrap, log can be found in %s." % bootstrapLog)
 
-  parts = glob(join(opts.workDir,opts.architecture, "external/apt/*/etc/profile.d/init.sh"))
+  parts = glob(join(opts.workDir,opts.architecture, "cms/cmspkg/*/etc/profile.d/init.sh"))
   if len(parts) != 1:
-    fatal("""malformed bootstrap. More than one apt installation found.""")
+    fatal("""malformed bootstrap. More than one cmspkg installation found.""")
 
   initSh = parts[0]
 
   if not exists(initSh):
-    fatal("""ERROR: cannot read apt-get environment. File missing: %s.""" % s)
+    fatal("""ERROR: cannot read cmspkg environment. File missing: %s.""" % s)
 
   # If we are not in a cfg file write where to find the correct init.sh
   log("Done. Setup log can be found in %s." % bootstrapLog)
@@ -3272,8 +3246,7 @@ def executeScript(opts, dumpedScript, local=True):
                     cmdUser=opts.uploadUser,
                     cmdPort=opts.uploadPort)
     err, out = getstatusoutput(script)
-  if opts.debug:
-    log(out)
+  if opts.debug: log(out)
   return (err, out)
 
 def allPackagesToUpload (args, factory):
@@ -3332,8 +3305,9 @@ def  deprecateLocalCommand(opts, fullPackageList):
 def cleanup_server_upload(opts):
   global SERVER_TMP_UPLOAD_DIRECTORY
   if not SERVER_TMP_UPLOAD_DIRECTORY: return
-  cleanupCmd = format("rm -rf %(tmpdir)s", tmpdir=SERVER_TMP_UPLOAD_DIRECTORY)
+  cleanupCmd = format("rm -rf %(tmpdir)s*", tmpdir=SERVER_TMP_UPLOAD_DIRECTORY)
   executeScript(opts, cleanupCmd, False)
+  SERVER_TMP_UPLOAD_DIRECTORY = None
 
 def upload(opts, args, factory):
   global SERVER_TMP_UPLOAD_DIRECTORY
@@ -3780,13 +3754,13 @@ def restoreOriginalEnvironment ():
 def rpmCacheUpdate(opts):
     if hasattr (opts, "bootstrap") and opts.bootstrap == True:
         rpm_db_cache.clear()
-        rpmQueryCommand = "rpm -qa --queryformat '%{NAME} %{RELEASE}\n'"
+        rpmQueryCommand = "rpm -qa --queryformat '%{NAME} %{RELEASE} %{SUMMARY}\n' | sed 's|CMS Experiment package SpecChecksum:||'"
         error, output = getstatusoutput (rpmQueryCommand)
         if error:
             die("Error while executing rpm -qa.\n%s" % output)
         for p in output.split("\n"):
-            n,r = p.split(" ",1)
-            rpm_db_cache[n]=r
+            n,r,c = p.split(" ",2)
+            rpm_db_cache[n]=[r,c]
     return
 
 def setupAptEnvironment(environmentInitSh):
@@ -3796,9 +3770,6 @@ def setupAptEnvironment(environmentInitSh):
     if len(parts) != 2:
       fatal("Unable to interpret environment. Malformed line %s" % line)
     environ.__setitem__(*parts)
-  error, aptLocation = getstatusoutput("which apt-get")
-  if error or not aptLocation.startswith(opts.workDir):
-    fatal("Cannot find a working apt-get in bootstrapped area %s" % opts.workDir)
 
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
@@ -3843,7 +3814,8 @@ if __name__ == "__main__":
       if not exists(opts.tempdir):
         makedirs(opts.tempdir)
       chdir (opts.workDir)
-      
+      CMSPKG_CMD = join(opts.workDir,"common",CMSPKG_CMD) + " --architecture %s" % opts.architecture
+
       #Process level lock: To make sure that there is only one cmsBuild process is running for this work area
       procLock = cmsLock(opts.workDir)
       if not procLock:
@@ -3943,12 +3915,12 @@ if __name__ == "__main__":
             #
             # Source the apt-init.sh file and setup the environment,
             # update the apt cache.
-            aptInitSh = join(opts.workDir, opts.architecture, "apt-init.sh") 
-            if not exists(aptInitSh):
+            envSh = join(opts.workDir, opts.architecture, "cmspkg-init.sh") 
+            if not exists(envSh):
               environmentInitSh = bootstrap(opts)
-              symlink(environmentInitSh.replace(opts.workDir, ".."), aptInitSh)
+              symlink(environmentInitSh.replace(opts.workDir, ".."), envSh)
             if not successfulBootstrapEnv:
-              setupAptEnvironment(aptInitSh)
+              setupAptEnvironment(envSh)
               successfulBootstrapEnv = True
             tags_cache.update()
           elif command == "deprecate-local":
@@ -3960,6 +3932,7 @@ if __name__ == "__main__":
             # immediately).  or the remote repository is not consistent with the
             # current state.
             successfulTransaction = upload(opts, args[1:], factory)
+            cleanup_server_upload(opts)
             if not successfulTransaction:
               log("Looks like repository changed while we were building. Trying again.")
     except KeyboardInterrupt:
