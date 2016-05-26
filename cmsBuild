@@ -2358,7 +2358,7 @@ def parseOptions():
                       dest="cmsdist",
                       help="the location of the CMSDIST directory",
                       metavar="PATH",
-                      default=abspath("./CMSDIST"))
+                      default=None)
     parser.add_option("--cmsdist-tag",
                        dest="cmsdistTag",
                        default="",
@@ -2508,6 +2508,13 @@ def parseOptions():
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args (None, None)
     
+    #if cmsdist is not set then look for cmsdist/CMSDISTin local directory    
+    if not opts.cmsdist:
+      if exists("cmsdist"):
+        opts.cmsdist = abspath("./cmsdist")
+      else:
+        opts.cmsdist = abspath("./CMSDIST")
+
     # Setup some default values.
     # FIXME: use an OptionParser callback.
     # FIXME: exclusive --cmsdist and --cmsdist-tag options.
