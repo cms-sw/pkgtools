@@ -24,6 +24,7 @@ import urllib2
 from glob import glob
 import itertools
 import pickle
+from hashlib import sha256
 
 logLevel = 10 
 NORMAL=10
@@ -472,7 +473,7 @@ def download (source, dest, options):
     downloadHandler = downloadHandlers[match.group (1)]
     checksum = getUrlChecksum (source)
     filename = source.rsplit("/", 1)[1]
-    downloadDir = join (cacheDir, checksum)
+    downloadDir = join (cacheDir, checksum[0:2], checksum)
     try:
       makedirs (downloadDir)
     except OSError, e:
@@ -2425,7 +2426,7 @@ def parseOptions():
     advancedBuildOptions.add_option("--server",
                                     dest="server",
                                     metavar="URL",
-                                    help="URL of apt repository. E.g. 'http://cmsrep.cern.ch/cgi-bin/cmspkg'",
+                                    help="URL of cmspkg cgi-script e.g. 'http://cmsrep.cern.ch/cgi-bin/cmspkg'",
                                     default="http://cmsrep.cern.ch/cgi-bin/cmspkg")
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
@@ -2554,8 +2555,11 @@ def parseOptions():
     if opts.syncBack and args[0] != "upload":
       fatal("--sync-back option is available only when uploading.")
 
-    if "-cache" in opts.repository or "-cache" in opts.uploadTmpRepository:
-      fatal("Repository name cannot contain -cache")
+    if not re.match("^[a-zA-Z0-9_.]+$",opts.repository):
+      fatal("Repository name '%s' contains invalid characters. Allowed characters are: a-zA-Z0-9_." % opts.repository)
+
+    if not re.match("^[a-zA-Z0-9_]+$",opts.uploadTmpRepository):
+      fatal("Tmp upload repository name '%s' contains invalid characters. Allowed characters are: a-zA-Z0-9_" % opts.uploadTmpRepository)
 
     return opts, args
     
@@ -3311,52 +3315,9 @@ def cleanup_server_upload(opts):
 
 def upload(opts, args, factory):
   global SERVER_TMP_UPLOAD_DIRECTORY
-  """New upload method. Updates using this are atomic and it should
-     automatically retry when parallel updates happen.
-     The workflow is the following.
+  """New upload method. It uses the upload.sh server-side script for uploading
+     https://github.com/cms-sw/cmspkg/blob/master/server/scripts/upload.sh"""
 
-     * If it exists as a real directory, migrate old style repository to
-       me in <repository>-cache/<repository>.00..00-00..00.  We add a symlink
-       "<repository>" pointing to it, so that we are compatible with old areas.
-     * If the repository does not exists, create it from scratch with
-       the naming convention used above.
-     * Get the final part of the hash of the repository pointed by the symlink called
-       "<repository>". In case we start from scratch this will be 00..00, for example.
-     * Check consistency of the upload area just like before.
-     * Create locally a delta repository containing all the bits that need to
-       be uploaded.
-     * Upload the local delta repository to a unique temporary directory on server.
-     * rsync the parent repository in a temporary "new area", using --link-dest to minimize
-       disk-space. Notice we do not use --link-dest for files which will have to be rewritten 
-       (e.g. apt md5cache)
-     * rsync the uploaded delta in the same temporary new area, ignoring files
-       already existing. This will avoid any kind of overwriting of past repositories, which are
-       effectively immutable.
-     * calculate the new hash of the temporary area by taking a sha256 sum of
-       the file listing in RPMS/cache. This listing will include, by construction,
-       all the hashes for the packages and will therefore uniquely identify the 
-       repository.
-     * Move the new temporary ara in it's final location 
-       
-       <repository>-cache/<repository>.00..00-XX..XX
-
-       where XX..XX is the hash calculated above.
-     * Create a unique symlink:
-       
-       <repository>.next-XXXXXXX
-       
-       this will uniquely identify this session.
-     * Kill all the other sessions by removing all the symlinks called <repository>.next-* apart from
-       us.
-     * Get the parent hash and check it is still the one when we began.
-     * Swap <repository>.next-XXXXXXX and <repository>. This will happen atomically. This will
-       effectively commit the transaction and <repository> will now point to
-       the updated repository.
-     
-     If at any time there is an error (e.g. a parallel upload succeeded before us), we start again
-     from scratch, including the consistency check.
-     If the consistency check fails, we need to rebuild and therefore we die.
-  """
   if not args:
     upload_help()
     return False
@@ -3372,32 +3333,17 @@ def upload(opts, args, factory):
     cleanup_server_upload(opts)
     sys.exit(1)
 
-  migrateRepo = format('CACHE="%(uploadDir)s/%(repository)s-cache"\n'
-                       'mkdir -p $CACHE\n'
-                       '# Automatically migrate old style repositories by assigning them the 00..00 hash\n'
-                       '# Notice that we keep <repository>.<user> and <repository> in two separate\n'
-                       '# caches so that temporary uploads do not overlap with production ones and\n'
-                       '# make sure migrated old style repositories do not overlap.\n'
-                       'if [ -x %(uploadDir)s/%(repository)s ] && [ ! -L %(uploadDir)s/%(repository)s ]; then \n'
-                       '  echo "Migrating old style repository"\n'
-                       '  mv %(uploadDir)s/%(repository)s $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000\n'
-                       '  ln -sf $CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000 %(uploadDir)s/%(repository)s\n'
-                       'fi\n'
-                       'PARENTDIR="`readlink %(uploadDir)s/%(repository)s || true`"\n'
-                       'if [ "X$PARENTDIR" = X ]; then\n'
-                       '  PARENTDIR="$CACHE/%(repository)s.0000000000000000000000000000000000000000000000000000000000000000-0000000000000000000000000000000000000000000000000000000000000000"\n'
-                       '  mkdir -p $PARENTDIR/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
-                       '  ln -sf $PARENTDIR %(uploadDir)s/%(repository)s\n'
-                       'fi\n'
-                       'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-                       'echo PARENTDIR:$PARENTDIR\n'
-                       'echo RESULT:$PARENTHASH',
-                       uploadDir=opts.uploadRootDirectory,
-                       repository=opts.repository)
-  (err, parentHashResult) = executeScript(opts, migrateRepo, False)
-  logAndDieOnError(err, "Error while migrating repository structure.")
-  parentDirectory = getResult(parentHashResult, "PARENTDIR:")
-  parentHash      = getResult(parentHashResult, "RESULT:")
+  rpmCacheUpdate(opts)
+  cmspkg_upload_repo = opts.uploadTmpRepository if not opts.syncBack else ""
+  migrateRepo = format("/data/scripts/upload.sh INIT '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s'",
+                       architecture=opts.architecture,
+                       repository=opts.repository,
+                       cmspkg_upload_repo=cmspkg_upload_repo)
+  (err, uploadDir) = executeScript(opts, migrateRepo, False)
+  logAndDieOnError(err, "Error while checking for parent repository and getting a temp area for upload.")
+  
+  uploadDir  = getResult(uploadDir, "NEW_TEMP_REPOSITORY:")
+  SERVER_TMP_UPLOAD_DIRECTORY = uploadDir
 
   #Once we have established the parent then we should update the apt cache
   tags_cache.update()
@@ -3422,63 +3368,71 @@ def upload(opts, args, factory):
     return statusAndLog(True, "Nothing needs to be uploaded")
   log("Ready to upload.")
 
+  BootstrapPackage = ""
+  CMSCommonPackage = ""
+  BootstrapPackages = [pkg.pkgName() for pkg in fullPackageList if pkg.pkgName().startswith("external+bootstrap-driver+")]
+  CMSCommonPackages = [pkg.pkgName() for pkg in fullPackageList if pkg.pkgName().startswith("cms+cms-common+")]
+  if BootstrapPackages: BootstrapPackage = "/".join(BootstrapPackages[0].split("+",2))
+  if CMSCommonPackage: CMSCommonPackage = "/".join(CMSCommonPackages[0].split("+",2))
+
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
   pkgChecksums = [p.checksum for p in fullPackageList]
-
+  uploadSum = sha256("-".join(pkgChecksums)).hexdigest()
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
-  subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
   # Create an area locally which has to be merged with the remote repository.
   createEmptyRepository = format(
     "set -e\n"
     "rm -rf %(tmpdir)s\n"
-    "mkdir -p %(tmpdir)s/RPMS/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/RPMS/cache\n"
-    "mkdir -p %(tmpdir)s/SRPMS\n"
-    "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/SOURCES/cache\n"
-    "mkdir -p %(tmpdir)s/apt/%(architecture)s\n"
-    "mkdir -p %(tmpdir)s/TARS\n"
-    "mkdir -p %(tmpdir)s/WEB\n"
-    'for x in %(subsystems)s; do\n'
-    '  mkdir -p %(tmpdir)s/apt/%(architecture)s/RPMS.$x\n'
-    'done\n',
+    "mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS\n",
     architecture=opts.architecture,
     tmpdir=tmpdir,
-    subsystems=subsystems)
+    uploadSum=uploadSum)
   # Hard-link packages.
   hardLinkPackages = format(
-    "%(rsync)s -am --include '*/' %(includes)s --exclude '*' --link-dest %(workdir)s/RPMS/cache/ %(workdir)s/RPMS/cache/ %(tmpdir)s/RPMS/cache/\n"
-    "%(rsync)s -am --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/WEB/\n"
-    ,
+    "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
+    "touch $MD5CACHE\n"
+    "for h in %(includes)s ; do\n"
+    "  hi=$(echo $h | sed 's|^\(..\).*|\\1|')\n"
+    "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
+    "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
+    "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
+    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
+    "  done\n"
+    "done\n"
+    "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
+    "if [ $WEB_FILES -gt 0 ] ; then\n"
+    "  mkdir -p %(tmpdir)s/%(uploadSum)s/WEB\n"
+    "  %(rsync)s -am --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/%(uploadSum)s/WEB/\n"
+    "fi\n",
     rsync="rsync --chmod=a+rX",
     workdir=opts.workDir,
     tmpdir=tmpdir,
-    includes=" ".join(["--include \"**%s**\"" % x for x in pkgChecksums]),
-    architecture=opts.architecture)
+    includes=" ".join(pkgChecksums),
+    architecture=opts.architecture,
+    uploadSum=uploadSum)
   # Copy bootstrap.sh, bootstrap-driver.txt, cmsos. Given we can rollback now
   # there is no risk of screwing up the repository by copying some unwanted
   # driver / bootstrap.sh / cmsos.
   # FIXME: copy also some predefined web area, so that we have rollbackable web
   #        area?
-  copyByProducts = format("cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver.txt | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/external/bootstrap-driver/*/%(architecture)s-driver-comp.txt | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/external/apt/*/bin/bootstrap.sh | tail -1` %(tmpdir)s/ || true\n"
-                          "cp `ls -rt %(workdir)s/%(architecture)s/cms/cms-common/*/*/common/cmsos | tail -1` %(tmpdir)s/cmsos || true\n",
+  copyByProducts = format("echo Looking for local Bootstrap-driver\n"
+                          "cd %(workdir)s/%(architecture)s\n"
+                          "if [ 'X%(BootstrapPackage)s' != 'X' ] ; then\n"
+                          "  mkdir -p %(tmpdir)s/%(uploadSum)s/drivers \n"
+                          "  [ -f %(BootstrapPackage)s/%(architecture)s-driver.txt ]      && cp %(BootstrapPackage)s/%(architecture)s-driver.txt      %(tmpdir)s/%(uploadSum)s/drivers/\n"
+                          "  [ -f %(BootstrapPackage)s/%(architecture)s-driver-comp.txt ] && cp %(BootstrapPackage)s/%(architecture)s-driver-comp.txt %(tmpdir)s/%(uploadSum)s/drivers/\n"
+                          "  [ -f %(BootstrapPackage)s/bootstrap.sh ]                     && cp %(BootstrapPackage)s/bootstrap.sh                     %(tmpdir)s/%(uploadSum)s\n"
+                          "fi\n"
+                          "echo Looking for local cms common build\n"
+                          "if [ 'X%(CMSCommonPackage)s' != 'X' ] ; then\n"
+                          "  [ -f common/cmsos ] cp common/cmsos %(tmpdir)s/%(uploadSum)s\n"
+                          "fi\n",
                           workdir=opts.workDir,
                           tmpdir=tmpdir,
-                          architecture=opts.architecture)
-  # Create the needed symlinks.
-  symlinks = ""
-  for pkg in fullPackageList:
-    symlinks += format(
-      "ln -s ../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/RPMS/%(architecture)s/%(packageName)s\n"
-      "ln -s ../../../RPMS/cache/%(checksum)s/%(architecture)s/%(packageName)s %(tmpdir)s/apt/%(architecture)s/RPMS.%(subsystem)s/%(packageName)s\n", 
-      checksum=pkg.checksum,
-      tmpdir=tmpdir,
-      architecture=opts.architecture,
-      subsystem=pkg.group,
-      packageName=basename(pkg.rpmfilename))
-
+                          architecture=opts.architecture,
+                          uploadSum=uploadSum,
+                          BootstrapPackage=BootstrapPackage,
+                          CMSCommonPackage=CMSCommonPackage)
   remoteSourceRE=re.compile (".*:.*/.*")
   sources = ""
   for pkg in [pkg for pkg in fullPackageList if exists (pkg.rpmLocation())]:
@@ -3489,11 +3443,14 @@ def upload(opts, args, factory):
                    for source in pkg.sources
                    if remoteSourceRE.match(source)]
     for filename, checksum in sourceFiles:
+      checksum_in=checksum[0:2]
+      if exists(join(opts.workDir, "SOURCES", "cache", checksum_in, checksum, ".no-cmsrep-upload")): continue
       sources += format(
-        "mkdir -p %(tmpdir)s/SOURCES/cache/%(checksum)s\n"
-        "mkdir -p %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
-        "ln -f %(workdir)s/SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/cache/%(checksum)s/%(filename)s\n"
-        "ln -sf ../../../../../SOURCES/cache/%(checksum)s/%(filename)s %(tmpdir)s/SOURCES/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
+        "SRC_DIR=%(tmpdir)s/%(uploadSum)s/SOURCES\n"
+        "mkdir -p $SRC_DIR/cache/%(checksum_in)s/%(checksum)s\n"
+        "mkdir -p $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
+        "ln -f %(workdir)s/SOURCES/cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/cache/%(checksum_in)s/%(checksum)s/%(filename)s\n"
+        "ln -sf ../../../../cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
         workdir=opts.workDir,
         tmpdir=tmpdir,
         architecture=opts.architecture,
@@ -3501,192 +3458,39 @@ def upload(opts, args, factory):
         name=pkg.name,
         version=pkg.version,
         filename=filename,
-        checksum=checksum)
+        uploadSum=uploadSum,
+        checksum=checksum,
+        checksum_in=checksum_in)
   
-
-  (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, symlinks, sources]))
+  (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, sources]))
   logAndDieOnError(err, "Error while creating the local repository.")
 
-  repoInfo = {"uploadDir": opts.uploadRootDirectory,
+  repoInfo = {"uploadDir": uploadDir,
               "repository": opts.repository,
-              "uploadTmpRepository": opts.uploadTmpRepository,
               "rsync": format("rsync -e 'ssh -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
-              "user": opts.uploadUser,
-              "parentHash": parentHash}
+              "user": opts.uploadUser}
 
-  # Create unique repository on server
-  (err, createUploadTmp) = executeScript(opts, format("mkdir -p  %(uploadDir)s/tmp\n"
-                                                "echo RESULT:`mktemp -d -p %(uploadDir)s/tmp/ tmp.%(parentHash)s-XXXXXXXX`", **repoInfo),
-                                         False)
-  logAndDieOnError(err, "Error while creating temporary directory.")
-  tmpUploadDir = getResult(createUploadTmp, "RESULT:")
-  SERVER_TMP_UPLOAD_DIRECTORY = tmpUploadDir 
-  
-  # Before uploading the rpms to server temp area, make sure no one is using
-  # the same parent
   upload = format(
-                  'err=0\n'
-                  'while pgrep -f %(originalParentHash)s 2>&1 >/dev/null; do\n'
-                  '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping and trying again."\n'
-                  '  sleep 30\n'
-                  '  err=1\n'
-                  'done\n'
-                  'if [ $err = 1 ] ; then\n'
-                  '  rm -rf %(tmpUploadDir)s\n'
-                  '  exit 1\n'
-                  'fi\n',
+                  "%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(uploadDir)s/upload/\n",
                   tmpdir=tmpdir,
-                  tmpUploadDir=tmpUploadDir,
-                  originalParentHash=parentHash,
+                  **repoInfo)
+  (err, msg) = executeScript(opts, upload, True)
+  if err: logAndDieOnError(err, "Error while uploading to remote repository.")
+
+  upload = format(
+                  "/data/scripts/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s'\n",
+                  tmpdir=tmpdir,
+                  tmpUploadDir=basename(uploadDir),
+                  architecture=opts.architecture,
+                  cmspkg_upload_repo=cmspkg_upload_repo,
                   **repoInfo)
   (err, msg) = executeScript(opts, upload, False)
   if err:
-    log("Parallel upload session in progress. Starting uploading procedure from scratch. This will check again build area consistency.")
-    if opts.debug:
-      log(msg)
-    return False
-
-  # Upload local repository to a temp area on the server.
-  upload = format(
-                  '%(rsync)s -a %(tmpdir)s/ %(user)s@%(server)s:%(tmpUploadDir)s/',
-                  tmpdir=tmpdir,
-                  tmpUploadDir=tmpUploadDir,
-                  **repoInfo)
-  (err, msg) = executeScript(opts, upload, True)
-  if err:
-    log("Something went wrong while uploading the rpms to server temp area.")
-    if opts.debug:
-      log(msg)
-    return False
-  # Human readable repositories are symlinks to one called:
-  # <prefix>.<parent>-<me>
-  # 
-  # where <prefix> is the --repository option passed on command line, e.g. cms.
-  #       <parent> is the sha256 of the previous repository listing.
-  #       <me> is the sha256 of the current repository listing.
-  # Notice that if the repository is not yet a link we use
-  #       <prefix>.0000000000000000-<me>
-  # where me is the sha256 of the repository listing, and then we symlink it to 
-  # <prefix>.
-  # If the repository does not exists at all, we create a dummy:
-  # <prefix>.00...00-00...00
-  # This allows us to have migrations as well, by tweaking the rsync rule to ignore old
-  # architectures for example.
-  #
-  # We then create a
-  createRepo = format(
-    'CACHE="%(uploadDir)s/%(repository)s-cache"\n'
-    'test -d $CACHE\n'
-    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
-    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-    'UPLOADREPO=%(tmpUploadDir)s\n'
-    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
-    '  mv $UPLOADREPO $DELME\n'
-    '  rm -rf $DELME\n'
-    '  echo "Parent mismatch."\n'
-    '  exit 1\n'
-    'fi\n'
-    '# Check if there are already more than 4 rsync running, \n'
-    '# and try again in such a case.\n'
-    'err=0\n'
-    'while pgrep -f $PARENTHASH 2>&1 >/dev/null; do\n'
-    '  echo "Someone is already uploading to the same parent. Avoid congestion by sleeping 1 minute and trying again."\n'
-    '  sleep 30\n'
-    '  err=1\n'
-    'done\n'
-    'if [ $err = 1 ] ; then\n'
-    '  DELME=`echo $UPLOADREPO.delme | sed -e "s/$PARENTHASH//g"`\n'
-    '  mv $UPLOADREPO $DELME\n'
-    '  rm -rf $DELME\n'
-    '  exit 1\n'
-    'fi\n'
-    'TMPREPO=%(tmpUploadDir)s-target\n'
-    'mkdir -p $TMPREPO/{RPMS,SRPMS,SOURCES,TARS,WEB,apt,md5cache}\n'
-    '# First copy / link the old repository.\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/RPMS/ $PARENTDIR/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/SRPMS/ $PARENTDIR/SRPMS/ $TMPREPO/SRPMS/ || true\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/SOURCES/ $PARENTDIR/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/TARS/ $PARENTDIR/TARS/ $TMPREPO/TARS/ || true\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/WEB/ $PARENTDIR/WEB/ $TMPREPO/WEB/ || true\n'
-    '%(rsync)s -a $PARENTDIR/apt/ $TMPREPO/apt/\n'
-    '%(rsync)s -a $PARENTDIR/md5cache/ $TMPREPO/md5cache/\n'
-    '# Copy ancillary files from $UPLOADEDREPO first, so that newer builds override old.\n'
-    '%(rsync)s -a $PARENTDIR/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/{bootstrap.sh,*-driver.txt,cmsos} $TMPREPO/ || true\n'
-    '# Then copy the new one, ignoring existing files. This way we make sure no files can be overwritten.\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/RPMS/ $TMPREPO/RPMS/\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/SRPMS/ $TMPREPO/SRPMS/\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/SOURCES/ $TMPREPO/SOURCES/\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/TARS/ $TMPREPO/TARS/\n'
-    '%(rsync)s -a --ignore-existing $UPLOADREPO/apt/ $TMPREPO/apt/\n'
-    '# Web area will always be the latest one built,\n'
-    '# however we still hardlink old, unchanged, content.\n'
-    '%(rsync)s -a --link-dest $PARENTDIR/WEB/ $UPLOADREPO/WEB/ $TMPREPO/WEB/\n'
-    'CHILDHASH=`find $UPLOADREPO/RPMS/cache -type f -name "*.rpm" | sed -e "s|^.*/RPMS/cache||" | sort | sha256sum | cut -f1 -d\ `\n'
-    'rm -rf $UPLOADREPO\n'
-    '# Generate a new apt cache.\n'
-    'source %(serverAptEnv)s\n'
-    'PREVIOUSSUBSYS=`ls $PARENTDIR/apt/%(cmsplatf)s/base/pkglist.*.bz2 | sed -e "s|.*[.]\\(.*\\)[.]bz2|\\1|"`\n'
-    'for x in %(subsystems)s $PREVIOUSSUBSYS; do\n'
-    '  mkdir -p $TMPREPO/apt/%(cmsplatf)s/RPMS.$x\n'
-    'done\n'
-    'for x in `find $TMPREPO/md5cache/%(cmsplatf)s -name "*.md5cache"`; do\n'
-    '  mv $x `dirname $x`/`echo $TMPREPO | tr / _`_apt_%(cmsplatf)s`echo $x | sed -e"s/.*%(cmsplatf)s//"`\n'
-    'done\n'
-    'genbasedir --cachedir=$TMPREPO/md5cache/%(cmsplatf)s --flat $TMPREPO/apt/%(cmsplatf)s `echo %(subsystems)s $PREVIOUSSUBSYS | tr " " "\n" | sort -u`\n'
-    'chmod 755 $TMPREPO/apt/%(cmsplatf)s\n'
-    '# Move the new repository into place and link it to its <repo>.<user> name.\n'
-    'CHILD="$CACHE/%(repository)s.${PARENTHASH}-${CHILDHASH}"\n'
-    'if [ ! -e $CHILD ] ; then\n'
-    '  mv -T $TMPREPO $CHILD || { mv $TMPREPO $TMPREPO.delme && exit 1; }\n'
-    'else\n'
-    '  mv $TMPREPO $TMPREPO.delme\n'
-    'fi\n'
-    'if [ %(syncBack)s = True ]; then\n'
-    '  TARGETREPO=%(repository)s\n'
-    'else\n'
-    '  TARGETREPO=%(repository)s.%(uploadTmpRepository)s\n'
-    '  if [ -x %(uploadDir)s/$TARGETREPO ] && [ ! -L %(uploadDir)s/$TARGETREPO ] ; then\n'
-    '    mv %(uploadDir)s/$TARGETREPO %(uploadDir)s/delme.$TARGETREPO\n'
-    '  fi\n'
-    'fi\n'
-    'UNIQUEDIR=`mktemp -d -t cmsBuildUpload.XXXXXXXXXX`\n'
-    'UNIQUEID=`echo $UNIQUEDIR | sed -e "s|.*cmsBuildUpload[.]||"`\n'
-    'echo $UNIQUEID\n'
-    '# Create a transaction.\n'
-    'ln -sf $CHILD %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
-    '# Try to abort all the pending transactions but ours.\n'
-    'for x in `find %(uploadDir)s/$TARGETREPO.next-* ! -name "*-$UNIQUEID"`; do\n'
-    ' if rm $x; then true; else rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID ; fi\n'
-    'done\n'
-    '# In case no transaction is aborted either parallel transactions completed\n'
-    '# successfully (and the parenthash is not the same anymore) or there\n'
-    '# were no other transactions.\n'
-    'PARENTDIR="`readlink %(uploadDir)s/%(repository)s`"\n'
-    'PARENTHASH=`echo $PARENTDIR | sed -e "s|.*-||"`\n'
-    'if [ ! "X$PARENTHASH" = X%(originalParentHash)s ]; then\n'
-    '  rm -f %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n' 
-    '  rm -rf $UNIQUEDIR\n' 
-    '  echo "Parent mismatch $PARENTHASH %(originalParentHash)s."\n'
-    '  exit 1\n'
-    'fi\n'
-    'mv -T %(uploadDir)s/$TARGETREPO.next-$UNIQUEID %(uploadDir)s/$TARGETREPO\n'
-    'rm -rf %(uploadDir)s/$TARGETREPO.next-$UNIQUEID\n'
-    'rm -rf $UNIQUEDIR\n',
-    serverAptEnv=opts.serverAptEnv,
-    cmsplatf=opts.architecture,
-    tmpUploadDir=tmpUploadDir,
-    subsystems=subsystems,
-    syncBack=opts.syncBack,
-    originalParentHash=parentHash,
-    **repoInfo)
-  (err, msg) = executeScript(opts, createRepo, False)
-  if err:
-    log("Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
-    if opts.debug:
-      log(msg)
+    if (err >> 8) != 19:
+      log("Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
+    else:
+      logAndDieOnError(err, "Error while uploading to remote repository.")
     return False
   log("Upload successfully finished")
   return True
