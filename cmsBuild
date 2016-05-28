@@ -3175,6 +3175,7 @@ def bootstrap(opts):
   f.write(output)
   f.close()
   if error:
+    log(output, DEBUG)
     fatal("unsuccessful bootstrap, log can be found in %s." % bootstrapLog)
 
   parts = glob(join(opts.workDir,opts.architecture, "cms/cmspkg/*/etc/profile.d/init.sh"))
