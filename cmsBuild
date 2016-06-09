@@ -738,6 +738,7 @@ class TagCacheAptImpl (object):
               else:
                 orderedPackages.append(n)
             matchingPackages = orderedPackages
+          log ("Matching Packages all %s: %s" % (pkg.checksum, ",".join(matchingPackages)), DEBUG)
           if len(matchingPackages):
             output = matchingPackages[0]
           else:
@@ -3400,8 +3401,9 @@ def upload(opts, args, factory):
   parentDirectory = getResult(parentHashResult, "PARENTDIR:")
   parentHash      = getResult(parentHashResult, "RESULT:")
 
-  #Once we have established the parent then we should update the apt cache
+  #Once we have established the parent then we should update the apt/cmspkg and rpm cache
   tags_cache.update()
+  rpmCacheUpdate(opts)
   fullPackageList = allPackagesToUpload (args, factory)
   if not fullPackageList:
     return statusAndLog(True, "Nothing needs to be uploaded")
