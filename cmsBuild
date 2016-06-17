@@ -1694,11 +1694,12 @@ class SubPackage (object):
         self.srpmfilename   = self.parent.srpmfilename
         self.pkginstroot    = self.parent.pkginstroot
 
-    def dumpSpecFragment(self):
+    def dumpSpecFragment(self, computeSpecChecksum = True):
         importName = 'subpackage-%s.file' % self.subname
         importFilename = join (self.options.cmsdist, importName)
         spec = open (importFilename, 'r').read()
-        spec = re.compile(r'^Summary:.*$', re.M).sub(r'\g<0> SpecChecksum:%s' % self.checksum, spec)
+        if computeSpecChecksum:
+          spec = re.compile(r'^(Summary:.*?)( SpecChecksum:.*|)$', re.M).sub(r'\g<1> SpecChecksum:%s' % self.checksum, spec)
         return spec
 
     def pkgName (self):
@@ -2013,7 +2014,7 @@ class Package (object):
             checksumCalculator.addFile (abspath (filename))
 
         for subpackage in self.subpackages:
-            checksumCalculator.addString( subpackage.dumpSpecFragment() )
+            checksumCalculator.addString( subpackage.dumpSpecFragment(not self.options.repository.split('.')[0] == "comp") )
 
         for pkg in self.dependencies:
             checksumCalculator.addPkg (pkg)
