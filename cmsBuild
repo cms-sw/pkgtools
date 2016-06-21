@@ -3180,7 +3180,7 @@ def bootstrap(opts):
     log(output, DEBUG)
     fatal("unsuccessful bootstrap, log can be found in %s." % bootstrapLog)
 
-  parts = glob(join(opts.workDir,opts.architecture, "cms/cmspkg/*/etc/profile.d/init.sh"))
+  parts = glob(join(opts.workDir,opts.architecture, "external/rpm/*/etc/profile.d/init.sh"))
   if len(parts) != 1:
     fatal("""malformed bootstrap. More than one cmspkg installation found.""")
 
