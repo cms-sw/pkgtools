@@ -3427,7 +3427,7 @@ def upload(opts, args, factory):
   log("Ready to upload.")
 
   packageNames = [pkg.pkgName() for pkg in fullPackageList]
-  pkgChecksums = [p.checksum for p in fullPackageList]
+  pkgChecksums = list(set([p.checksum for p in fullPackageList]))
 
   tmpdir=join(opts.workDir, opts.tempDirPrefix, "upload")
   subsystems = " ".join(set([name.split("+")[0] for name in packageNames]))
