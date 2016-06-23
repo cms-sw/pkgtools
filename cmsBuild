@@ -3160,6 +3160,7 @@ def bootstrap(opts):
   useDev=""
   if opts.useDev: useDev="-dev"
   bootstrapUrl = "%s%s/file/%s/%s/%s" % (opts.server, useDev, opts.repository,  opts.architecture, "bootstrap.sh")
+  log("fetching %s" % bootstrapUrl, DEBUG)
   try:
     f=urlopen(bootstrapUrl)
     bootstrapContents = f.read()
@@ -3428,9 +3429,9 @@ def upload(opts, args, factory):
     includes=" ".join(pkgChecksums),
     architecture=opts.architecture,
     uploadSum=uploadSum)
-  # Copy bootstrap.sh, bootstrap-driver.txt, cmsos. Given we can rollback now
+  # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
   # there is no risk of screwing up the repository by copying some unwanted
-  # driver / bootstrap.sh / cmsos.
+  # driver / cmsos.
   # FIXME: copy also some predefined web area, so that we have rollbackable web
   #        area?
   copyByProducts = format("echo Looking for local Bootstrap-driver\n"
@@ -3439,7 +3440,6 @@ def upload(opts, args, factory):
                           "  mkdir -p %(tmpdir)s/%(uploadSum)s/drivers \n"
                           "  [ -f %(BootstrapPackage)s/%(architecture)s-driver.txt ]      && cp %(BootstrapPackage)s/%(architecture)s-driver.txt      %(tmpdir)s/%(uploadSum)s/drivers/\n"
                           "  [ -f %(BootstrapPackage)s/%(architecture)s-driver-comp.txt ] && cp %(BootstrapPackage)s/%(architecture)s-driver-comp.txt %(tmpdir)s/%(uploadSum)s/drivers/\n"
-                          "  [ -f %(BootstrapPackage)s/bootstrap.sh ]                     && cp %(BootstrapPackage)s/bootstrap.sh                     %(tmpdir)s/%(uploadSum)s\n"
                           "fi\n"
                           "echo Looking for local cms common build\n"
                           "if [ 'X%(CMSCommonPackage)s' != 'X' ] ; then\n"
