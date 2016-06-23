@@ -35,7 +35,7 @@ DEFAULT_CVS_PASSWORD="AA_:yZZ3e"
 DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
 CMSPKG_CMD="cmspkg"
 SERVER_TMP_UPLOAD_DIRECTORY=None
-rpmEnvironmentScript = None
+rpmEnvironmentScript = "true"
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
