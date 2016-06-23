@@ -3521,6 +3521,7 @@ allOk = lambda x,y: x and y
 someOk = lambda x,y: x or y
 
 def doDeprecateLocal (opts, args, factory):
+  rpmCacheUpdate(opts)
   fullPackageList = allPackagesToUpload(args, factory)
   executeScript(opts, deprecateLocalCommand(opts, fullPackageList))
 
