@@ -35,6 +35,7 @@ DEFAULT_CVS_PASSWORD="AA_:yZZ3e"
 DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
 CMSPKG_CMD="cmspkg"
 SERVER_TMP_UPLOAD_DIRECTORY=None
+rpmEnvironmentScript = None
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
@@ -1427,7 +1428,7 @@ class InstallFromLocalArea (BuilderAction):
         if not self.dryRun ():
             return False 
         pkgName = self.pkg.pkgName ()
-        error, output = getstatusoutput ("rpm -q %s" % pkgName)
+        error, output = getstatusoutput ("%s ; rpm -q %s" % (rpmEnvironmentScript, pkgName))
         # Not all the rpm commands set the error correctly.
         if error or "error:" in output:
             return False
@@ -1473,7 +1474,8 @@ class InstallFromServer (BuilderAction):
 
         # If a file exists on server we return True
         cmsPkgCmd = CMSPKG_CMD
-        searchCommand = """%(cmsPkgCmd)s -f search %(pkgName)s; rpm -q %(pkgName)s""" % locals ()
+        rpmenv =  rpmEnvironmentScript
+        searchCommand = """%(cmsPkgCmd)s -f search %(pkgName)s; %(rpmenv)s ; rpm -q %(pkgName)s""" % locals ()
         error, output = getstatusoutput (searchCommand)
         self.output = output
         if error: return False
@@ -2177,7 +2179,7 @@ class Package (object):
         f.write (self.__factory.postProcessSpec (self.spec).replace('%%', '%'))
         f.close ()
         commandPrefix = getCommandPrefix (self.options)
-        evalCommand = "%s rpm -q --specfile %s --info %s" % (commandPrefix,
+        evalCommand = "%s ; %s rpm -q --specfile %s --info %s" % (rpmEnvironmentScript, commandPrefix,
                                                       self.tmpspec, self.options.rpmQueryDefines)
         log (evalCommand, DEBUG)
         error, output = getstatusoutput (evalCommand)
@@ -2298,7 +2300,7 @@ class Package (object):
         localSources = []
         localPatches = []
         buildDeps    = []
-        queryCommand = "%s rpm -q --info --specfile %s %s 2>/dev/null" % (getCommandPrefix (self.options),
+        queryCommand = "%s ; %s rpm -q --info --specfile %s %s 2>/dev/null" % (rpmEnvironmentScript, getCommandPrefix (self.options),
                                                                   self.tmpspec, self.options.rpmQueryDefines)
         regexps = self.__headerMatchingRegexp
         matchers = [(regexps.REQUIRES_REGEXP, deps),
@@ -2430,6 +2432,11 @@ def parseOptions():
                                     metavar="URL",
                                     help="URL of cmspkg cgi-script e.g. 'http://cmsrep.cern.ch/cgi-bin/cmspkg'",
                                     default="http://cmsrep.cern.ch/cgi-bin/cmspkg")
+    advancedBuildOptions.add_option("--use-dev",
+                                    action="store_true",
+                                    dest="useDev",
+                                    default=None,
+                                    help="Use development cmspkg instead of production.")
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
@@ -2702,7 +2709,7 @@ def checkCanInstallRpm (pkg):
 def getScriptlets(pkg, relocation, original):
     """Gets the scriptlet associated to an rpm.
     """
-    command = "rpm -qp --scripts %s" % pkg.rpmLocation()
+    command = "%s ; rpm -qp --scripts %s" % (rpmEnvironmentScript , pkg.rpmLocation())
     error, output = getstatusoutput(command)
     if error:
         log ("Command: %(command)s failed with the following message: %(output)s." % locals(), DEBUG)
@@ -2727,7 +2734,7 @@ def installRpm (pkg, bootstrap):
     """
     error = 1; output = ""; command = "#No command"
     if bootstrap:
-        command = "rpm -Uvh --prefix "+pkg.options.workDir+" %s" % pkg.rpmLocation()
+        command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
         error, output = getstatusoutput (command)
     else:
         workDir = pkg.workDir
@@ -2859,6 +2866,7 @@ def buildPackage(pkg, scheduler):
   if pkg.options.ignoreCompileErrors:
     optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\"" 
   optionsDict["tmpdir"] = join(opts.workDir, opts.tempDirPrefix)
+  optionsDict["rpmenv"] = rpmEnvironmentScript
   optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                       "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
                       "extraRpmDefines": pkg.options.rpmQueryDefines})
@@ -2866,11 +2874,11 @@ def buildPackage(pkg, scheduler):
     optionsDict["nodeps"] = "--nodeps"
 
   # FIXME: should be done only once!
-  err, out = getstatusoutput("rpmbuild --version")
+  err, out = getstatusoutput("%s ; rpmbuild --version" % rpmEnvironmentScript)
   if err:
     return "ERROR: unable to find working rpmbuild"
  
-  rpmbuildCommand = "TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+  rpmbuildCommand = "%(rpmenv)s ; TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                     " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                     " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
   rpmbuildCommand = rpmbuildCommand.strip()
@@ -3089,7 +3097,7 @@ def buildSpecs(topLevelPackages):
     sys.exit(1)
 
 def build(opts, args, factory):
-  err, out = getstatusoutput("rpm --version")
+  err, out = getstatusoutput("%s ; rpm --version" % rpmEnvironmentScript)
   if err:
     fatal("unable to find a working rpm.")
   rpmCacheUpdate(opts)
@@ -3149,7 +3157,9 @@ def callCmsos (opts):
 # @return the location of the init.sh script to be sourced when building 
 #         or uploading.
 def bootstrap(opts):
-  bootstrapUrl = "%s/file/%s/%s/%s" % (opts.server, opts.repository,  opts.architecture, "bootstrap.sh")
+  useDev=""
+  if opts.useDev: useDev="-dev"
+  bootstrapUrl = "%s%s/file/%s/%s/%s" % (opts.server, useDev, opts.repository,  opts.architecture, "bootstrap.sh")
   try:
     f=urlopen(bootstrapUrl)
     bootstrapContents = f.read()
@@ -3169,7 +3179,7 @@ def bootstrap(opts):
              "-arch",  opts.architecture,
              "-path", opts.workDir,
              "-repository", opts.repository,
-             "-assume-yes", "-only-once", "setup"]
+             "-assume-yes", "-only-once", useDev, "setup"]
   if logLevel is DEBUG:
     options.append("-debug")
   bootstrapCommand ="TMPDIR=%s sh -ex %s %s" % (opts.tempdir, bootstrapFilename, " ".join(options)) 
@@ -3191,11 +3201,11 @@ def bootstrap(opts):
   initSh = parts[0]
 
   if not exists(initSh):
-    fatal("""ERROR: cannot read cmspkg environment. File missing: %s.""" % s)
+    fatal("""ERROR: cannot read cmspkg environment. File missing cmspkg/rpm env""")
 
   # If we are not in a cfg file write where to find the correct init.sh
   log("Done. Setup log can be found in %s." % bootstrapLog)
-  log("init.sh can be found in %s" % initSh, DEBUG)
+  log("rpm env file can be found in %s" % initSh, DEBUG)
   createDirs(architecture=opts.architecture, dest=opts.workDir)
   return initSh
 
@@ -3281,7 +3291,7 @@ def  deprecateLocalCommand(opts, fullPackageList):
   deprecatedSrc  = " ".join(["SOURCES/"+p.pkgdir for p in fullPackageList])
   deprecatedDir  = " ".join([p.pkgrel for p in fullPackageList])
   deprecatedSRPM = " ".join(["SRPMS/cache/*/"+p.pkgName()+"*" for p in fullPackageList])
-  deprecateLocal = format("rpm -e %(deprecablePackages)s\n"
+  deprecateLocal = format("%(rpmenv)s ; rpm -e %(deprecablePackages)s\n"
                           'cd %(workDir)s\n'
                           'rm -rf %(deprecatedDir)s\n'
                           "for x in %(deprecableRPMS)s; do\n"
@@ -3300,6 +3310,7 @@ def  deprecateLocalCommand(opts, fullPackageList):
                           '  rm -rf $x\n'
                           "done\n"
                           "rm -rf %(deprecatedSRPM)s\n",
+                          rpmenv=rpmEnvironmentScript,
                           architecture=opts.architecture,
                           deprecableRPMS=deprecableRPMS,
                           deprecatedSrc=deprecatedSrc,
@@ -3337,10 +3348,13 @@ def upload(opts, args, factory):
     sys.exit(1)
 
   rpmCacheUpdate(opts)
+  useDev=""
+  if opts.useDev: useDev="-dev"
   cmspkg_upload_repo = opts.uploadTmpRepository if not opts.syncBack else ""
-  migrateRepo = format("/data/scripts/upload.sh INIT '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s'",
+  migrateRepo = format("/data/scripts%(useDev)s/upload.sh INIT '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s'",
                        architecture=opts.architecture,
                        repository=opts.repository,
+                       useDev=useDev,
                        cmspkg_upload_repo=cmspkg_upload_repo)
   (err, uploadDir) = executeScript(opts, migrateRepo, False)
   logAndDieOnError(err, "Error while checking for parent repository and getting a temp area for upload.")
@@ -3483,11 +3497,12 @@ def upload(opts, args, factory):
   if err: logAndDieOnError(err, "Error while uploading to remote repository.")
 
   upload = format(
-                  "/data/scripts/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s'\n",
+                  "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s'\n",
                   tmpdir=tmpdir,
                   tmpUploadDir=basename(uploadDir),
                   architecture=opts.architecture,
                   cmspkg_upload_repo=cmspkg_upload_repo,
+                  useDev=useDev,
                   **repoInfo)
   (err, msg) = executeScript(opts, upload, False)
   if err:
@@ -3562,7 +3577,7 @@ def restoreOriginalEnvironment ():
 def rpmCacheUpdate(opts):
     if hasattr (opts, "bootstrap") and opts.bootstrap == True:
         rpm_db_cache.clear()
-        rpmQueryCommand = "rpm -qa --queryformat '%{NAME} %{RELEASE} %{SUMMARY}\n' | sed 's|CMS Experiment package SpecChecksum:||'"
+        rpmQueryCommand = "%s ; rpm -qa --queryformat '%%{NAME} %%{RELEASE} %%{SUMMARY}\n' | sed 's|CMS Experiment package SpecChecksum:||'" % rpmEnvironmentScript
         error, output = getstatusoutput (rpmQueryCommand)
         if error:
             die("Error while executing rpm -qa.\n%s" % output)
@@ -3570,14 +3585,6 @@ def rpmCacheUpdate(opts):
             n,r,c = p.split(" ",2)
             rpm_db_cache[n]=[r,c]
     return
-
-def setupAptEnvironment(environmentInitSh):
-  if not exists(environmentInitSh):
-    fatal("Error while bootstrapping. File not found %s." % environmentInitSh)
-  for parts in pickle.load(popen('. %s; unset module; python -c "import os, sys, pickle; pickle.dump(os.environ, sys.stdout)"' % environmentInitSh)).iteritems():
-    if len(parts) != 2:
-      fatal("Unable to interpret environment. Malformed line %s" % line)
-    environ.__setitem__(*parts)
 
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
@@ -3723,13 +3730,11 @@ if __name__ == "__main__":
             #
             # Source the apt-init.sh file and setup the environment,
             # update the apt cache.
-            envSh = join(opts.workDir, opts.architecture, "cmspkg-init.sh") 
-            if not exists(envSh):
-              environmentInitSh = bootstrap(opts)
-              symlink(environmentInitSh.replace(opts.workDir, ".."), envSh)
-            if not successfulBootstrapEnv:
-              setupAptEnvironment(envSh)
-              successfulBootstrapEnv = True
+            rpmEnvironmentScript = join(opts.workDir, opts.architecture, "rpm-env.sh")
+            if not exists(rpmEnvironmentScript):
+              envSh = bootstrap(opts)
+              symlink(envSh.replace(opts.workDir+"/"+opts.architecture,"."), rpmEnvironmentScript)
+            rpmEnvironmentScript = "source "+rpmEnvironmentScript
             tags_cache.update()
           elif command == "deprecate-local":
             doDeprecateLocal(opts, args[1:], factory)
