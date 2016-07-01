@@ -1474,11 +1474,16 @@ class InstallFromServer (BuilderAction):
         # If a file exists on server we return True
         cmsPkgCmd = CMSPKG_CMD
         rpmenv =  rpmEnvironmentScript
-        searchCommand = """%(cmsPkgCmd)s -f search %(pkgName)s; %(rpmenv)s ; rpm -q %(pkgName)s""" % locals ()
+        pkgRev = self.pkg.pkgRevision
+        searchCommand = """%(cmsPkgCmd)s showpkg %(pkgName)s; %(rpmenv)s ; rpm -q %(pkgName)s-1-%(pkgRev)s""" % locals ()
         error, output = getstatusoutput (searchCommand)
-        self.output = output
+        self.output = output.split("\n")
         if error: return False
-        return pkgsWithSameHash or output.startswith(self.pkg.pkgName()+' - ')
+        def evalExistsOnServer ():
+            for line in self.output[2:]:
+               if line.startswith("1-%s." % pkgRev): return True
+            return False
+        return pkgsWithSameHash or evalExistsOnServer ()
     
     def doExpectedResults (self):
         # In order for a download to be successful we expect:
@@ -1489,9 +1494,8 @@ class InstallFromServer (BuilderAction):
             return False
         
         def onServerAndLocal ():
-            if not self.output.startswith(self.pkg.pkgName()+' - '): return False
-            if "is not installed" in self.output: return False
-            return True
+            if not self.output[0].startswith(self.pkg.pkgName()+' - CMS Experiment package'): return False
+            return self.output[-1].startswith("%s-1-%s." % (self.pkg.pkgName(),self.pkg.pkgRevision))
         rpmInstalled = onServerAndLocal ()
         rpmFilename = join (abspath (self.pkg.rpmdir), self.pkg.rpmfilename)
         return rpmInstalled and not exists (rpmFilename) 
