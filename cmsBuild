@@ -2671,7 +2671,7 @@ def checkIfOnServer (pkg):
     log ("Checking if package %s can be downloaded from apt servers" % pkg.pkgName(), DEBUG)
     if tags_cache.cache.has_key(pkg.pkgName()) and isDefaultRevision(pkg.pkgRevision):
         return True
-    error, output = getstatusoutput ("%s -f search %s" % (CMSPKG_CMD, pkg.pkgName()))
+    error, output = getstatusoutput ("%s -f show %s" % (CMSPKG_CMD, pkg.pkgName()))
     if error or not output:
         log ("RPM %s not found in apt repository." % pkg.pkgName (), DEBUG)
         return False
