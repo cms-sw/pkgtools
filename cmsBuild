@@ -997,7 +997,7 @@ case %{cmsplatf} in
               new_install_name=`basename $old_install_name`
               install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
               # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
+              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||' |  sed -e's|:$||' `
               do
                 install_name_tool -change $dep `basename $dep` $x
               done
