@@ -826,13 +826,13 @@ case %{cmsplatf} in
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$RPM_INSTALL_PREFIX"/"${old_install_name##%{instroot}}
+              new_install_name=$RPM_INSTALL_PREFIX${old_install_name##%{instroot}}
               echo $old_install_name", "$new_install_name", "$x
               install_name_tool -id $new_install_name $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
-                newdep=$RPM_INSTALL_PREFIX"/"${dep##%{instroot}}
+                newdep=$RPM_INSTALL_PREFIX${dep##%{instroot}}
                 echo $dep", "$newdep", "$x
                 install_name_tool -change $dep $newdep $x
               done
@@ -919,13 +919,13 @@ case %{cmsplatf} in
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$RPM_INSTALL_PREFIX"/"${old_install_name##%{instroot}}
+              new_install_name=$RPM_INSTALL_PREFIX${old_install_name##%{instroot}}
               echo $old_install_name", "$new_install_name", "$x
               install_name_tool -id $new_install_name $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
-                newdep=$RPM_INSTALL_PREFIX"/"${dep##%{instroot}}
+                newdep=$RPM_INSTALL_PREFIX${dep##%{instroot}}
                 echo $dep", "$newdep", "$x
                 install_name_tool -change $dep $newdep $x
               done
