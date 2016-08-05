@@ -820,18 +820,21 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 case %{cmsplatf} in
     osx* )
-        for x in `find $CMS_INSTALL_PREFIX -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
             if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$CMS_INSTALL_PREFIX${old_install_name##%{installroot}}
+              new_install_name=$RPM_INSTALL_PREFIX"/"${old_install_name##%{instroot}}
+              echo $old_install_name", "$new_install_name", "$x
               install_name_tool -id $new_install_name $x
-              # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{installroot}|%{installroot}|" | grep -e '^%{installroot}' | sed -e's|(.*||' | grep -v -e':$'`
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
-                install_name_tool -change $dep $CMS_INSTALL_PREFIX${dep##%{installroot}} $x
+                newdep=$RPM_INSTALL_PREFIX"/"${dep##%{instroot}}
+                echo $dep", "$newdep", "$x
+                install_name_tool -change $dep $newdep $x
               done
               chmod -w $x
             fi
@@ -907,20 +910,24 @@ DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
 %{relocateConfig}etc/profile.d/init.csh
+
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
             if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$CMS_INSTALL_PREFIX${old_install_name##%{installroot}}
+              new_install_name=$RPM_INSTALL_PREFIX"/"${old_install_name##%{instroot}}
+              echo $old_install_name", "$new_install_name", "$x
               install_name_tool -id $new_install_name $x
-              # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{installroot}|%{installroot}|" | grep -e '^%{installroot}' | sed -e's|(.*||' | grep -v -e':$'`
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
-                install_name_tool -change $dep $CMS_INSTALL_PREFIX${dep##%{installroot}} $x
+                newdep=$RPM_INSTALL_PREFIX"/"${dep##%{instroot}}
+                echo $dep", "$newdep", "$x
+                install_name_tool -change $dep $newdep $x
               done
               chmod -w $x
             fi
@@ -1032,28 +1039,6 @@ do
 done
 %endif
 
-case %{cmsplatf} in
-    osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
-        do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
-            then
-              chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=%{installroot}${old_install_name##%{instroot}}
-              install_name_tool -id $new_install_name $x
-              # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
-              do
-                install_name_tool -change $dep %{installroot}${dep##%{instroot}} $x
-              done
-              chmod -w $x
-            fi
-        done
-    ;;
-    * )
-    ;;
-esac
 """
 
 DEFAULT_PREP_POSTAMBLE="""
