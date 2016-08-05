@@ -827,7 +827,7 @@ case %{cmsplatf} in
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               new_install_name=$CMS_INSTALL_PREFIX${old_install_name##%{installroot}}
-              install_name_tool -change $old_install_name $x -id $new_install_name $x
+              install_name_tool -id $new_install_name $x
               # Make sure also dependencies do not have an hardcoded path.
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{installroot}|%{installroot}|" | grep -e '^%{installroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
@@ -916,7 +916,7 @@ case %{cmsplatf} in
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               new_install_name=$CMS_INSTALL_PREFIX${old_install_name##%{installroot}}
-              install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
+              install_name_tool -id $new_install_name $x
               # Make sure also dependencies do not have an hardcoded path.
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{installroot}|%{installroot}|" | grep -e '^%{installroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
@@ -1041,7 +1041,7 @@ case %{cmsplatf} in
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               new_install_name=%{installroot}${old_install_name##%{instroot}}
-              install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
+              install_name_tool -id $new_install_name $x
               # Make sure also dependencies do not have an hardcoded path.
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
               do
