@@ -1183,7 +1183,7 @@ case %{cmsplatf} in
             if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
             then
               chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'|sed -e's|@.*path/||'`
               new_install_name=%{placeholder}${old_install_name##%{instroot}}
               echo $old_install_name", "$new_install_name", "$x
               install_name_tool -id $new_install_name $x
