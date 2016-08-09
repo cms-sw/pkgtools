@@ -1053,7 +1053,7 @@ else: SPEC_HEADER = """
 %%define pkgcategory    %(group)s
 %%define cmsroot        %(workDir)s
 %%define instroot       %(workDir)s/%(tempDirPrefix)s/BUILDROOT/%(checksum)s%(installDir)s
-%%define placeholder    /XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/%(tempDirPrefix)s/BUILDROOT/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/%(installDir)s
+%%define placeholder    %(workDir)s/%(tempDirPrefix)s/BUILDROOT/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/%(installDir)s
 %%define realversion    %(realVersion)s
 %%define gccver         %(compilerRealVersion)s
 %%define compilerRealVersion %(compilerRealVersion)s
