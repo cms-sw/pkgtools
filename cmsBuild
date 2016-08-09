@@ -866,19 +866,15 @@ case %{cmsplatf} in
     osx* )
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$RPM_INSTALL_PREFIX${old_install_name##%{placeholder}}
-              echo $old_install_name", "$new_install_name", "$x
-              install_name_tool -id $new_install_name $x
+              echo $old_install_name | grep %{installroot} && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}; install_name_tool -id $new_install_name $x)
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{placeholder}|%{placeholder}|" | grep -e '^%{placeholder}' | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
-                newdep=$RPM_INSTALL_PREFIX${dep##%{placeholder}}
-                echo $dep", "$newdep", "$x
-                install_name_tool -change $dep $newdep $x
+                echo $dep | grep %{installroot} && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x)
               done
               chmod -w $x
             fi
@@ -964,19 +960,15 @@ case %{cmsplatf} in
     osx* )
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=$RPM_INSTALL_PREFIX${old_install_name##%{placeholder}}
-              echo $old_install_name", "$new_install_name", "$x
-              install_name_tool -id $new_install_name $x
+              echo $old_install_name | grep %{installroot} && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name*##%{installroot}} ;install_name_tool -id $new_install_name $x)
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{placeholder}|%{placeholder}|" | grep -e '^%{placeholder}' | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
-                newdep=$RPM_INSTALL_PREFIX${dep##%{placeholder}}
-                echo $dep", "$newdep", "$x
-                install_name_tool -change $dep $newdep $x
+                echo $dep | grep %{installroot} && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x)
               done
               chmod -w $x
             fi
@@ -1180,19 +1172,18 @@ case %{cmsplatf} in
     osx* )
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
               chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'|sed -e's|@.*path/||'`
-              new_install_name=%{placeholder}${old_install_name##%{instroot}}
-              echo $old_install_name", "$new_install_name", "$x
-              install_name_tool -id $new_install_name $x
+              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+              install_name=`basename $old_install_name`
+              dir_name=`dirname $x`
+              new_name=${dir_name}"/"${install_name}
+              echo $old_install_root | grep ${installroot} && ( new_install_name=%{placeholder}${new_name##*%{installroot}}; install_name_tool -id $new_install_name $x)
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^%{instroot}' | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
-                newdep=%{placeholder}${dep##%{instroot}}
-                echo $dep", "$newdep", "$x
-                install_name_tool -change $dep $newdep $x
+                 echo $dep | grep %{installroot} && ( newdep=%{placeholder}${dep/##*%{installroot}} ; install_name_tool -change $dep $newdep $x)
               done
               chmod -w $x
             fi
