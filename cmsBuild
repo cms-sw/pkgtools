@@ -25,6 +25,7 @@ from glob import glob
 import itertools
 import pickle
 from hashlib import sha256
+from sys import platform
 
 logLevel = 10 
 NORMAL=10
@@ -3612,7 +3613,7 @@ def upload(opts, args, factory):
     "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
     "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
     "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
+    "    md5 -q $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
     "  done\n"
     "done\n"
     "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
