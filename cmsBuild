@@ -787,7 +787,7 @@ global tags_cache
 tags_cache = None
 
 # FIXME: write a more valuable description
-DEFAULT_SECTIONS = {"": """
+if not sys.platform == "darwin": DEFAULT_SECTIONS = {"": """
 """,
                     "%%description": """
 No description
@@ -831,6 +831,74 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
 """}
+else: DEFAULT_SECTIONS = {"": """
+""",
+                    "%%description": """
+No description
+""",
+                  "%prep": """
+%%setup -n %n-%realversion
+""",
+                  "%build": """
+%initenv
+./configure --prefix=%i
+make
+""",
+                "%install": """
+%initenv
+make install
+""",
+                "%pre": """
+if [ X"$(id -u)" = X0 ]; then
+  if [ ! -f /etc/cms-root-install-allowed ]; then
+    echo "*** CMS SOFTWARE INSTALLATION ABORTED ***"
+    echo "CMS software cannot be installed as the super-user."
+    echo "(We recommend reading a unix security guide)."
+    exit 1
+  fi
+fi
+""",
+                "%post": """
+if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
+%{relocateConfig}etc/profile.d/init.sh
+%{relocateConfig}etc/profile.d/init.csh
+
+case %{cmsplatf} in
+    osx* )
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        do 
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
+            then
+              chmod +w $x
+              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+              echo $old_install_name | grep %{installroot} && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||  install_name_tool -id `basename $new_install_name` $x ) 
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                echo $dep | grep %{installroot} && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
+              done
+              chmod -w $x
+            fi
+        done
+    ;;
+    * )
+    ;;
+esac
+
+""",
+                "%preun": """
+""",
+                "%postun": """
+if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
+""",
+                "%files": """
+%{i}/
+%dir %{instroot}/
+%dir %{instroot}/%{cmsplatf}/
+%dir %{instroot}/%{cmsplatf}/%{pkgcategory}/
+%dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
+"""}
+
 
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
@@ -879,11 +947,37 @@ if [ X"$(id -u)" = X0 ]; then
     exit 1
 fi
 """
-
-DEFAULT_POST_PREAMBLE = """
+if not sys.platform == "darwin": DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
 %{relocateConfig}etc/profile.d/init.csh
+"""
+else: DEFAULT_POST_PREAMBLE = """
+if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
+%{relocateConfig}etc/profile.d/init.sh
+%{relocateConfig}etc/profile.d/init.csh
+
+case %{cmsplatf} in
+    osx* )
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        do 
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
+            then
+              chmod +w $x
+              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+              echo $old_install_name | grep %{installroot} && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}} ;install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x )
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                echo $dep | grep %{installroot} && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x)
+              done
+              chmod -w $x
+            fi
+        done
+    ;;
+    * )
+    ;;
+esac
 """
 DEFAULT_PREUN_PREAMBLE = """
 """
@@ -923,7 +1017,7 @@ COMMANDS_CSH = {"SETV":     """set %(var)s="%(value)s"\n""",
                 "ALIAS_SH": "",
                 "ALIAS_CSH":"""alias %(var)s "%(value)s"\n"""}
 
-SPEC_HEADER = """
+if not sys.platform == "darwin": SPEC_HEADER = """
 %%define pkgname        %(name)s
 %%define pkgversion     %(version)s
 %%define pkgcategory    %(group)s
@@ -954,8 +1048,41 @@ Provides: %(group)s+%(name)s+%(version)s
 Obsoletes: %(group)s+%(name)s+%(version)s
 Prefix: %(installDir)s
 """
+else: SPEC_HEADER = """
+%%define pkgname        %(name)s
+%%define pkgversion     %(version)s
+%%define pkgcategory    %(group)s
+%%define cmsroot        %(workDir)s
+%%define instroot       %(workDir)s/%(tempDirPrefix)s/BUILDROOT/%(checksum)s%(installDir)s
+%%define placeholder    %(workDir)s/%(tempDirPrefix)s/BUILDROOT/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/%(installDir)s
+%%define realversion    %(realVersion)s
+%%define gccver         %(compilerRealVersion)s
+%%define compilerRealVersion %(compilerRealVersion)s
+%%define pkgrevision    %(pkgRevision)s
+%%define pkgreqs        %(pkgreqs)s
+%%define directpkgreqs	%(directpkgreqs)s
+%%define specchecksum   %(checksum)s
+%%define cmscompiler	%(compilerName)s
+%%define cmsbuildApiVersion 1
+%%define installroot    %(installDir)s
+%%define tempprefix     %(tempDirPrefix)s
+Name: %(group)s+%(name)s+%(version)s
+Group: %(group)s
+Version: %(rpmVersion)s
+Release: %(pkgRevision)s
+License:  "As required by the orginal provider of the software."
+Summary: %(summary)s SpecChecksum:%(checksum)s
+%(requiresStatement)s
+Packager: CMS <hn-cms-sw-develtools@cern.ch>
+Distribution: CMS
+Vendor: CMS
+Provides: %(group)s+%(name)s+%(version)s
+Obsoletes: %(group)s+%(name)s+%(version)s
+Prefix: %(installDir)s
+"""
 
-DEFAULT_INSTALL_POSTAMBLE="""
+
+if not sys.platform == "darwin": DEFAULT_INSTALL_POSTAMBLE="""
 # Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
 # to support architectures not being build with cmsBuild > V00-19-XX
 %if "%{?keep_pkgconfig:set}" != "set"
@@ -1001,6 +1128,63 @@ case %{cmsplatf} in
               for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
               do
                 install_name_tool -change $dep `basename $dep` $x
+              done
+              chmod -w $x
+            fi
+        done
+    ;;
+    * )
+    ;;
+esac
+"""
+else: DEFAULT_INSTALL_POSTAMBLE="""
+# Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
+# to support architectures not being build with cmsBuild > V00-19-XX
+%if "%{?keep_pkgconfig:set}" != "set"
+if [ -d "%i/lib/pkgconfig" ]; then rm -rf %i/lib/pkgconfig; fi
+%endif
+
+# Do not package libtool and archive libraries, unless required.
+%if "%{?keep_archives:set}" != "set"
+# Don't need archive libraries.
+rm -f %i/lib/*.{l,}a
+%endif
+
+# Strip executable / paths which were specified in the strip_files macro.
+%if "%{?strip_files:set}" == "set"
+for x in %strip_files
+do
+  if [ -e $x ]
+  then
+    find $x -type f -perm -a+x -exec %strip {} \;
+  fi 
+done
+%endif
+
+# remove files / directories which were specified by the drop_files macro.
+%if "%{?drop_files:set}" == "set"
+for x in %drop_files
+do
+  if [ -e $x ]; then rm -rf $x; fi
+done
+%endif
+
+case %{cmsplatf} in
+    osx* )
+        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        do 
+            if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
+            then
+              chmod +w $x
+              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+              install_name=`basename $old_install_name`
+              dir_name=`dirname $x`
+              new_name=${dir_name}"/"${install_name}
+              echo $new_install_name | grep ${installroot} && ( new_install_name=%{placeholder}${new_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||  install_name_tool -id $install_name $x )
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                 echo $dep | grep %{installroot} && ( newdep=%{placeholder}${dep/##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
               done
               chmod -w $x
             fi
@@ -3181,7 +3365,8 @@ def bootstrap(opts):
     sys.exit (1)
   bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
   bootstrapFile = open(bootstrapFilename, "w")
-  bootstrapFile.write(bootstrapContents)
+  if sys.platform == "darwin" : bootstrapFile.write(bootstrapContents.replace("--insecure",""))
+  else : bootstrapFile.write(bootstrapContents)
   bootstrapFile.close()
       
   log("Bootstrapping from server %s" % opts.server, DEBUG)
