@@ -866,7 +866,7 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 case %{cmsplatf} in
     osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do 
             if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
@@ -874,7 +874,7 @@ case %{cmsplatf} in
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               ( echo /$old_install_name | grep %{installroot} ) && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||  install_name_tool -id `basename $new_install_name` $x ) 
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
                ( echo /$dep | grep %{installroot} ) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
               done
@@ -960,7 +960,7 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 case %{cmsplatf} in
     osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"| grep -v libgcc_s.1.dylib`; 
         do 
             if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
@@ -968,7 +968,7 @@ case %{cmsplatf} in
               old_install_name=/`otool -D $x | tail -1 | sed -e's|:$||'`
               (echo /$old_install_name | grep %{installroot}) && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}} ;install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x )
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
                 (echo /$dep | grep %{installroot}) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x)
               done
@@ -1172,7 +1172,7 @@ done
 
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do 
             if [ "X`file $x | cut -d: -f2 | awk '{print $1}'`" = XMach-O ]
             then
@@ -1183,7 +1183,7 @@ case %{cmsplatf} in
               new_name=${dir_name}"/"${install_name}
               (echo /$new_install_name | grep ${installroot}) && ( new_install_name=%{placeholder}${new_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||  install_name_tool -id $install_name $x )
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
                  (echo /$dep | grep %{installroot}) && ( newdep=%{placeholder}${dep/##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
               done
