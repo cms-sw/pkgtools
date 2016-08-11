@@ -869,7 +869,8 @@ case %{cmsplatf} in
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do
             filestr=`file $x | cut -d: -f2` 
-            if [ "X$filestr" = "XMach-O 64-bit dynamically linked shared library x86_64" ]
+            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
@@ -881,7 +882,8 @@ case %{cmsplatf} in
               done
               chmod -w $x
             fi
-            if [ "X$filestr" = "XMach-O 64-bit executable x86_64" ]
+            echo $filestr | grep Mach-O | grep executable  
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
@@ -974,7 +976,8 @@ case %{cmsplatf} in
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"| grep -v libgcc_s.1.dylib`; 
         do 
             filestr=`file $x | cut -d: -f2`
-            if [ "X$filestr" = "XMach-O 64-bit dynamically linked shared library x86_64" ]
+            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
@@ -986,7 +989,8 @@ case %{cmsplatf} in
               done
               chmod -w $x
             fi
-            if [ "X$filestr" = "XMach-O 64-bit executable x86_64" ]
+            echo $filestr | grep Mach-O | grep executable  
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
@@ -1197,7 +1201,8 @@ case %{cmsplatf} in
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do
             filestr=`file $x | cut -d: -f2`
-            if [ "X$filestr" = "XMach-O 64-bit dynamically linked shared library x86_64" ]
+            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
@@ -1212,7 +1217,8 @@ case %{cmsplatf} in
               done
               chmod -w $x
             fi
-            if [ "X$filestr" = "XMach-O 64-bit executable x86_64" ]
+            echo $filestr | grep Mach-O | grep executable  
+            if [ $? -eq "0" ]
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
