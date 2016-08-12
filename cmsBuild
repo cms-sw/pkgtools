@@ -3675,7 +3675,7 @@ def upload(opts, args, factory):
     uploadSum=uploadSum)
   # Hard-link packages.
   if platform == 'darwin' :
-  hardLinkPackages = format(
+    hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
     "for h in %(includes)s ; do\n"
@@ -3698,7 +3698,7 @@ def upload(opts, args, factory):
     architecture=opts.architecture,
     uploadSum=uploadSum)
   else:
-  hardLinkPackages = format(
+    hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
     "for h in %(includes)s ; do\n"
