@@ -3674,6 +3674,7 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     uploadSum=uploadSum)
   # Hard-link packages.
+  if platform == 'darwin' :
   hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
@@ -3682,7 +3683,30 @@ def upload(opts, args, factory):
     "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
     "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
     "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5 -q $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
+    "    md5sum=`md5 -q $r`; f=`basename $r`; echo $f\" \"$md5sum >> $MD5CACHE\n"
+    "  done\n"
+    "done\n"
+    "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
+    "if [ $WEB_FILES -gt 0 ] ; then\n"
+    "  mkdir -p %(tmpdir)s/%(uploadSum)s/WEB\n"
+    "  %(rsync)s -am --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/%(uploadSum)s/WEB/\n"
+    "fi\n",
+    rsync="rsync --chmod=a+rX",
+    workdir=opts.workDir,
+    tmpdir=tmpdir,
+    includes=" ".join(pkgChecksums),
+    architecture=opts.architecture,
+    uploadSum=uploadSum)
+  else:
+  hardLinkPackages = format(
+    "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
+    "touch $MD5CACHE\n"
+    "for h in %(includes)s ; do\n"
+    "  hi=$(echo $h | sed 's|^\(..\).*|\\1|')\n"
+    "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
+    "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
+    "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
+    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
     "  done\n"
     "done\n"
     "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
