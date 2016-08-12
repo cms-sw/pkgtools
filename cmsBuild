@@ -876,7 +876,7 @@ case %{cmsplatf} in
               if [ -z "${old_install_name##*%{installroot}*}" ] 
               then
                 new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
-                install_name_tool -id $new_install_name $x && install_name_tool -id `basename $new_install_name` $x 
+                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x 
               fi
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
@@ -884,7 +884,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{installroot}*}" ] 
                 then
                    newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
-                   install_name_tool -change $dep $newdep $x &&  install_name_tool -change $dep `basename $dep` $x 
+                   install_name_tool -change $dep $newdep $x ||  install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
               chmod -w $x
@@ -898,7 +898,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{installroot}*}" ]
                 then
                   newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
-                  install_name_tool -change $dep $newdep $x  && install_name_tool -change $dep `basename $dep` $x
+                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
               chmod -w $x
@@ -993,7 +993,7 @@ case %{cmsplatf} in
               if [ -z "${old_install_name##*%{installroot}*}" ]
               then
                 new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
-                install_name_tool -id $new_install_name $x && install_name_tool -id `basename $old_install_name` $x
+                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $old_install_name` $x
               fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
@@ -1001,7 +1001,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{installroot}*}" ]
                 then 
                   newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
-                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x 
+                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
               chmod -w $x
@@ -1015,7 +1015,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{installroot}*}" ]
                 then 
                   newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
-                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x
+                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
               chmod -w $x
@@ -1101,7 +1101,6 @@ else: SPEC_HEADER = """
 %%define pkgcategory    %(group)s
 %%define cmsroot        %(workDir)s
 %%define instroot       %(workDir)s/%(tempDirPrefix)s/BUILDROOT/%(checksum)s%(installDir)s
-%%define placeholder    %(workDir)s/%(tempDirPrefix)s/BUILDROOT/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX%(installDir)s
 %%define realversion    %(realVersion)s
 %%define gccver         %(compilerRealVersion)s
 %%define compilerRealVersion %(compilerRealVersion)s
@@ -1227,16 +1226,16 @@ case %{cmsplatf} in
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               if [ -z "$old_install_name##*%{installroot}*}" ] 
               then
-                new_install_name=%{placeholder}${old_install_name##*%{installroot}}
-                install_name_tool -id $new_install_name $x && install_name_tool -id $install_name $x
+                new_install_name=%{installroot}${old_install_name##*%{installroot}}
+                install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
               fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
                  if [ -z "${dep##*%{installroot}*}" ]
                  then
-                   newdep=%{placeholder}${dep##*%{installroot}}
-                   install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x
+                   newdep=%{installroot}${dep##*%{installroot}}
+                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
               done
               chmod -w $x
@@ -1249,8 +1248,8 @@ case %{cmsplatf} in
               do
                 if [ -z "${dep##*%{installroot}*}" ]
                 then 
-                  newdep=%{placeholder}${dep##*%{installroot}}
-                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x 
+                  newdep=%{installroot}${dep##*%{installroot}}
+                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
               chmod -w $x
