@@ -869,27 +869,37 @@ case %{cmsplatf} in
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do
             filestr=`file $x | cut -d: -f2` 
-            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
-            if [ $? -eq "0" ]
+            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              ( echo $old_install_name | grep %{installroot} ) && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||   install_name_tool -id `basename $new_install_name` $x  ) 
+              if [ -z "${old_install_name##*%{installroot}*}" ] 
+              then
+                new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
+                install_name_tool -id $new_install_name $x && install_name_tool -id `basename $new_install_name` $x 
+              fi
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-               ( echo $dep | grep %{installroot} ) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x ||  install_name_tool -id `basename $dep` $x   )
+                if [ -z "${dep##*%{installroot}*}" ] 
+                then
+                   newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                   install_name_tool -change $dep $newdep $x &&  install_name_tool -change $dep `basename $dep` $x 
+                fi
               done
               chmod -w $x
             fi
-            echo $filestr | grep Mach-O | grep executable  
-            if [ $? -eq "0" ]
+	    if [ -z "${filestr##*Mach-O*executable*}" ]  
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-               ( echo $dep | grep %{installroot} ) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x ||  install_name_tool -id `basename $dep` $x   )
+                if [ -z "${dep##*%{installroot}*}" ]
+                then
+                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  install_name_tool -change $dep $newdep $x  && install_name_tool -change $dep `basename $dep` $x
+                fi
               done
               chmod -w $x
             fi
@@ -976,27 +986,37 @@ case %{cmsplatf} in
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"| grep -v libgcc_s.1.dylib`; 
         do 
             filestr=`file $x | cut -d: -f2`
-            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
-            if [ $? -eq "0" ]
+            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              (echo $old_install_name | grep %{installroot}) && (new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}} ;install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x )
+              if [ -z "${old_install_name##*%{installroot}*}" ]
+              then
+                new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
+                install_name_tool -id $new_install_name $x && install_name_tool -id `basename $old_install_name` $x
+              fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                (echo $dep | grep %{installroot}) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x)
+                if [ -z "${dep##*%{installroot}*}" ]
+                then 
+                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x 
+                fi
               done
               chmod -w $x
             fi
-            echo $filestr | grep Mach-O | grep executable  
-            if [ $? -eq "0" ]
+            if [ -z "${filestr##*Mach-O*executable*}" ]  
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                (echo $dep | grep %{installroot}) && ( newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x)
+                if [ -z "${dep##*%{installroot}*}" ]
+                then 
+                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x
+                fi
               done
               chmod -w $x
             fi
@@ -1201,30 +1221,37 @@ case %{cmsplatf} in
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
         do
             filestr=`file $x | cut -d: -f2`
-            echo $filestr | grep Mach-O | grep "dynamically linked shared library"
-            if [ $? -eq "0" ]
+            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              install_name=`basename $old_install_name`
-              dir_name=`dirname $x`
-              new_name=${dir_name}"/"${install_name}
-              (echo $new_install_name | grep %{installroot}) && ( new_install_name=%{placeholder}${new_name##*%{installroot}}; install_name_tool -id $new_install_name $x ||  install_name_tool -id $install_name $x )
+              if [ -z "$old_install_name##*%{installroot}*}" ] 
+              then
+                new_install_name=%{placeholder}${old_install_name##*%{installroot}}
+                install_name_tool -id $new_install_name $x && install_name_tool -id $install_name $x
+              fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                 (echo $dep | grep %{installroot}) && ( newdep=%{placeholder}${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
+                 if [ -z "${dep##*%{installroot}*}" ]
+                 then
+                   newdep=%{placeholder}${dep##*%{installroot}}
+                   install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x
+                 fi
               done
               chmod -w $x
             fi
-            echo $filestr | grep Mach-O | grep executable  
-            if [ $? -eq "0" ]
+            if [ -z "${filestr##*Mach-O*executable*}" ]  
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                 (echo $dep | grep %{installroot}) && ( newdep=%{placeholder}${dep##*%{installroot}} ; install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x  )
+                if [ -z "${dep##*%{installroot}*}" ]
+                then 
+                  newdep=%{placeholder}${dep##*%{installroot}}
+                  install_name_tool -change $dep $newdep $x && install_name_tool -change $dep `basename $dep` $x 
+                fi
               done
               chmod -w $x
             fi
