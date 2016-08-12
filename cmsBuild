@@ -1228,7 +1228,11 @@ case %{cmsplatf} in
               then
                 new_install_name=%{installroot}${old_install_name##*%{installroot}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
-              fi 
+              elif [ -z "${old_install_name##*@*}" ]
+              then
+                new_install_name=%{installroot}${x##*%{installroot}} 
+                install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
+              fi
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
