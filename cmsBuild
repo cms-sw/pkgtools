@@ -873,17 +873,17 @@ case %{cmsplatf} in
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              if [ -z "${old_install_name##*%{installroot}*}" ] 
+              if [ -z "${old_install_name##*%{pkgrel}*}" ] 
               then
-                new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
+                new_install_name=$RPM_INSTALL_PREFIX%{pkgrel}${old_install_name##*%{pkgrel}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x 
               fi
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                if [ -z "${dep##*%{installroot}*}" ] 
+                if [ -z "${dep##*%{pkgrel}*}" ] 
                 then
-                   newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                   newdep=$RPM_INSTALL_PREFIX%{pkgrel}${dep##*%{pkgrel}}
                    install_name_tool -change $dep $newdep $x ||  install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
@@ -895,9 +895,9 @@ case %{cmsplatf} in
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                if [ -z "${dep##*%{installroot}*}" ]
+                if [ -z "${dep##*%{pkgrel}*}" ]
                 then
-                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  newdep=$RPM_INSTALL_PREFIX%{pkgrel}${dep##*%{pkgrel}}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
@@ -990,17 +990,17 @@ case %{cmsplatf} in
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              if [ -z "${old_install_name##*%{installroot}*}" ]
+              if [ -z "${old_install_name##*%{pkgrel}*}" ]
               then
-                new_install_name=$RPM_INSTALL_PREFIX${old_install_name##*%{installroot}}
+                new_install_name=$RPM_INSTALL_PREFIX%{pkgrel}${old_install_name##*%{pkgrel}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id `basename $old_install_name` $x
               fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                if [ -z "${dep##*%{installroot}*}" ]
+                if [ -z "${dep##*%{pkgrel}*}" ]
                 then 
-                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  newdep=$RPM_INSTALL_PREFIX%{pkgrel}${dep##*%{pkgrel}}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
@@ -1012,9 +1012,9 @@ case %{cmsplatf} in
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                if [ -z "${dep##*%{installroot}*}" ]
+                if [ -z "${dep##*%{pkgrel}*}" ]
                 then 
-                  newdep=$RPM_INSTALL_PREFIX${dep##*%{installroot}}
+                  newdep=$RPM_INSTALL_PREFIX%{pkgrel}${dep##*%{pkgrel}}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
@@ -1192,21 +1192,25 @@ case %{cmsplatf} in
             then
               chmod +w $x
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              if [ -z "$old_install_name##*%{installroot}*}" ] 
+              if [ -z "$old_install_name##*%{pkgrel}*}" ] 
               then
-                new_install_name=XYZ%{installroot}${old_install_name##*%{installroot}}
+                new_install_name=%{installroot}%{pkgrel}${old_install_name##*%{pkgrel}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
               elif [ -z "${old_install_name##@*path/*}" ]
               then
-                new_install_name=XYZ%{installroot}${x##*%{installroot}} 
+                new_install_name=%{installroot}%{pkgrel}${x##@*path/} 
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
               fi
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                 if [ -z "${dep##*%{installroot}*}" ]
+                 if [ -z "${dep##*%{pkgrel}*}" ]
                  then
-                   newdep=XYZ%{installroot}${dep##*%{installroot}}
+                   newdep=%{installroot}%{pkgrel}${dep##*%{pkgrel}}
+                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
+                 elif [ -z "${dep##@*path/*}" ]
+                 then
+                   newdep="@rpath/"${dep##@*path/} 
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
               done
@@ -1218,10 +1222,14 @@ case %{cmsplatf} in
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
               do
-                if [ -z "${dep##*%{installroot}*}" ]
+                if [ -z "${dep##*%{pkgrel}*}" ]
                 then 
-                  newdep=XYZ%{installroot}${dep##*%{installroot}}
+                  newdep=%{installroot}%{pkgrel}${dep##*%{pkgrel}}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
+                 elif [ -z "${dep##@*path/*}" ]
+                 then
+                   newdep="@rpath/"${dep##@*path/} 
+                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
               chmod -w $x
