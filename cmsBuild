@@ -1196,7 +1196,7 @@ case %{cmsplatf} in
               then
                 new_install_name=XYZ%{installroot}${old_install_name##*%{installroot}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
-              elif [ -z "${old_install_name##@*path/*" ]
+              elif [ -z "${old_install_name##@*path/*}" ]
               then
                 new_install_name=XYZ%{installroot}${x##*%{installroot}} 
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
