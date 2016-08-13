@@ -1064,7 +1064,7 @@ COMMANDS_CSH = {"SETV":     """set %(var)s="%(value)s"\n""",
                 "ALIAS_SH": "",
                 "ALIAS_CSH":"""alias %(var)s "%(value)s"\n"""}
 
-if not sys.platform == "darwin": SPEC_HEADER = """
+SPEC_HEADER = """
 %%define pkgname        %(name)s
 %%define pkgversion     %(version)s
 %%define pkgcategory    %(group)s
@@ -1095,38 +1095,6 @@ Provides: %(group)s+%(name)s+%(version)s
 Obsoletes: %(group)s+%(name)s+%(version)s
 Prefix: %(installDir)s
 """
-else: SPEC_HEADER = """
-%%define pkgname        %(name)s
-%%define pkgversion     %(version)s
-%%define pkgcategory    %(group)s
-%%define cmsroot        %(workDir)s
-%%define instroot       %(workDir)s/%(tempDirPrefix)s/BUILDROOT/%(checksum)s%(installDir)s
-%%define realversion    %(realVersion)s
-%%define gccver         %(compilerRealVersion)s
-%%define compilerRealVersion %(compilerRealVersion)s
-%%define pkgrevision    %(pkgRevision)s
-%%define pkgreqs        %(pkgreqs)s
-%%define directpkgreqs	%(directpkgreqs)s
-%%define specchecksum   %(checksum)s
-%%define cmscompiler	%(compilerName)s
-%%define cmsbuildApiVersion 1
-%%define installroot    %(installDir)s
-%%define tempprefix     %(tempDirPrefix)s
-Name: %(group)s+%(name)s+%(version)s
-Group: %(group)s
-Version: %(rpmVersion)s
-Release: %(pkgRevision)s
-License:  "As required by the orginal provider of the software."
-Summary: %(summary)s SpecChecksum:%(checksum)s
-%(requiresStatement)s
-Packager: CMS <hn-cms-sw-develtools@cern.ch>
-Distribution: CMS
-Vendor: CMS
-Provides: %(group)s+%(name)s+%(version)s
-Obsoletes: %(group)s+%(name)s+%(version)s
-Prefix: %(installDir)s
-"""
-
 
 if not sys.platform == "darwin": DEFAULT_INSTALL_POSTAMBLE="""
 # Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
@@ -1226,11 +1194,11 @@ case %{cmsplatf} in
               old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
               if [ -z "$old_install_name##*%{installroot}*}" ] 
               then
-                new_install_name=%{installroot}${old_install_name##*%{installroot}}
+                new_install_name=XYZ%{installroot}${old_install_name##*%{installroot}}
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
-              elif [ -z "${old_install_name##*@*}" ]
+              elif [ -z "${old_install_name##@*path/*" ]
               then
-                new_install_name=%{installroot}${x##*%{installroot}} 
+                new_install_name=XYZ%{installroot}${x##*%{installroot}} 
                 install_name_tool -id $new_install_name $x || install_name_tool -id $install_name $x
               fi
               # Change dependencies hardcoded path to new install path.
@@ -1238,7 +1206,7 @@ case %{cmsplatf} in
               do
                  if [ -z "${dep##*%{installroot}*}" ]
                  then
-                   newdep=%{installroot}${dep##*%{installroot}}
+                   newdep=XYZ%{installroot}${dep##*%{installroot}}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
               done
@@ -1252,7 +1220,7 @@ case %{cmsplatf} in
               do
                 if [ -z "${dep##*%{installroot}*}" ]
                 then 
-                  newdep=%{installroot}${dep##*%{installroot}}
+                  newdep=XYZ%{installroot}${dep##*%{installroot}}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
@@ -3674,8 +3642,9 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     uploadSum=uploadSum)
   # Hard-link packages.
-  if platform == 'darwin' :
-    hardLinkPackages = format(
+  md5sum="md5sum $r | awk '{print $1}'"
+  if platform == 'darwin' : md5sum="md5 -q $r"
+  hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
     "for h in %(includes)s ; do\n"
@@ -3683,7 +3652,7 @@ def upload(opts, args, factory):
     "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
     "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
     "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5sum=`md5 -q $r`; f=`basename $r`; echo $f\" \"$md5sum >> $MD5CACHE\n"
+    "    echo $(basename $r)\" \"$(%(md5sum)s) >> $MD5CACHE\n"
     "  done\n"
     "done\n"
     "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
@@ -3696,30 +3665,8 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     includes=" ".join(pkgChecksums),
     architecture=opts.architecture,
-    uploadSum=uploadSum)
-  else:
-    hardLinkPackages = format(
-    "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
-    "touch $MD5CACHE\n"
-    "for h in %(includes)s ; do\n"
-    "  hi=$(echo $h | sed 's|^\(..\).*|\\1|')\n"
-    "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
-    "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
-    "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
-    "  done\n"
-    "done\n"
-    "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
-    "if [ $WEB_FILES -gt 0 ] ; then\n"
-    "  mkdir -p %(tmpdir)s/%(uploadSum)s/WEB\n"
-    "  %(rsync)s -am --link-dest %(workdir)s/WEB/ %(workdir)s/WEB/ %(tmpdir)s/%(uploadSum)s/WEB/\n"
-    "fi\n",
-    rsync="rsync --chmod=a+rX",
-    workdir=opts.workDir,
-    tmpdir=tmpdir,
-    includes=" ".join(pkgChecksums),
-    architecture=opts.architecture,
-    uploadSum=uploadSum)
+    uploadSum=uploadSum,
+    md5sum=md5sum )
   # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
   # there is no risk of screwing up the repository by copying some unwanted
   # driver / cmsos.
