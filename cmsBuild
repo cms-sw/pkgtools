@@ -788,7 +788,7 @@ global tags_cache
 tags_cache = None
 
 # FIXME: write a more valuable description
-if not sys.platform == "darwin": DEFAULT_SECTIONS = {"": """
+DEFAULT_SECTIONS = {"": """
 """,
                     "%%description": """
 No description
@@ -819,96 +819,6 @@ fi
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
 %{relocateConfig}etc/profile.d/init.csh
-""",
-                "%preun": """
-""",
-                "%postun": """
-if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
-""",
-                "%files": """
-%{i}/
-%dir %{instroot}/
-%dir %{instroot}/%{cmsplatf}/
-%dir %{instroot}/%{cmsplatf}/%{pkgcategory}/
-%dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
-"""}
-else: DEFAULT_SECTIONS = {"": """
-""",
-                    "%%description": """
-No description
-""",
-                  "%prep": """
-%%setup -n %n-%realversion
-""",
-                  "%build": """
-%initenv
-./configure --prefix=%i
-make
-""",
-                "%install": """
-%initenv
-make install
-""",
-                "%pre": """
-if [ X"$(id -u)" = X0 ]; then
-  if [ ! -f /etc/cms-root-install-allowed ]; then
-    echo "*** CMS SOFTWARE INSTALLATION ABORTED ***"
-    echo "CMS software cannot be installed as the super-user."
-    echo "(We recommend reading a unix security guide)."
-    exit 1
-  fi
-fi
-""",
-                "%post": """
-if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
-%{relocateConfig}etc/profile.d/init.sh
-%{relocateConfig}etc/profile.d/init.csh
-
-case %{cmsplatf} in
-    osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
-        do
-            filestr=`file $x | cut -d: -f2` 
-            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
-            then
-              chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              if [ -z "${old_install_name##*%{cmsplatf}*}" ] 
-              then
-                new_install_name=$RPM_INSTALL_PREFIX/%{cmsplatf}/${old_install_name##*%{cmsplatf}/}
-                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $new_install_name` $x 
-              fi
-              # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
-              do
-                if [ -z "${dep##*%{cmsplatf}*}" ] 
-                then
-                   newdep=$RPM_INSTALL_PREFIX/%{cmsplatf}/${dep##*%{cmsplatf}/}
-                   install_name_tool -change $dep $newdep $x ||  install_name_tool -change $dep `basename $dep` $x 
-                fi
-              done
-              chmod -w $x
-            fi
-	    if [ -z "${filestr##*Mach-O*executable*}" ]  
-            then
-              chmod +w $x
-              # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
-              do
-                if [ -z "${dep##*%{cmsplatf}*}" ]
-                then
-                  newdep=$RPM_INSTALL_PREFIX/%{cmsplatf}/${dep##*%{cmsplatf}/}
-                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
-                fi
-              done
-              chmod -w $x
-            fi
-        done
-    ;;
-    * )
-    ;;
-esac
-
 """,
                 "%preun": """
 """,
@@ -993,7 +903,7 @@ case %{cmsplatf} in
               if [ -z "${old_install_name##*%{cmsplatf}*}" ]
               then
                 new_install_name=$RPM_INSTALL_PREFIX/%{cmsplatf}/${old_install_name##*%{cmsplatf}/}
-                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
+                echo install_name_tool -id $new_install_name $x || echo install_name_tool -id `basename $x` $x
               fi 
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
@@ -1001,7 +911,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{cmsplatf}*}" ]
                 then 
                   newdep=$RPM_INSTALL_PREFIX/%{cmsplatf}/${dep##*%{cmsplatf}/}
-                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
+                  echo install_name_tool -change $dep $newdep $x || echo install_name_tool -change $dep `basename $dep` $x 
                 fi
               done
               chmod -w $x
@@ -1015,7 +925,7 @@ case %{cmsplatf} in
                 if [ -z "${dep##*%{cmsplatf}*}" ]
                 then 
                   newdep=$RPM_INSTALL_PREFIX/%{cmsplatf}/${dep##*%{cmsplatf}/}
-                  install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
+                  echo install_name_tool -change $dep $newdep $x || echo install_name_tool -change $dep `basename $dep` $x
                 fi
               done
               chmod -w $x
@@ -1185,28 +1095,24 @@ done
 
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" | grep -v libgcc_s.1.dylib`; 
+        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; 
         do
             filestr=`file $x | cut -d: -f2`
+            rpathold=${x%%%{cmsplatf}/*}/%{cmsplatf}
+            relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $x`
             if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              if [ -z "$old_install_name##*%{cmsplatf}*}" ] 
-              then
-                new_install_name=%{installroot}/%{cmsplatf}/${old_install_name##*%{cmsplatf}/}
-                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
-              elif [ -z "${old_install_name##@*path/*}" ]
-              then
-                new_install_name=%{installroot}/%{cmsplatf}/${x##*%{cmsplatf}/} 
-                install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
-              fi
+              new_install_name="@rpath/"${x##*%{cmsplatf}/}
+              rpathnew="@loader_path/"$relpath
+              install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
+              install_name_tool -add_rpath $rpathnew $x || true
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
                  if [ -z "${dep##*%{cmsplatf}*}" ]
                  then
-                   newdep=%{installroot}/%{cmsplatf}/${dep##*%{cmsplatf}/}
+                   newdep="@rpath/"${dep##*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  elif [ -z "${dep##@*path/*}" ]
                  then
@@ -1220,11 +1126,11 @@ case %{cmsplatf} in
             then
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
-              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'| grep -v libgcc_s.1.dylib`
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
                 if [ -z "${dep##*%{cmsplatf}*}" ]
                 then 
-                  newdep=%{installroot}/%{cmsplatf}/${dep##*%{cmsplatf}/}
+                  newdep="@rpath/"${dep##*%{cmsplatf}/}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                  elif [ -z "${dep##@*path/*}" ]
                  then
@@ -1232,6 +1138,8 @@ case %{cmsplatf} in
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
+              rpathnew="@loader_path/"$relpath
+              install_name_tool -add_rpath $rpathnew $x
               chmod -w $x
             fi
         done
@@ -2028,8 +1936,8 @@ class Package (object):
         #For online: pkgRevision is always architecture
         if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
         self.rpmVersion = "1"
-
         self.requiresStatement = "Requires: gcc"
+#        if sys.platform == 'darwin': self.requiresStatement = ""
         self.sections = {}
         self.dependentCounter = 0 
         self.__sectionOptions = None

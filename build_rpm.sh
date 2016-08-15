@@ -216,6 +216,13 @@ case `uname` in
     export DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
     USER_LIBS=-liconv
     LIBPATHNAME=DYLD_FALLBACK_LIBRARY_PATH
+    for f in $PREFIX/lib/*.dylib*;do
+       install_name_tool -id $f $f
+       for lib in `otool -L $f | grep executable_path | awk '{print $1}'`;do 
+          libn=$PREFIX/lib/`basename $lib`; 
+          install_name_tool -change $lib $libn $f; 
+       done;
+    done
   ;;
   Linux)
     export LD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
