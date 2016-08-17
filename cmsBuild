@@ -903,6 +903,7 @@ case %{cmsplatf} in
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
+              install_name_tool -add_rpath $rpathnew $x
               chmod -w $x
             fi
             if [ -z "${filestr##*Mach-O*executable*}" ]  
@@ -912,6 +913,7 @@ case %{cmsplatf} in
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@executable_path/"$relpath
+              install_name_tool -add_rpath $rpathnew $x
               chmod -w $x
             fi
         done
