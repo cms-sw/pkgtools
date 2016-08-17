@@ -899,6 +899,11 @@ case %{cmsplatf} in
             if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
+              for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
+                 if [ -z "${RP##*%{cmsplatf}*}" ]; then
+                   install_name_tool -delete_rpath $RP $x
+                 fi
+              done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
@@ -909,6 +914,11 @@ case %{cmsplatf} in
             if [ -z "${filestr##*Mach-O*executable*}" ]  
             then
               chmod +w $x
+              for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
+                 if [ -z "${RP##*%{cmsplatf}*}" ]; then
+                   install_name_tool -delete_rpath $RP $x
+                 fi
+              done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
@@ -1096,10 +1106,6 @@ case %{cmsplatf} in
                  then
                    newdep="@rpath/"${dep##*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
-                 elif [ -z "${dep##@*path/*}" ]
-                 then
-                   newdep="@loader_path/"${dep##@*path/} 
-                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
               done
               chmod -w $x
@@ -1114,10 +1120,6 @@ case %{cmsplatf} in
                 then 
                   newdep="@rpath/"${dep##*%{cmsplatf}/}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
-                 elif [ -z "${dep##@*path/*}" ]
-                 then
-                   newdep="@loader_path/"${dep##@*path/} 
-                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                 fi
               done
               chmod -w $x
