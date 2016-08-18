@@ -893,15 +893,15 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 case %{cmsplatf} in
     osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"| grep -v libgcc_s.1.dylib`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
         do 
             filestr=`file $x | cut -d: -f2`
             if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
-                 if [ -z "${RP##*%{cmsplatf}*}" ]; then
-                   install_name_tool -delete_rpath $RP $x
+                 if [ -z "${RP##*%{cmsplatf}}" ]; then
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x
                  fi
               done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
@@ -915,8 +915,8 @@ case %{cmsplatf} in
             then
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
-                 if [ -z "${RP##*%{cmsplatf}*}" ]; then
-                   install_name_tool -delete_rpath $RP $x
+                 if [ -z "${RP##*%{cmsplatf}}" ]; then
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x
                  fi
               done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
