@@ -881,16 +881,14 @@ if [ X"$(id -u)" = X0 ]; then
     exit 1
 fi
 """
-if not sys.platform == "darwin": DEFAULT_POST_PREAMBLE = """
+DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
 %{relocateConfig}etc/profile.d/init.csh
 """
-else: DEFAULT_POST_PREAMBLE = """
-if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
-%{relocateConfig}etc/profile.d/init.sh
-%{relocateConfig}etc/profile.d/init.csh
 
+
+if sys.platform == "darwin": DEFAULT_POST_POSTAMBLE = """
 case %{cmsplatf} in
     osx* )
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
@@ -932,6 +930,8 @@ case %{cmsplatf} in
     ;;
 esac
 """
+else: DEFAULT_POST_POSTAMBLE = ""
+
 DEFAULT_PREUN_PREAMBLE = """
 """
 DEFAULT_POSTUN_PREAMBLE = """
@@ -1300,7 +1300,7 @@ class PackageFactory (object):
                         "%build": DEFAULT_BUILD_POSTAMBLE,
                         "%install": DEFAULT_INSTALL_POSTAMBLE,
                         "%pre": "",
-                        "%post": "",
+                        "%post": DEFAULT_POST_POSTAMBLE,
                         "%preun": "",
                         "%postun": "",
                         "%files": ""}
