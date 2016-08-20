@@ -866,7 +866,7 @@ DEFAULT_BUILD_PREAMBLE = """
 %initenv
 """
 
-DEFAULT_INSTALL_PREABLE = """
+DEFAULT_INSTALL_PREMABLE = """
 mkdir -p %i
 mkdir -p %_rpmdir
 mkdir -p %_srcrpmdir
@@ -1125,6 +1125,7 @@ case %{cmsplatf} in
               ;;
              * )
               ;;
+           esac
         done
     ;;
     * )
@@ -1288,7 +1289,7 @@ class PackageFactory (object):
                         "%%description": DEFAULT_DESCRIPTION_PREAMBLE,
                         "%prep": DEFAULT_PREP_PREAMBLE,
                         "%build": DEFAULT_BUILD_PREAMBLE,
-                        "%install": DEFAULT_INSTALL_PREAMBLE,
+                        "%install": DEFAULT_INSTALL_PREMABLE,
                         "%pre": DEFAULT_PRE_PREAMBLE,
                         "%post": DEFAULT_POST_PREAMBLE,
                         "%preun": DEFAULT_PREUN_PREAMBLE,
