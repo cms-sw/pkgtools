@@ -891,11 +891,10 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 if sys.platform == "darwin": DEFAULT_POST_POSTAMBLE = """
 case %{cmsplatf} in
     osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f | grep -v -e "[.]pyc"`; 
-        do 
-            filestr=`file $x | tail -1 | cut -d: -f2 `
-            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
-            then
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
+         filestr=`file $x | tail -1 | cut -d: -f2 `
+         case $filestr in 
+           *Mach-O*(dynamically linked shared library|bundle|universal binary)* )
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
@@ -908,9 +907,8 @@ case %{cmsplatf} in
               rpathnew="@loader_path/"$relpath
               install_name_tool -add_rpath $rpathnew $x
               chmod -w $x
-            fi
-            if [ -z "${filestr##*Mach-O*executable*}" ]  
-            then
+              ;;
+           *Mach-O*executable* )
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
@@ -923,8 +921,11 @@ case %{cmsplatf} in
               rpathnew="@executable_path/"$relpath
               install_name_tool -add_rpath $rpathnew $x
               chmod -w $x
-            fi
-        done
+              ;;
+             * )
+              ;;
+           esac
+         done
     ;;
     * )
     ;;
@@ -1091,11 +1092,10 @@ done
 
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f | grep -v -e "[.]pyc" `; 
-        do
-            filestr=`file $x | tail -1 | cut -d: -f2 `
-            if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
-            then
+        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; do
+          filestr=`file $x | tail -1 | cut -d: -f2 `
+          case ${filestr} in 
+            *Mach-O*(dynamically linked shared library|bundle|universal binary)* )
               chmod +w $x
               new_install_name="@rpath/"${x##*%{cmsplatf}/}
               install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
@@ -1109,9 +1109,8 @@ case %{cmsplatf} in
                  fi
               done
               chmod -w $x
-            fi
-            if [ -z "${filestr##*Mach-O*executable*}" ]  
-            then
+              ;;
+            *Mach-O*executable* )  
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
@@ -1123,7 +1122,9 @@ case %{cmsplatf} in
                 fi
               done
               chmod -w $x
-            fi
+              ;;
+             * )
+              ;;
         done
     ;;
     * )
@@ -1287,7 +1288,7 @@ class PackageFactory (object):
                         "%%description": DEFAULT_DESCRIPTION_PREAMBLE,
                         "%prep": DEFAULT_PREP_PREAMBLE,
                         "%build": DEFAULT_BUILD_PREAMBLE,
-                        "%install": DEFAULT_INSTALL_PREABLE,
+                        "%install": DEFAULT_INSTALL_PREAMBLE,
                         "%pre": DEFAULT_PRE_PREAMBLE,
                         "%post": DEFAULT_POST_PREAMBLE,
                         "%preun": DEFAULT_PREUN_PREAMBLE,
