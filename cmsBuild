@@ -891,9 +891,9 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 if sys.platform == "darwin": DEFAULT_POST_POSTAMBLE = """
 case %{cmsplatf} in
     osx* )
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f | grep -v -e "[.]pyc"`; 
         do 
-            filestr=`file $x | cut -d: -f2`
+            filestr=`file $x | tail -1 | cut -d: -f2 `
             if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
@@ -1091,9 +1091,9 @@ done
 
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; 
+        for x in `find %{i} -type f | grep -v -e "[.]pyc" `; 
         do
-            filestr=`file $x | cut -d: -f2`
+            filestr=`file $x | tail -1 | cut -d: -f2 `
             if [ -z "${filestr##*Mach-O*dynamically linked shared library*}" ]
             then
               chmod +w $x
