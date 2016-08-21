@@ -898,28 +898,28 @@ case %{cmsplatf} in
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
-                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x || true
                  fi
               done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
-              install_name_tool -add_rpath $rpathnew $x
+              install_name_tool -add_rpath $rpathnew $x || true
               chmod -w $x
               ;;
            *Mach-O*executable* )
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
-                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x || true
                  fi
               done   
               rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname $x`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@executable_path/"$relpath
-              install_name_tool -add_rpath $rpathnew $x
+              install_name_tool -add_rpath $rpathnew $x || true
               chmod -w $x
               ;;
              * )
