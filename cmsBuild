@@ -894,7 +894,7 @@ case %{cmsplatf} in
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
          filestr=`file $x | tail -1 | cut -d: -f2 `
          case $filestr in 
-           *Mach-O*"dynamically linked shared library"*|*Mach-O*bundle*|*Mach-O*"universal binary"* )
+           *Mach-O*dynamically*|*Mach-O*bundle*|*Mach-O*binary* )
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
@@ -1095,7 +1095,7 @@ case %{cmsplatf} in
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; do
           filestr=`file $x | tail -1 | cut -d: -f2 `
           case ${filestr} in 
-            *Mach-O*"dynamically linked shared library"*|*Mach-O*bundle|*Mach-O*"universal binary"* )
+            *Mach-O*dynamically*|*Mach-O*bundle|*Mach-O*binary* )
               chmod +w $x
               new_install_name="@rpath/"${x##*%{cmsplatf}/}
               install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
