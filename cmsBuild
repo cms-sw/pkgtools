@@ -893,8 +893,7 @@ case %{cmsplatf} in
     osx* )
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
          filestr=`file $x | tail -1 | cut -d: -f2 `
-         case $filestr in 
-           *Mach-O*dynamically*|*Mach-O*bundle*|*Mach-O*binary* )
+         if [ -z "${filestr##*Mach-O*dynamically*}" ]; then
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
@@ -907,8 +906,36 @@ case %{cmsplatf} in
               rpathnew="@loader_path/"$relpath
               install_name_tool -add_rpath $rpathnew $x || true
               chmod -w $x
-              ;;
-           *Mach-O*executable* )
+          fi
+          if [ -z "${filestr##*Mach-O*bundle*}" ]; then 
+              chmod +w $x
+              for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
+                 if [ -z "${RP##*%{cmsplatf}}" ]; then
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x || true
+                 fi
+              done   
+              rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
+              curpath=`dirname $x`
+              relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
+              rpathnew="@loader_path/"$relpath
+              install_name_tool -add_rpath $rpathnew $x || true
+              chmod -w $x
+           fi
+           if [ -z "${filestr##*Mach-O*binary*}" ]; then
+              chmod +w $x
+              for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
+                 if [ -z "${RP##*%{cmsplatf}}" ]; then
+                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} $x || true
+                 fi
+              done   
+              rpathold=${x%%%{cmsplatf}/*}%{cmsplatf}/
+              curpath=`dirname $x`
+              relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
+              rpathnew="@loader_path/"$relpath
+              install_name_tool -add_rpath $rpathnew $x || true
+              chmod -w $x
+           fi
+           if [ -z "${filestr##*Mach-O*executable*" ]; then
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
@@ -921,10 +948,7 @@ case %{cmsplatf} in
               rpathnew="@executable_path/"$relpath
               install_name_tool -add_rpath $rpathnew $x || true
               chmod -w $x
-              ;;
-             * )
-              ;;
-           esac
+            fi
          done
     ;;
     * )
@@ -1094,8 +1118,7 @@ case %{cmsplatf} in
     osx* )
         for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; do
           filestr=`file $x | tail -1 | cut -d: -f2 `
-          case ${filestr} in 
-            *Mach-O*dynamically*|*Mach-O*bundle|*Mach-O*binary* )
+          if [ -z "${filestr##*Mach-O*dynamically*}" ];then 
               chmod +w $x
               new_install_name="@rpath/"${x##*%{cmsplatf}/}
               install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
@@ -1109,8 +1132,38 @@ case %{cmsplatf} in
                  fi
               done
               chmod -w $x
-              ;;
-            *Mach-O*executable* )  
+          fi
+          if [ -z "${filestr##*Mach-O*bundle}" ];then
+              chmod +w $x
+              new_install_name="@rpath/"${x##*%{cmsplatf}/}
+              install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                 if [ -z "${dep##*%{cmsplatf}*}" ]
+                 then
+                   newdep="@rpath/"${dep##*%{cmsplatf}/}
+                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
+                 fi
+              done
+              chmod -w $x
+          fi
+          if [ -z "${filestr##*Mach-O*binary*}" ];then
+              chmod +w $x
+              new_install_name="@rpath/"${x##*%{cmsplatf}/}
+              install_name_tool -id $new_install_name $x || install_name_tool -id `basename $x` $x
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                 if [ -z "${dep##*%{cmsplatf}*}" ]
+                 then
+                   newdep="@rpath/"${dep##*%{cmsplatf}/}
+                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
+                 fi
+              done
+              chmod -w $x
+           fi
+           if [ -z "${filestr##*Mach-O*executable*}" ];then 
               chmod +w $x
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
@@ -1122,10 +1175,7 @@ case %{cmsplatf} in
                 fi
               done
               chmod -w $x
-              ;;
-             * )
-              ;;
-           esac
+           fi
         done
     ;;
     * )
