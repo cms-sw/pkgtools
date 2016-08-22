@@ -935,7 +935,7 @@ case %{cmsplatf} in
               install_name_tool -add_rpath $rpathnew $x || true
               chmod -w $x
            fi
-           if [ -z "${filestr##*Mach-O*executable*" ]; then
+           if [ -z "${filestr##*Mach-O*executable*}" ]; then
               chmod +w $x
               for RP in `otool -l $x | grep -A3 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
