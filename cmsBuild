@@ -896,7 +896,7 @@ case %{cmsplatf} in
               chmod +w ${1}
               for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
                  if [ -z "${RP##*%{cmsplatf}}" ]; then
-                   install_name_tool -rpath $RP $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} || true
+                   install_name_tool -delete_rpath $RP ${1} || true
                  fi
               done   
               rpathnew="@loader_path/."
@@ -912,6 +912,7 @@ case %{cmsplatf} in
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
               install_name_tool -add_rpath $rpathnew ${1} || true
+              install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} || true
               chmod -w ${1}
           }
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
