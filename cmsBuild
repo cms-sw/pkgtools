@@ -1130,6 +1130,10 @@ case %{cmsplatf} in
                    newdep="@rpath/"${dep##*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
+                 if [ -z "${dep##lib*dylib}" ];then
+                   newdep=`basename $x`/$dep
+                   install_name_tool -change $dep $newdep $x || true
+                 fi
               done
               chmod -w $x
           fi
@@ -1144,6 +1148,10 @@ case %{cmsplatf} in
                  then
                    newdep="@rpath/"${dep##*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
+                 fi
+                 if [ -z "${dep##lib*dylib}" ];then
+                   newdep=`basename $x`/$dep
+                   install_name_tool -change $dep $newdep $x || true
                  fi
               done
               chmod -w $x
@@ -1160,6 +1168,10 @@ case %{cmsplatf} in
                    newdep="@rpath/"${dep##*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x
                  fi
+                 if [ -z "${dep##lib*dylib}" ];then
+                   newdep=`basename $x`/$dep
+                   install_name_tool -change $dep $newdep $x || true
+                 fi
               done
               chmod -w $x
            fi
@@ -1173,6 +1185,10 @@ case %{cmsplatf} in
                   newdep="@rpath/"${dep##*%{cmsplatf}/}
                   install_name_tool -change $dep $newdep $x || install_name_tool -change $dep `basename $dep` $x 
                 fi
+                 if [ -z "${dep##lib*dylib}" ];then
+                   newdep=`basename $x`/$dep
+                   install_name_tool -change $dep $newdep $x || true
+                 fi
               done
               chmod -w $x
            fi
