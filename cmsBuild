@@ -895,24 +895,24 @@ case %{cmsplatf} in
           {
               chmod +w ${1}
               for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
-                 if [ -z "${RP##*%{cmsplatf}}" ]; then
+                 if [ -z "${RP#*%{cmsplatf}}" ]; then
                    install_name_tool -delete_rpath $RP ${1} || true
                  fi
               done   
               rpathnew="@loader_path/."
-              install_name_tool -add_rpath $rpathnew ${1} || true
+              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
               rpathnew="@executable_path/."
-              install_name_tool -add_rpath $rpathnew ${1} || true
-              rpathnew="@loader_path/../lib/%{cmsplatf}"
-              install_name_tool -add_rpath $rpathnew ${1} || true
-              rpathnew="@executable_path/../lib/%{cmsplatf}"
-              install_name_tool -add_rpath $rpathnew ${1} || true
+              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+              rpathnew="@loader_path/../../lib/%{cmsplatf}"
+              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+              rpathnew="@executable_path/../../lib/%{cmsplatf}"
+              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
               rpathold=${1%%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname ${1}`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
-              install_name_tool -add_rpath $rpathnew ${1} || true
-              install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} || true
+              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+              install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} 2>/dev/null || true
               chmod -w ${1}
           }
         for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
@@ -1099,14 +1099,14 @@ case %{cmsplatf} in
         relocate_dylib()
             {
               chmod +w ${1}
-              new_install_name="@rpath/"${1##*%{cmsplatf}/}
+              new_install_name="@rpath/"${1#*%{cmsplatf}/}
               install_name_tool -id $new_install_name ${1} || install_name_tool -id `basename ${1}` ${1}
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L ${1} | sed -e's|(.*||' | grep -v -e':$' | grep -v -e'^/usr/lib'| grep -v '/Frameworks/'`
               do
                  if [ -z "${dep##*%{cmsplatf}*}" ]
                  then
-                   newdep="@rpath/"${dep##*%{cmsplatf}/}
+                   newdep="@rpath/"${dep#*%{cmsplatf}/}
                    install_name_tool -change $dep $newdep ${1} || true
                  fi
                  if [ -z "${dep##lib*dylib}" ];then
@@ -1138,7 +1138,7 @@ case %{cmsplatf} in
               do
                 if [ -z "${dep##*%{cmsplatf}*}" ]
                 then 
-                  newdep="@rpath/"${dep##*%{cmsplatf}/}
+                  newdep="@rpath/"${dep#*%{cmsplatf}/}
                   install_name_tool -change $dep $newdep $x || true 
                 fi
               done
