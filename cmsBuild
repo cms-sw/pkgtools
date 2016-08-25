@@ -866,7 +866,7 @@ DEFAULT_BUILD_PREAMBLE = """
 %initenv
 """
 
-DEFAULT_INSTALL_PREMABLE = """
+DEFAULT_INSTALL_PREABLE = """
 mkdir -p %i
 mkdir -p %_rpmdir
 mkdir -p %_srcrpmdir
@@ -907,7 +907,7 @@ case %{cmsplatf} in
               install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
               rpathnew="@executable_path/../../lib/%{cmsplatf}"
               install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathold=${1%%%{cmsplatf}/*}%{cmsplatf}/
+              rpathold=${1%%{cmsplatf}/*}%{cmsplatf}/
               curpath=`dirname ${1}`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
@@ -1307,7 +1307,7 @@ class PackageFactory (object):
                         "%%description": DEFAULT_DESCRIPTION_PREAMBLE,
                         "%prep": DEFAULT_PREP_PREAMBLE,
                         "%build": DEFAULT_BUILD_PREAMBLE,
-                        "%install": DEFAULT_INSTALL_PREMABLE,
+                        "%install": DEFAULT_INSTALL_PREABLE,
                         "%pre": DEFAULT_PRE_PREAMBLE,
                         "%post": DEFAULT_POST_PREAMBLE,
                         "%preun": DEFAULT_PREUN_PREAMBLE,
@@ -1939,6 +1939,7 @@ class Package (object):
         if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
         self.rpmVersion = "1"
         self.requiresStatement = "Requires: gcc"
+#  PG This could eventually be use to allow system clang as the default compiler
 #        if sys.platform == 'darwin': self.requiresStatement = ""
         self.sections = {}
         self.dependentCounter = 0 
@@ -3321,6 +3322,7 @@ def bootstrap(opts):
     sys.exit (1)
   bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
   bootstrapFile = open(bootstrapFilename, "w")
+# PG the --insecure option does not work on darwin
   if sys.platform == "darwin" : bootstrapFile.write(bootstrapContents.replace("--insecure",""))
   else : bootstrapFile.write(bootstrapContents)
   bootstrapFile.close()
