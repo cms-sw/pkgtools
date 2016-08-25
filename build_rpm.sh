@@ -66,6 +66,17 @@ do
   esac
 done
 
+case ${ARCH} in
+  osx*)
+    # Darwin is not RPM based, explicitly go for guessing the triplet
+    CONFIG_BUILD=guess
+    ;;
+  *)
+    # Assume Linux distro is RPM based and fetch triplet from RPM
+    CONFIG_BUILD=auto
+    ;;
+esac
+
 set -e
 
 IS_ONLINE=
@@ -94,7 +105,7 @@ esac
 # became a Makefile internal one and needs to be passed on command line.  Keep
 # this in mind if we need to move to a newer NSS.
 case $ARCH in
-  osx10[0-6]*) ;;
+  osx10[4-6]*) ;;
   osx*) export NSS_USE_SYSTEM_SQLITE=1 ;;
 esac
 
@@ -133,7 +144,7 @@ case $CONFIG_BUILD in
 esac
 
 CONFIG_HOST=$CONFIG_BUILD
-
+ 
 # Fetch the sources.
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/nspr/releases/v4.9.5/src/nspr-4.9.5.tar.gz | tar xvz
 curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
@@ -141,10 +152,11 @@ curl -k -s -S http://rpm5.org/files/popt/popt-1.16.tar.gz | tar xvz
 curl -k -s -S https://ftp.mozilla.org/pub/mozilla.org/security/nss/releases/NSS_3_14_3_RTM/src/nss-3.14.3.tar.gz | tar xvz
 curl -k -s -S ftp://ftp.fu-berlin.de/unix/tools/file/file-5.13.tar.gz | tar xvz
 curl -k -s -S http://download.oracle.com/berkeley-db/db-4.5.20.tar.gz | tar xvz
-curl -k -s -S http://rpm.org/releases/rpm-4.8.x/rpm-4.8.0.tar.bz2 | tar xvj
+curl -k -s -S -L https://github.com/cms-externals/rpm/archive/cms/v4.8.0.tar.gz | tar xvz
 curl -k -s -S http://ftp.gnu.org/gnu/cpio/cpio-2.11.tar.bz2 | tar xvj
 
 # Build required externals.
+
 if [ ! $IS_ONLINE ]; then
 cd $HERE/zlib-1.2.8
 CFLAGS="-fPIC -O3 -DUSE_MMAP -DUNALIGNED_OK -D_LARGEFILE64_SOURCE=1" \
@@ -198,30 +210,19 @@ cd $HERE/db-4.5.20/build_unix
 make -j $BUILDPROCESSES && make install
 
 # Build the actual rpm distribution.
-cd $HERE/rpm-4.8.0
-rm -rf lib/rpmhash.*
-REPO=https://raw.githubusercontent.com/cms-sw/cmsdist/IB/CMSSW_7_2_X/stable
-curl -s -S "$REPO/rpm-4.8.0-case-insensitive-sources.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-add-missing-__fxstat64.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-case-insensitive-fixes.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-fix-glob_pattern_p.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-fix-arm.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-remove-chroot-check.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-remove-strndup.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-allow-empty-buildroot.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-fix-missing-libgen.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-fix-find-provides.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-increase-line-buffer.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-increase-macro-buffer.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-fix-fontconfig-provides.patch" | patch -p1
-curl -s -S "$REPO/rpm-4.8.0-disable-internal-dependency-generator-libtool.patch" | patch -p1
-
+cd $HERE/rpm-cms-v4.8.0
 case `uname` in
   Darwin)
     export DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
-    USER_CFLAGS=-fnested-functions
     USER_LIBS=-liconv
     LIBPATHNAME=DYLD_FALLBACK_LIBRARY_PATH
+    for f in $PREFIX/lib/*.dylib*;do
+       install_name_tool -id $f $f
+       for lib in `otool -L $f | grep executable_path | awk '{print $1}'`;do 
+          libn=$PREFIX/lib/`basename $lib`; 
+          install_name_tool -change $lib $libn $f; 
+       done;
+    done
   ;;
   Linux)
     export LD_FALLBACK_LIBRARY_PATH=$PREFIX/lib
