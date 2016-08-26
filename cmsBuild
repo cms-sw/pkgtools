@@ -892,51 +892,45 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 
 if sys.platform == "darwin": DEFAULT_POST_POSTAMBLE = """
-case %{cmsplatf} in
-    osx* )
-       re_rpath() 
-          {
-              chmod +w ${1}
-              for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
-                 if [ -z "${RP##/*/%{cmsplatf}/}" ]; then
-                   install_name_tool -delete_rpath $RP ${1} || true
-                 fi
-              done   
-              rpathnew="@loader_path/."
-              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathnew="@executable_path/."
-              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathnew="@loader_path/../../lib/%{cmsplatf}"
-              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathnew="@executable_path/../../lib/%{cmsplatf}"
-              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathold=${1%%/%{cmsplatf}/*}/%{cmsplatf}/
-              curpath=`dirname ${1}`
-              relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
-              rpathnew="@loader_path/"$relpath
-              install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} 2>/dev/null || true
-              chmod -w ${1}
-          }
-        for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
-         filestr=`file $x | tail -1 | cut -d: -f2 `
-         if [ -z "${filestr##*Mach-O*dynamically*}" ]; then
-            re_rpath $x
-         fi
-         if [ -z "${filestr##*Mach-O*bundle*}" ]; then 
-            re_rpath $x
-         fi
-         if [ -z "${filestr##*Mach-O*binary*}" ]; then
-            re_rpath $x
-         fi
-         if [ -z "${filestr##*Mach-O*executable*}" ]; then
-            re_rpath $x
-         fi
-        done
-    ;;
-    * )
-    ;;
-esac
+re_rpath() 
+   {
+       chmod +w ${1}
+       for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
+          if [ -z "${RP##/*/%{cmsplatf}/}" ]; then
+            install_name_tool -delete_rpath $RP ${1} || true
+          fi
+       done   
+       rpathnew="@loader_path/."
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@executable_path/."
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@loader_path/../../lib/%{cmsplatf}"
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@executable_path/../../lib/%{cmsplatf}"
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathold=${1%%/%{cmsplatf}/*}/%{cmsplatf}/
+       curpath=`dirname ${1}`
+       relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
+       rpathnew="@loader_path/"$relpath
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} 2>/dev/null || true
+       chmod -w ${1}
+   }
+for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
+  filestr=`file $x | tail -1 | cut -d: -f2 `
+  if [ -z "${filestr##*Mach-O*dynamically*}" ]; then
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*bundle*}" ]; then 
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*binary*}" ]; then
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*executable*}" ]; then
+     re_rpath $x
+  fi
+done
 """
 else: DEFAULT_POST_POSTAMBLE = ""
 
@@ -1042,28 +1036,22 @@ do
 done
 %endif
 
-case %{cmsplatf} in
-    osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
-        do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
-            then
-              chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=`basename $old_install_name`
-              install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
-              # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
-              do
-                install_name_tool -change $dep `basename $dep` $x
-              done
-              chmod -w $x
-            fi
-        done
-    ;;
-    * )
-    ;;
-esac
+for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+do 
+    if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
+    then
+      chmod +w $x
+      old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+      new_install_name=`basename $old_install_name`
+      install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
+      # Make sure also dependencies do not have an hardcoded path.
+      for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
+      do
+        install_name_tool -change $dep `basename $dep` $x
+      done
+      chmod -w $x
+    fi
+done
 """
 else: DEFAULT_INSTALL_POSTAMBLE="""
 # Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
