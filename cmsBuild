@@ -850,7 +850,10 @@ INITENV_PREAMBLE = [
 ("+PATH", "PATH", "%i/bin"),
 ("+PATH", "%%{dynamic_path_var}", "%i/lib")]
 
-DEFAULT_PREAMBLE = """
+if sys.platform == 'darwin' : DEFAULT_PREAMBLE = """
+AutoReqProv: no
+"""
+else: DEFAULT_PREAMBLE = """
 """
 
 DEFAULT_DESCRIPTION_PREAMBLE = """
@@ -895,7 +898,7 @@ case %{cmsplatf} in
           {
               chmod +w ${1}
               for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
-                 if [ -z "${RP#*%{cmsplatf}}" ]; then
+                 if [ -z "${RP##/*/%{cmsplatf}/}" ]; then
                    install_name_tool -delete_rpath $RP ${1} || true
                  fi
               done   
@@ -907,7 +910,7 @@ case %{cmsplatf} in
               install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
               rpathnew="@executable_path/../../lib/%{cmsplatf}"
               install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
-              rpathold=${1%%{cmsplatf}/*}%{cmsplatf}/
+              rpathold=${1%%/%{cmsplatf}/*}/%{cmsplatf}/
               curpath=`dirname ${1}`
               relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
               rpathnew="@loader_path/"$relpath
@@ -1104,17 +1107,18 @@ case %{cmsplatf} in
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L ${1} | sed -e's|(.*||' | grep -v -e':$' | grep -v -e'^/usr/lib'| grep -v '/Frameworks/'`
               do
-                 if [ -z "${dep##*%{cmsplatf}*}" ]
+                 libname=`basename $dep`
+                 if [ -z "${dep##/*/%{cmsplatf}/*$libname}" ]
                  then
-                   newdep="@rpath/"${dep#*%{cmsplatf}/}
+                   newdep="@rpath/"${dep#/*/%{cmsplatf}/}
                    install_name_tool -change $dep $newdep ${1} || true
                  fi
-                 if [ -z "${dep##lib*dylib}" ];then
-                   newdep="@loader_path/"$dep
+                 if [ -z "${dep##$libname}" ];then
+                   newdep="@loader_path/"$libname
                    install_name_tool -change $dep $newdep ${1} || true
                  fi
-                 if [ -z "${dep##@rpath/lib*dylib}" ]; then
-                   newdep="@loader_path/"`basename $dep`
+                 if [ -z "${dep##@rpath/$libname}" ]; then
+                   newdep="@loader_path/"$libname
                    install_name_tool -change $dep $newdep ${1} || true
                  fi
               done
@@ -1136,9 +1140,10 @@ case %{cmsplatf} in
               # Change dependencies hardcoded path to new install path.
               for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
               do
-                if [ -z "${dep##*%{cmsplatf}*}" ]
+                libname=`basename $dep`
+                if [ -z "${dep##/*/%{cmsplatf}/*$libname}" ]
                 then 
-                  newdep="@rpath/"${dep#*%{cmsplatf}/}
+                  newdep="@rpath/"${dep#/*/%{cmsplatf}/}
                   install_name_tool -change $dep $newdep $x || true 
                 fi
               done
