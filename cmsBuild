@@ -365,13 +365,15 @@ def downloadPip(source, dest, options):
   tarball=sp[-1]
 #newer pip will need this (but untested)
 #  comm = 'which pip; pip download --no-deps ' + dest + ' ' + pack
-  comm = 'which pip; pip install --no-deps -d ' + dest + ' ' + pack+'; /bin/ls '+dest+'| grep -v files.list > '+dest+'/files.list'
+  tempdir = createTempDir (options.workDir, options.tempDirPrefix)
+
+  comm = 'which pip; pip install --no-deps -d ' + tempdir + ' ' + pack+'; /bin/ls '+tempdir+'| grep -v files.list > '+tempdir+'/files.list'
   error, output = getstatusoutput(comm)
   if error:
     log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
     return False
 
-  comm2='cd '+dest+'; tar cfz '+tarball+' files.list `cat files.list`'
+  comm2='cd '+tempdir+'; tar cfz '+dest+'/'+tarball+' files.list `cat files.list`'
   error, output = getstatusoutput(comm2)
   if error:
     log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
