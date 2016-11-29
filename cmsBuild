@@ -355,6 +355,31 @@ def downloadGit(source, dest, options):
     return False
   return packCheckout(args["tempdir"], args["dest"], args["export"])
 
+def downloadPip(source, dest, options):
+
+# pip:/package/version/tarbalname
+  sp=source.split('/')
+  pack=sp[2].strip()
+  if len(sp)>4: pack=pack+'=='+sp[3].strip()
+  tarball=sp[-1]
+#newer pip will need this (but untested)
+#  comm = 'which pip; pip download --no-deps ' + dest + ' ' + pack
+  tempdir = createTempDir (options.workDir, options.tempDirPrefix)
+
+  comm = 'which pip; pip install --no-deps -d ' + tempdir + ' ' + pack+'; /bin/ls '+tempdir+'| grep -v files.list > '+tempdir+'/files.list'
+  error, output = getstatusoutput(comm)
+  if error:
+    log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
+    return False
+
+  comm2='cd '+tempdir+'; tar cfz '+dest+'/'+tarball+' files.list `cat files.list`'
+  error, output = getstatusoutput(comm2)
+  if error:
+    log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
+    return False
+
+  return True
+
 downloadHandlers = {'cvs': downloadCvs,
                     'cmstc': downloadTc,
                     'http': downloadUrllib2,
@@ -362,7 +387,8 @@ downloadHandlers = {'cvs': downloadCvs,
                     'ftp': downloadUrllib2,
                     'ftps': downloadUrllib2,
                     'git': downloadGit,
-                    'svn': downloadSvn}
+                    'svn': downloadSvn,
+                    'pip': downloadPip}
 
     
 def getUrlChecksum (s):
