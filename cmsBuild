@@ -3221,6 +3221,7 @@ def bootstrap(opts):
              "-assume-yes", "-only-once", useDev, "setup"]
   if logLevel is DEBUG:
     options.append("-debug")
+  options.append("&& %s/common/cmspkg -a %s -f update" % (opts.workDir, opts.architecture))
   bootstrapCommand ="TMPDIR=%s sh -ex %s %s" % (opts.tempdir, bootstrapFilename, " ".join(options)) 
   log("Bootstrapping cmsBuild area.")
   log(bootstrapCommand, DEBUG)
