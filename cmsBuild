@@ -88,14 +88,6 @@ def makedirs(path):
   if returncode != 0:
     raise OSError("makedirs() failed (return: %s):\n%s" % (returncode, out)) 
 
-# A recursive globbing helper.
-def recursive_glob(treeroot, pattern):
-  results = []
-  for base, dirs, files in walk(treeroot):
-    goodfiles = fnmatch.filter(files, pattern) + fnmatch.filter(dirs, pattern)
-    results.extend(join(base, f) for f in goodfiles)
-  return results
-
 rpm_db_cache = {}
     
 def downloadUrllib2(source, destDir, options, cmscache=False):
@@ -3593,30 +3585,6 @@ def getSpecRepository (url, options):
 class CaseSensitiveConfigParser (ConfigParser):
     def optionxform (self, option):
         return option
-
-g_originalEnvironment = {}
-
-def saveOriginalEnvironment ():
-    """ Saves the environment.
-    """
-    for key, value in environ.iteritems ():
-        if key in ["SHELL"]:
-            continue
-        g_originalEnvironment[key] = value
-
-def restoreOriginalEnvironment ():
-    """ Restore the environment.
-    """
-    assert (g_originalEnvironment)
-    for key, value in g_originalEnvironment.iteritems ():
-        if key in ["SHELL"]:
-            continue
-        environ[key] = value
-    for key in environ.iterkeys ():
-        if key in ["SHELL"]:
-            continue
-        if key not in g_originalEnvironment.iterkeys ():
-            environ[key] = ""
 
 def rpmCacheUpdate(opts):
     if hasattr (opts, "bootstrap") and opts.bootstrap == True:
