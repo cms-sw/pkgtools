@@ -1256,6 +1256,9 @@ class PackageFactory (object):
         except IOError, e:
             raise FileNotFound (filename)            
         pkg.initWithSpec (specLines)
+        if pkg.name != pkgName:
+          log ("FATAL: Package name '%s' and spec name '%s' does not match" % (pkg.name, pkgName))
+          raise MalformedSpec
         return pkg
 
     def postProcessSpec (self, spec):
