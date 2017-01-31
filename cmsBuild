@@ -2529,6 +2529,11 @@ def parseOptions():
                           action="store_true",
                           help="Show progress",
                           default=False)
+    debugGroup.add_option("--check-pkg-deps",
+                          dest="checkPackageDeps",
+                          action="store_true",
+                          help="Run extra checks after the build to make sure package dependencies are fully satisfied",
+                          default=False)
     parser.add_option_group(advancedBuildOptions)
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
@@ -2936,9 +2941,24 @@ def installPackage(pkg, scheduler):
     error, output = getstatusoutput (command)
     if error: raise RpmBuildFailed (pkg)
     localPaths = [l for l in output.split("\n") if l.startswith(pkg.options.workDir)]
+    pkg_error = False
     if localPaths:
       scheduler.log("Error: Local path dependency found for %s\n  %s" % (pkg.pkgName (), "\n  ".join(localPaths)))
-      raise RpmBuildFailed (pkg)
+      pkg_error = True
+    if pkg.options.checkPackageDeps:
+      pkg_deps = ["system-base-import"] + [ p.pkgName () for p in pkg.dependencies ]
+      all_provides = {}
+      for d in pkg_deps:
+        e, o = getstatusoutput("%s ; rpm -q --provides %s" % (rpmEnvironmentScript, d))
+        for p in o.split("\n"): all_provides[p]=1
+      miss_deps = {}
+      for d in output.split("\n"):
+        if d.startswith("rpmlib(") or (d in pkg_deps): continue
+        if not d in all_provides: miss_deps[d]=1
+      if miss_deps:
+        scheduler.log("Error: Package %s requires '%s' while there is no direct dependency in spec file" % (pkg.pkgName (), ",".join(sorted(miss_deps.keys()))))
+        pkg_error = True
+    if pkg_error: raise RpmBuildFailed (pkg)
   installRpm(pkg, pkg.options.bootstrap)
   scheduler.log("Done")
   f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
