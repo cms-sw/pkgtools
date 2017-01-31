@@ -2946,10 +2946,12 @@ def installPackage(pkg, scheduler):
       scheduler.log("Error: Local path dependency found for %s\n  %s" % (pkg.pkgName (), "\n  ".join(localPaths)))
       pkg_error = True
     if pkg.options.checkPackageDeps:
-      pkg_deps = ["system-base-import"] + [ p.pkgName () for p in pkg.dependencies ]
+      pkg_deps = ["system-base-import", pkg.rpmLocation()] + [ p.pkgName () for p in pkg.dependencies ]
       all_provides = {}
       for d in pkg_deps:
-        e, o = getstatusoutput("%s ; rpm -q --provides %s" % (rpmEnvironmentScript, d))
+        opt = ""
+        if d == pkg.rpmLocation(): opt="p"
+        e, o = getstatusoutput("%s ; rpm -q%s --provides %s" % (rpmEnvironmentScript, opt, d))
         for p in o.split("\n"): all_provides[p]=1
       miss_deps = {}
       for d in output.split("\n"):
