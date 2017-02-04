@@ -36,6 +36,7 @@ DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
 CMSPKG_CMD="cmspkg"
 SERVER_TMP_UPLOAD_DIRECTORY=None
 rpmEnvironmentScript = "true"
+pip_package_env_script = ""
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
@@ -349,17 +350,28 @@ def downloadGit(source, dest, options):
   return packCheckout(args["tempdir"], args["dest"], args["export"])
 
 def downloadPip(source, dest, options):
-
-# pip:/package/version/tarbalname
-  sp=source.split('/')
-  pack=sp[2].strip()
-  if len(sp)>4: pack=pack+'=='+sp[3].strip()
-  tarball=sp[-1]
+# Valid PIP URL formats are
+# pip://package/version?[pip_options=options&]output=/tarbalname
+# pip://package/version/tarbalname
+  url_parts = source.split("pip://",1)[1].split("?",1)
+  opts = []
+  if len(url_parts)>1: opts = url_parts[1].split("&")
+  pkg  = url_parts[0].split("/")
+  pack=pkg[0].strip()
+  if len(pkg)>1: pack=pack+'=='+pkg[1].strip()
+  tarball=source.rsplit("/",1)[1]
 #newer pip will need this (but untested)
 #  comm = 'which pip; pip download --no-deps ' + dest + ' ' + pack
   tempdir = createTempDir (options.workDir, options.tempDirPrefix)
-
-  comm = 'which pip; pip install --no-deps -d ' + tempdir + ' ' + pack+'; /bin/ls '+tempdir+'| grep -v files.list > '+tempdir+'/files.list'
+  pip_opts = "--no-deps --no-binary=:all:"
+  for opt in opts:
+    if opt[:12] == "pip_options=":
+      pip_opts = opt[12:].replace("+"," ").replace("%20"," ").replace("%3D","=")
+      break
+  comm = ""
+  if pip_package_env_script: comm = ". %s; " % pip_package_env_script
+  comm = comm + ' which pip; pip download ' + pip_opts + ' -d ' + tempdir + ' ' + pack+'; /bin/ls '+tempdir+'| grep -v files.list > '+tempdir+'/files.list'
+  print "PIP:",comm
   error, output = getstatusoutput(comm)
   if error:
     log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
@@ -2068,6 +2080,9 @@ class Package (object):
         #        directory for the sources, even if they might be different (for example when downloading them from cvs). 
         self.checksum = checksumCalculator.getChecksum ()
         self.version = calculateHumanReadableVersion (self)
+        if self.name == self.options.pipPackage:
+          global pip_package_env_script
+          pip_package_env_script = join(self.options.workDir,self.cmsplatf,self.group,self.name,self.version,"etc/profile.d/init.sh")
 
     def generateRequires (self, dependencies, origDependencies):
         requiresPkgs = [ "%s+%s+%s" % (pkg.group, pkg.name, pkg.version) 
@@ -2462,6 +2477,16 @@ def parseOptions():
                                     dest="useDev",
                                     default=None,
                                     help="Use development cmspkg instead of production.")
+    advancedBuildOptions.add_option("--pip-package",
+                                    dest="pipPackage",
+                                    metavar="NAME",
+                                    help="Name of the cmsdist pip package",
+                                    default="py2-pip")
+    advancedBuildOptions.add_option("--check-pkg-deps",
+                                    dest="checkPackageDeps",
+                                    action="store_true",
+                                    help="Run extra checks after the build to make sure package dependencies are fully satisfied",
+                                    default=False)
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
@@ -2528,11 +2553,6 @@ def parseOptions():
                           dest="progress",
                           action="store_true",
                           help="Show progress",
-                          default=False)
-    debugGroup.add_option("--check-pkg-deps",
-                          dest="checkPackageDeps",
-                          action="store_true",
-                          help="Run extra checks after the build to make sure package dependencies are fully satisfied",
                           default=False)
     parser.add_option_group(advancedBuildOptions)
     parser.add_option_group(uploadGroup)
@@ -2937,7 +2957,8 @@ def installPackage(pkg, scheduler):
   scheduler.log("Trying to install the rpm package %s just built." % pkg.pkgName ())
   if bootstrap:
     scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName ())
-    command = "%s ; rpm  -qp --requires %s" % (rpmEnvironmentScript, pkg.rpmLocation())
+    rpm_env = rpmEnvironmentScript
+    command = "%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
     error, output = getstatusoutput (command)
     if error: raise RpmBuildFailed (pkg)
     localPaths = [l for l in output.split("\n") if l.startswith(pkg.options.workDir)]
@@ -2947,11 +2968,21 @@ def installPackage(pkg, scheduler):
       pkg_error = True
     if pkg.options.checkPackageDeps:
       pkg_deps = ["system-base-import", pkg.rpmLocation()] + [ p.pkgName () for p in pkg.dependencies ]
+      for p in rpm_db_cache:
+        if '+bootstrap-bundle+' in p:
+          pkg_deps.append(p)
+          break
       all_provides = {}
-      for d in pkg_deps:
-        opt = ""
-        if d == pkg.rpmLocation(): opt="p"
-        e, o = getstatusoutput("%s ; rpm -q%s --provides %s" % (rpmEnvironmentScript, opt, d))
+      for dep_pkg in pkg_deps:
+        provides_cachedir = join(pkg.options.workDir, pkg.options.tempDirPrefix, "cache")
+        opt = "-q --provides"
+        if dep_pkg == pkg.rpmLocation():
+          opt += " -p"
+          provides_cache = join(provides_cachedir, "provides-"+pkg.pkgName())
+        else:
+          provides_cache = join(provides_cachedir, "provides-"+dep_pkg)
+        cmd = "if [ ! -f %(provides_cache)s ] ; then %(rpm_env)s ; rpm %(opt)s %(dep_pkg)s > %(provides_cache)s ; fi ; cat %(provides_cache)s | cut -d\  -f1" % locals()
+        e, o = getstatusoutput(cmd)
         for p in o.split("\n"): all_provides[p]=1
       miss_deps = {}
       for d in output.split("\n"):
@@ -3102,6 +3133,9 @@ def checkPackageInCache(pkg, scheduler):
     if len(baseToolVersion)>0:
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
+  pip = [ p.pkgName() for p in pkg.fullDependencies if p.name == pkg.options.pipPackage ]
+  if pip and (not rpm_db_cache.has_key(pip[0])):
+    fetchDependencies += [ "install-"+pip[0] ]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
   buildActionDependencies = []
   for p in pkg.origDependencies + pkg.origBuildDependencies:
@@ -3660,8 +3694,7 @@ if __name__ == "__main__":
         
       # Create the work area and a tmp dir for it it does not exists and cd to it.
       opts.tempdir = join(opts.workDir, opts.tempDirPrefix)
-      if not exists(opts.tempdir):
-        makedirs(opts.tempdir)
+      getstatusoutput("rm -rf %s/cache; mkdir -p %s/cache" % (opts.tempdir, opts.tempdir))
       chdir (opts.workDir)
       CMSPKG_CMD = join(opts.workDir,"common",CMSPKG_CMD) + " --architecture %s" % opts.architecture
 
