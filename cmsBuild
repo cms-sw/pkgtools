@@ -371,7 +371,6 @@ def downloadPip(source, dest, options):
   comm = ""
   if pip_package_env_script: comm = ". %s; " % pip_package_env_script
   comm = comm + ' which pip; pip download ' + pip_opts + ' -d ' + tempdir + ' ' + pack+'; /bin/ls '+tempdir+'| grep -v files.list > '+tempdir+'/files.list'
-  print "PIP:",comm
   error, output = getstatusoutput(comm)
   if error:
     log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (source, comm, error, output) )
