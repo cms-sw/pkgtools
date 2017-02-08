@@ -2807,7 +2807,7 @@ def installRpm (pkg, bootstrap):
     log ("Done installing via rpm.", DEBUG)
 
 def installApt (pkg, scheduler):
-    command = "%s -f -j %s install %s" % (CMSPKG_CMD, pkg.options.workersPoolSize, pkg.pkgName ())
+    command = "%s -f -j 1 install %s" % (CMSPKG_CMD, pkg.pkgName ())
     error, output = getstatusoutput (command)
     log ("About to install %s using cmspkg..." % pkg.pkgName (), DEBUG)
     if error:
