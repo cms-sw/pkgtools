@@ -2370,6 +2370,10 @@ class Package (object):
             log("Site specific spec %s preferred for %s." % (siteSpec, d), DEBUG)
             return siteDep
           return d
+        if self.options.pipPackage:
+          if [ s for s in sources if s.startswith("pip://") ]:
+            if not self.options.pipPackage in deps+buildDeps:
+              buildDeps.append(self.options.pipPackage)
         deps = [siteSpecific(d) for d in deps]
         sources.extend ([join (cmsdistPath, source + ".file")
                          for source in localSources])
@@ -3132,9 +3136,9 @@ def checkPackageInCache(pkg, scheduler):
     if len(baseToolVersion)>0:
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
-  pip = [ p.pkgName() for p in pkg.fullDependencies if p.name == pkg.options.pipPackage ]
-  if pip and (not rpm_db_cache.has_key(pip[0])):
-    fetchDependencies += [ "install-"+pip[0] ]
+  if pkg.options.pipPackage and [ s for s in pkg.sources if s[:6] == "pip://" ]:
+    pip = [ p.pkgName() for p in pkg.fullDependencies if p.name == pkg.options.pipPackage ][0]
+    if not rpm_db_cache.has_key(pip): fetchDependencies += [ "install-"+pip ]
   scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
   buildActionDependencies = []
   for p in pkg.origDependencies + pkg.origBuildDependencies:
