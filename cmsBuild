@@ -364,9 +364,19 @@ def downloadPip(source, dest, options):
 #  comm = 'which pip; pip download --no-deps ' + dest + ' ' + pack
   tempdir = createTempDir (options.workDir, options.tempDirPrefix)
   pip_opts = "--no-deps --no-binary=:all:"
+
   for opt in opts:
     if opt[:12] == "pip_options=":
-      pip_opts = opt[12:].replace("+"," ").replace("%20"," ").replace("%3D","=")
+      pip_optsT = opt[12:].replace("+"," ").replace("%20"," ").replace("%3D","=")
+      #hack here a alternative source location
+      pip_opts=''
+      spSrc=pip_optsT.split()
+      for i in range(len(spSrc)):
+        if 'ALTSRC' in spSrc[i]:
+          pack=spSrc[i+1]
+          i=i+1
+        else:
+          pip_opts=pip_opts+' '+spSrc[i]
       break
   comm = ""
   if pip_package_env_script: comm = ". %s; " % pip_package_env_script
