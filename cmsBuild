@@ -933,6 +933,7 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 DEFAULT_FILES_PREAMBLE = """
 %%defattr(-, root, root)
 """
+DEFAULT_RPATH_PREAMBLE = "\n%{?post_initenv:%post_initenv}\n%{?add_rpath:%add_rpath}\n"
 
 COMMANDS_SH = {"SETV":      """%(var)s="%(value)s"\n""",
                "SET":       """export %(var)s="%(value)s";\n""",
@@ -1883,6 +1884,7 @@ class Package (object):
             if section == "%files":
                 self.sections[section][''] = '%{installroot}/'
             self.sections[section][''] += self.sectionPostambles[section]
+            if section=="%post" and self.options.buildWithRpath: self.sections[section][''] += DEFAULT_RPATH_PREAMBLE
     
     def initWithSpec (self, specLines):
         """ This parses the spec files and creates a structure with its contents.
@@ -2017,6 +2019,7 @@ class Package (object):
             else:
                 self.sections[currentSection][currentSubSection] += line
         self.sections[currentSection][currentSubSection] += self.sectionPostambles[currentSection]
+        if "%post" in self.sections and self.options.buildWithRpath: self.sections["%post"][''] += DEFAULT_RPATH_PREAMBLE
         
         # If no BUILDIF conditions we are done. 
         # Otherwise insert the build condition everywhere, so that sections 
@@ -2057,6 +2060,7 @@ class Package (object):
         checksumCalculator.addStrings (self.sectionOptions.values ())    
         checksumCalculator.addStrings (self.sectionPreambles.values ())    
         checksumCalculator.addStrings (self.sectionPostambles.values ())
+        if self.options.buildWithRpath: checksumCalculator.addStrings (DEFAULT_RPATH_PREAMBLE)
         
             
         for filename in self.imports:
@@ -2500,6 +2504,11 @@ def parseOptions():
                                     action="store_true",
                                     help="Run extra checks after the build to make sure package dependencies are fully satisfied",
                                     default=False)
+    advancedBuildOptions.add_option("--build-with-rpath",
+                                    dest="buildWithRpath",
+                                    action="store_true",
+                                    help="""Added rpath to the executables. This is done at post install time.""",
+                                    default=None)
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
@@ -3651,10 +3660,6 @@ def getSpecRepository (url, options):
         sys.exit (1)
     return destDir
 
-class CaseSensitiveConfigParser (ConfigParser):
-    def optionxform (self, option):
-        return option
-
 def rpmCacheUpdate(opts):
     if hasattr (opts, "bootstrap") and opts.bootstrap == True:
         rpm_db_cache.clear()
@@ -3722,23 +3727,10 @@ if __name__ == "__main__":
       # in a temporary directory and keep track of the path to it.
       if "://" in opts.cmsdist:
         opts.cmsdist = getSpecRepository(opts.cmsdist, opts)
-      # Syntactic sugar to be able to say:
-      #
-      # cmsBuild build CMSSW_X_Y_Z
-      #
-      # which modifies the cmssw.spec in-place and builds it.
-      cmsswCommands = [x for x in args if x.startswith("CMSSW_")] 
-      if len(cmsswCommands) > 1:
-        fatal("You can only build one version of CMSSW at the time")
-      elif len(cmsswCommands) == 1:
-        cmsswVersion = cmsswCommands[0]
-        args.remove(cmsswVersion)
-        args.append("cmssw")
-        cmsswSpec = join(opts.cmsdist, "cmssw.spec")
-        cmd = "perl -p -i -e 's/### RPM cms cmssw.*/### RPM cms cmssw %s/' %s"
-        error, output = getstatusoutput(cmd % (cmsswVersion, cmsswSpec))
-        if error:
-          fatal("Unable to modify cmssw.spec as requested.")
+
+      #If cmsdist does not have opts.pipPackage then use system pip
+      if opts.pipPackage and not exists(join(opts.cmsdist,opts.pipPackage+".spec")):
+        opts.pipPackage = None
       
       if not exists(opts.cmsdist):
         fatal("A CMSDIST checkout (or a tag) is required in order to build.")
