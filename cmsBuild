@@ -3385,15 +3385,19 @@ def allPackagesToUpload (args, factory):
   if len(pkgs) !=  len(args):
     return statusAndLog(False, "ERROR: Error while parsing spec.")
 
-  def allDeps(pkg, factory):
+  def allDeps(pkg, factory, dep_cache={}):
+    if pkg in dep_cache: return dep_cache[pkg]
     deps = [pkg]
     for dep in pkg.fullDependencies:
-      deps += allDeps(dep, factory)
+      for subdep in allDeps(dep, factory, dep_cache):
+        if not subdep in deps: deps.append(subdep)
+    dep_cache[pkg] = deps
     return deps
 
   fullPackageList = []
+  dep_cache={}
   for pkg in pkgs:
-    for dep in allDeps(pkg, factory):
+    for dep in allDeps(pkg, factory, dep_cache):
       if dep not in fullPackageList and exists (dep.rpmLocation()):
         fullPackageList.extend(factory.expandSubpackages([dep]))
   return fullPackageList
