@@ -542,9 +542,18 @@ def cmd_frombase(args):
   os.chdir(project)
   print "Running scram project... DONE"
 
-  print "Running cms-sparse-checkout..."
-  popen('eval `scram run -sh` && git cms-addpkg -y FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -A -a' % (release, baserelease, release, release), False, True)
-  print "Running cms-sparse-checkout... DONE"
+  e, o = getstatusoutput("which git-cms-addpkg")
+  if e:
+    print o
+    sys.exit(1)
+  if not os.path.exists(os.path.join(os.path.dirname(o),"git-cms-checkout-topic")):
+    print "Running cms-sparse-checkout..."
+    popen('eval `scram run -sh` && git cms-addpkg -y FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -A -a' % (release, baserelease, release, release), False, True)
+    print "Running cms-sparse-checkout... DONE"
+  else:
+    print "Running cms-checkout-topic..."
+    popen('eval `scram run -sh` && git cms-checkout-topic %s && git cms-addpkg -y FWCore/Version' % (release), False, True)
+    print "Running cms-checkout-topic... DONE"
 
   checkBigProducts(release)
 
