@@ -552,7 +552,7 @@ def cmd_frombase(args):
     print "Running cms-sparse-checkout... DONE"
   else:
     print "Running cms-checkout-topic..."
-    popen('eval `scram run -sh` && git cms-checkout-topic %s && git cms-addpkg -y FWCore/Version' % (release), False, True)
+    popen('eval `scram run -sh` && git cms-checkout-topic %s && git cms-addpkg -y FWCore/Version && git cms-checkdeps -A -a' % (release), False, True)
     print "Running cms-checkout-topic... DONE"
 
   checkBigProducts(release)
