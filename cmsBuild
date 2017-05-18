@@ -2202,7 +2202,7 @@ class Package (object):
         self.origBuildDependencies.sort()
         self.fullDependencies.sort()
 
-    def dumpSpec (self):
+    def dumpSpec (self, saveScripts=False):
         self.spec = "\n".join([self.specPreHeader, 
                                SPEC_HEADER % self.__dict__, 
                                self.preamble])
@@ -2210,8 +2210,11 @@ class Package (object):
             for subsection in self.sections[section].keys ():
                 sectionContents = self.sections[section][subsection].strip ("\n ")
                 if sectionContents:
-                    self.spec += "\n\n%s %s %s\n" % (section, subsection, self.sectionOptions[section])
-                    self.spec += sectionContents
+                  if saveScripts and (section in ["%build","%install","%prep"]) and (subsection==""):
+                    secScript="cmsdist-%s.sh" % section[1:]
+                    sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
+                  self.spec += "\n\n%s %s %s\n" % (section, subsection, self.sectionOptions[section])
+                  self.spec += sectionContents
         self.spec = self.__factory.postProcessSpec (self.spec)
 
         for subpackage in self.subpackages:
@@ -2300,7 +2303,7 @@ class Package (object):
                                                           self.initCsh])
 
     def getFinalSpec (self):
-        self.dumpSpec ()
+        self.dumpSpec (saveScripts=True)
         return self.spec
     
     def dumpCmsos (self):
