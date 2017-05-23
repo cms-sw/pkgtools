@@ -2828,7 +2828,7 @@ def installRpm (pkg, bootstrap):
             postScript.flush()
             error, output = getstatusoutput("cat %s; sh -e -x %s" % (postScript.name, postScript.name))
     if error:
-	e, o = getstatusoutput ("rm -rf %s %s/%s" % (pkg.rpmdir, abspath ("RPMS"),pkg.rpmfilename))
+        e, o = getstatusoutput ("rm -rf %s %s/%s" % (pkg.rpmdir, abspath ("RPMS"),pkg.rpmfilename))
         log ("Command:\n %(command)s failed with the following message: %(output)s" % locals (), DEBUG)
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via rpm.", DEBUG)
