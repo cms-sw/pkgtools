@@ -825,6 +825,11 @@ class TagCacheAptImpl (object):
 global tags_cache        
 tags_cache = None
 
+# Macros for creating git repo out of sources and applying patches
+PATCH_SOURCE_MACROS = """
+%define package_init_source  if [ ! -d .git ] ; then git init && git add . && git commit -a -m 'init repo' && PKGTOOLS_PATCH_NUM=0 ; fi
+%define package_commit_patch let PKGTOOLS_PATCH_NUM=$PKGTOOLS_PATCH_NUM+1 && git add . && [ $(git diff --name-only HEAD | wc -l) -gt 0 ] && git commit -a -m "applying patch ${PKGTOOLS_PATCH_NUM}"
+"""
 # FIXME: write a more valuable description
 DEFAULT_SECTIONS = {"": """
 """,
@@ -2210,9 +2215,17 @@ class Package (object):
             for subsection in self.sections[section].keys ():
                 sectionContents = self.sections[section][subsection].strip ("\n ")
                 if sectionContents:
-                  if saveScripts and (section in ["%build","%install","%prep"]) and (subsection==""):
-                    secScript="cmsdist-%s.sh" % section[1:]
-                    sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
+                  if saveScripts:
+                    if section in ["%prep"]:
+                      patchedContents = PATCH_SOURCE_MACROS
+                      xpatchRE = re.compile("^\s*%patch[0-9]*\s+.+$")
+                      for l in sectionContents.split("\n"):
+                        if xpatchRE.match(l): l = "%{package_init_source}\n"+l+"\n%{package_commit_patch}"
+                        patchedContents+=l+"\n"
+                      sectionContents = patchedContents
+                    if (section in ["%build","%install","%prep"]) and (subsection==""):
+                      secScript="cmsdist-%s.sh" % section[1:]
+                      sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
                   self.spec += "\n\n%s %s %s\n" % (section, subsection, self.sectionOptions[section])
                   self.spec += sectionContents
         self.spec = self.__factory.postProcessSpec (self.spec)
