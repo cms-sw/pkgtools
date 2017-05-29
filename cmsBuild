@@ -829,7 +829,7 @@ tags_cache = None
 PATCH_SOURCE_MACROS = """
 %define package_init_source  if [ ! -d .git ] ; then git init && git add . && git commit -a -m 'init repo' && _PKGTOOLS_PKG_BASE_DIR=`/bin/pwd` && PKGTOOLS_PATCH_NUM=0 ; fi
 %define package_commit_patch let PKGTOOLS_PATCH_NUM=$PKGTOOLS_PATCH_NUM+1 && git add . && [ $(git diff --name-only HEAD | wc -l) -gt 0 ] && git commit -a -m "applying patch ${PKGTOOLS_PATCH_NUM}"
-%define package_final_source if [ "X${_PKGTOOLS_PKG_BASE_DIR}" != "X" ] ; then mv ${_PKGTOOLS_PKG_BASE_DIR}/.git %{_builddir}/pkgtools-pkg.git ; fi
+%define package_final_source if [ "X${_PKGTOOLS_PKG_BASE_DIR}" != "X" ] ; then mv ${_PKGTOOLS_PKG_BASE_DIR}/.git %{_builddir}/pkgtools-pkg-src-move2git ; fi
 """
 # FIXME: write a more valuable description
 DEFAULT_SECTIONS = {"": """
