@@ -25,6 +25,7 @@ from glob import glob
 import itertools
 import pickle
 from hashlib import sha256
+from sys import platform
 
 logLevel = 10 
 NORMAL=10
@@ -877,6 +878,7 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
 """}
 
+
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
 
@@ -894,6 +896,9 @@ INITENV_PREAMBLE = [
 ("+PATH", "%%{dynamic_path_var}", "%i/lib")]
 
 DEFAULT_PREAMBLE = """
+"""
+if platform == 'darwin' : DEFAULT_PREAMBLE = """
+AutoReqProv: no
 """
 
 DEFAULT_DESCRIPTION_PREAMBLE = """
@@ -924,7 +929,6 @@ if [ X"$(id -u)" = X0 ]; then
     exit 1
 fi
 """
-
 DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
@@ -1847,7 +1851,6 @@ class Package (object):
         #For online: pkgRevision is always architecture
         if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
         self.rpmVersion = "1"
-
         self.requiresStatement = "Requires: gcc"
         self.sections = {}
         self.dependentCounter = 0 
@@ -2831,7 +2834,10 @@ def installRpm (pkg, bootstrap):
         tmpInstall  = join(tmpDir, pkg.installDir.strip(sep))
         rpmLoc  = pkg.rpmLocation()
         command  = "mkdir -p %(tmpInstall)s; rm -rf %(tmpInstall)s; ln -s %(workDir)s %(tmpInstall)s;"
-        command += "cd %(tmpDir)s; rpm2cpio %(rpmLoc)s | cpio -idmv; cd %(workDir)s; rm -rf %(tmpDir)s"
+        if platform == 'darwin':
+            command += "cd %(tmpDir)s; rpm2cpio %(rpmLoc)s | cpio --insecure -idmv; cd %(workDir)s; rm -rf %(tmpDir)s"
+        else:
+            command += "cd %(tmpDir)s; rpm2cpio %(rpmLoc)s | cpio  -idmv; cd %(workDir)s; rm -rf %(tmpDir)s"
         command = command % locals()
         error, output = getstatusoutput(command)
         if not error:
@@ -2995,7 +3001,7 @@ def installPackage(pkg, scheduler):
   if not checkCanInstallRpm (pkg):
     raise RpmBuildFailed (pkg)
   scheduler.log("Trying to install the rpm package %s just built." % pkg.pkgName ())
-  if bootstrap:
+  if pkg.options.bootstrap:
     scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName ())
     rpm_env = rpmEnvironmentScript
     command = "%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
@@ -3542,6 +3548,8 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     uploadSum=uploadSum)
   # Hard-link packages.
+  md5sum="md5sum $r | awk '{print $1}'"
+  if platform == 'darwin' : md5sum="md5 -q $r"
   hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
@@ -3550,7 +3558,7 @@ def upload(opts, args, factory):
     "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
     "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
     "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
+    "    echo $(basename $r)\" \"$(%(md5sum)s) >> $MD5CACHE\n"
     "  done\n"
     "done\n"
     "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
@@ -3563,7 +3571,8 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     includes=" ".join(pkgChecksums),
     architecture=opts.architecture,
-    uploadSum=uploadSum)
+    uploadSum=uploadSum,
+    md5sum=md5sum )
   # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
   # there is no risk of screwing up the repository by copying some unwanted
   # driver / cmsos.
