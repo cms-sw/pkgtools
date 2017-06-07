@@ -25,6 +25,7 @@ from glob import glob
 import itertools
 import pickle
 from hashlib import sha256
+from sys import platform
 
 logLevel = 10 
 NORMAL=10
@@ -871,6 +872,7 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
 """}
 
+
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
 
@@ -887,7 +889,10 @@ INITENV_PREAMBLE = [
 ("+PATH", "PATH", "%i/bin"),
 ("+PATH", "%%{dynamic_path_var}", "%i/lib")]
 
-DEFAULT_PREAMBLE = """
+if sys.platform == 'darwin' : DEFAULT_PREAMBLE = """
+AutoReqProv: no
+"""
+else: DEFAULT_PREAMBLE = """
 """
 
 DEFAULT_DESCRIPTION_PREAMBLE = """
@@ -918,12 +923,56 @@ if [ X"$(id -u)" = X0 ]; then
     exit 1
 fi
 """
-
 DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
 %{relocateConfig}etc/profile.d/init.csh
 """
+
+
+if sys.platform == "darwin": DEFAULT_POST_POSTAMBLE = """
+re_rpath() 
+   {
+       chmod +w ${1}
+       for RP in `otool -l ${1} | grep -A2 LC_RP | grep path | awk '{print $2}'`;do
+          if [ -z "${RP##/*/%{cmsplatf}/}" ]; then
+            install_name_tool -delete_rpath $RP ${1} || true
+          fi
+       done   
+       rpathnew="@loader_path/."
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@executable_path/."
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@loader_path/../../lib/%{cmsplatf}"
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathnew="@executable_path/../../lib/%{cmsplatf}"
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       rpathold=${1%%/%{cmsplatf}/*}/%{cmsplatf}/
+       curpath=`dirname ${1}`
+       relpath=`perl -e 'use File::Spec; print File::Spec->abs2rel(@ARGV);' $rpathold $curpath`
+       rpathnew="@loader_path/"$relpath
+       install_name_tool -add_rpath $rpathnew ${1} 2>/dev/null || true
+       install_name_tool -add_rpath $CMS_INSTALL_PREFIX/%{cmsplatf} ${1} 2>/dev/null || true
+       chmod -w ${1}
+   }
+for x in `find $RPM_INSTALL_PREFIX/%{pkgrel}/ -type f -perm -u+x | grep -v -e "[.]pyc"`; do 
+  filestr=`file $x | tail -1 | cut -d: -f2 `
+  if [ -z "${filestr##*Mach-O*dynamically*}" ]; then
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*bundle*}" ]; then 
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*binary*}" ]; then
+     re_rpath $x
+  fi
+  if [ -z "${filestr##*Mach-O*executable*}" ]; then
+     re_rpath $x
+  fi
+done
+"""
+else: DEFAULT_POST_POSTAMBLE = ""
+
 DEFAULT_PREUN_PREAMBLE = """
 """
 DEFAULT_POSTUN_PREAMBLE = """
@@ -995,7 +1044,56 @@ Obsoletes: %(group)s+%(name)s+%(version)s
 Prefix: %(installDir)s
 """
 
-DEFAULT_INSTALL_POSTAMBLE="""
+if not sys.platform == "darwin": DEFAULT_INSTALL_POSTAMBLE="""
+# Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
+# to support architectures not being build with cmsBuild > V00-19-XX
+%if "%{?keep_pkgconfig:set}" != "set"
+if [ -d "%i/lib/pkgconfig" ]; then rm -rf %i/lib/pkgconfig; fi
+%endif
+
+# Do not package libtool and archive libraries, unless required.
+%if "%{?keep_archives:set}" != "set"
+# Don't need archive libraries.
+rm -f %i/lib/*.{l,}a
+%endif
+
+# Strip executable / paths which were specified in the strip_files macro.
+%if "%{?strip_files:set}" == "set"
+for x in %strip_files
+do
+  if [ -e $x ]
+  then
+    find $x -type f -perm -a+x -exec %strip {} \;
+  fi 
+done
+%endif
+
+# remove files / directories which were specified by the drop_files macro.
+%if "%{?drop_files:set}" == "set"
+for x in %drop_files
+do
+  if [ -e $x ]; then rm -rf $x; fi
+done
+%endif
+
+for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
+do 
+    if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
+    then
+      chmod +w $x
+      old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
+      new_install_name=`basename $old_install_name`
+      install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
+      # Make sure also dependencies do not have an hardcoded path.
+      for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
+      do
+        install_name_tool -change $dep `basename $dep` $x
+      done
+      chmod -w $x
+    fi
+done
+"""
+else: DEFAULT_INSTALL_POSTAMBLE="""
 # Avoid pkgconfig dependency.  Notice you still need to keep the rm statement
 # to support architectures not being build with cmsBuild > V00-19-XX
 %if "%{?keep_pkgconfig:set}" != "set"
@@ -1029,21 +1127,56 @@ done
 
 case %{cmsplatf} in
     osx* )
-        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc"`; 
-        do 
-            if [ "X`file --mime $x | sed -e 's| ||g' | cut -d: -f2 | cut -d\; -f1`" = Xapplication/octet-stream ]
-            then
-              chmod +w $x
-              old_install_name=`otool -D $x | tail -1 | sed -e's|:$||'`
-              new_install_name=`basename $old_install_name`
-              install_name_tool -change $old_install_name $new_install_name -id $new_install_name $x
-              # Make sure also dependencies do not have an hardcoded path.
-              for dep in `otool -L $x | sed -e"s|[^\\t\\s ]*%{instroot}|%{instroot}|" | grep -e '^/' | sed -e's|(.*||'`
+        relocate_dylib()
+            {
+              chmod +w ${1}
+              new_install_name="@rpath/"${1#*%{cmsplatf}/}
+              install_name_tool -id $new_install_name ${1} || install_name_tool -id `basename ${1}` ${1}
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L ${1} | sed -e's|(.*||' | grep -v -e':$' | grep -v -e'^/usr/lib'| grep -v '/Frameworks/'`
               do
-                install_name_tool -change $dep `basename $dep` $x
+                 libname=`basename $dep`
+                 if [ -z "${dep##/*/%{cmsplatf}/*$libname}" ]
+                 then
+                   newdep="@rpath/"${dep#/*/%{cmsplatf}/}
+                   install_name_tool -change $dep $newdep ${1} || true
+                 fi
+                 if [ -z "${dep##$libname}" ];then
+                   newdep="@loader_path/"$libname
+                   install_name_tool -change $dep $newdep ${1} || true
+                 fi
+                 if [ -z "${dep##@rpath/$libname}" ]; then
+                   newdep="@loader_path/"$libname
+                   install_name_tool -change $dep $newdep ${1} || true
+                 fi
+              done
+              chmod -w ${1}
+             }
+        for x in `find %{i} -type f -perm -u+x | grep -v -e "[.]pyc" `; do
+          filestr=`file $x | tail -1 | cut -d: -f2 `
+          if [ -z "${filestr##*Mach-O*dynamically*}" ];then 
+            relocate_dylib $x
+          fi
+          if [ -z "${filestr##*Mach-O*bundle}" ];then
+            relocate_dylib $x
+          fi
+          if [ -z "${filestr##*Mach-O*binary*}" ];then
+            relocate_dylib $x
+          fi
+          if [ -z "${filestr##*Mach-O*executable*}" ];then 
+              chmod +w $x
+              # Change dependencies hardcoded path to new install path.
+              for dep in `otool -L $x | sed -e's|(.*||' | grep -v -e':$'`
+              do
+                libname=`basename $dep`
+                if [ -z "${dep##/*/%{cmsplatf}/*$libname}" ]
+                then 
+                  newdep="@rpath/"${dep#/*/%{cmsplatf}/}
+                  install_name_tool -change $dep $newdep $x || true 
+                fi
               done
               chmod -w $x
-            fi
+           fi
         done
     ;;
     * )
@@ -1220,7 +1353,7 @@ class PackageFactory (object):
                         "%build": DEFAULT_BUILD_POSTAMBLE,
                         "%install": DEFAULT_INSTALL_POSTAMBLE,
                         "%pre": "",
-                        "%post": "",
+                        "%post": DEFAULT_POST_POSTAMBLE,
                         "%preun": "",
                         "%postun": "",
                         "%files": ""}
@@ -1841,8 +1974,9 @@ class Package (object):
         #For online: pkgRevision is always architecture
         if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
         self.rpmVersion = "1"
-
         self.requiresStatement = "Requires: gcc"
+#  PG This could eventually be use to allow system clang as the default compiler
+#        if sys.platform == 'darwin': self.requiresStatement = ""
         self.sections = {}
         self.dependentCounter = 0 
         self.__sectionOptions = None
@@ -3284,7 +3418,9 @@ def bootstrap(opts):
     sys.exit (1)
   bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
   bootstrapFile = open(bootstrapFilename, "w")
-  bootstrapFile.write(bootstrapContents)
+# PG the --insecure option does not work on darwin
+  if sys.platform == "darwin" : bootstrapFile.write(bootstrapContents.replace("--insecure",""))
+  else : bootstrapFile.write(bootstrapContents)
   bootstrapFile.close()
       
   log("Bootstrapping from server %s" % opts.server, DEBUG)
@@ -3528,6 +3664,8 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     uploadSum=uploadSum)
   # Hard-link packages.
+  md5sum="md5sum $r | awk '{print $1}'"
+  if platform == 'darwin' : md5sum="md5 -q $r"
   hardLinkPackages = format(
     "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
     "touch $MD5CACHE\n"
@@ -3536,7 +3674,7 @@ def upload(opts, args, factory):
     "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
     "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
     "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
-    "    md5sum $r | awk '{print $2\" \"$1}' | sed 's|.*/||' >> $MD5CACHE\n"
+    "    echo $(basename $r)\" \"$(%(md5sum)s) >> $MD5CACHE\n"
     "  done\n"
     "done\n"
     "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
@@ -3549,7 +3687,8 @@ def upload(opts, args, factory):
     tmpdir=tmpdir,
     includes=" ".join(pkgChecksums),
     architecture=opts.architecture,
-    uploadSum=uploadSum)
+    uploadSum=uploadSum,
+    md5sum=md5sum )
   # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
   # there is no risk of screwing up the repository by copying some unwanted
   # driver / cmsos.
