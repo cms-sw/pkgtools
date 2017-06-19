@@ -3578,12 +3578,13 @@ def upload(opts, args, factory):
   # driver / cmsos.
   # FIXME: copy also some predefined web area, so that we have rollbackable web
   #        area?
+  driverExt = "driver.txt"
+  if (opts.repository=="comp") or (opts.repository.startswith("comp."): driverExt = "driver-comp.txt"
   copyByProducts = format("echo Looking for local Bootstrap-driver\n"
                           "cd %(workdir)s/%(architecture)s\n"
                           "if [ 'X%(BootstrapPackage)s' != 'X' ] ; then\n"
                           "  mkdir -p %(tmpdir)s/%(uploadSum)s/drivers \n"
-                          "  [ -f %(BootstrapPackage)s/%(architecture)s-driver.txt ]      && cp %(BootstrapPackage)s/%(architecture)s-driver.txt      %(tmpdir)s/%(uploadSum)s/drivers/\n"
-                          "  [ -f %(BootstrapPackage)s/%(architecture)s-driver-comp.txt ] && cp %(BootstrapPackage)s/%(architecture)s-driver-comp.txt %(tmpdir)s/%(uploadSum)s/drivers/\n"
+                          "  [ -f %(BootstrapPackage)s/%(architecture)s-%(driverExt)s ] && cp %(BootstrapPackage)s/%(architecture)s-%(driverExt)s %(tmpdir)s/%(uploadSum)s/drivers/%(architecture)s-driver.txt\n"
                           "fi\n"
                           "echo Looking for local cms common build\n"
                           "if [ 'X%(CMSCommonPackage)s' != 'X' ] ; then\n"
@@ -3593,6 +3594,7 @@ def upload(opts, args, factory):
                           tmpdir=tmpdir,
                           architecture=opts.architecture,
                           uploadSum=uploadSum,
+                          driverExt=driverExt,
                           BootstrapPackage=BootstrapPackage,
                           CMSCommonPackage=CMSCommonPackage)
   remoteSourceRE=re.compile (".*:.*/.*")
