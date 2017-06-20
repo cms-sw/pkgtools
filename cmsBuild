@@ -3579,7 +3579,7 @@ def upload(opts, args, factory):
   # FIXME: copy also some predefined web area, so that we have rollbackable web
   #        area?
   driverExt = "driver.txt"
-  if (opts.repository=="comp") or (opts.repository.startswith("comp."): driverExt = "driver-comp.txt"
+  if (opts.repository=="comp") or (opts.repository.startswith("comp.")): driverExt = "driver-comp.txt"
   copyByProducts = format("echo Looking for local Bootstrap-driver\n"
                           "cd %(workdir)s/%(architecture)s\n"
                           "if [ 'X%(BootstrapPackage)s' != 'X' ] ; then\n"
