@@ -1308,7 +1308,6 @@ class PackageFactory (object):
         specCache = "%s/specCache/%s.%s" %  (self.options.tempdir,pkgName,sha256(self.__basePackageHash +str(specLines)).hexdigest())
         forceRecreate = False
         while True:
-          if forceRecreate: print "Recreating package cache(checksum mismatch):",pkgName,pkg.checksum
           if forceRecreate or (not exists (specCache)):
             getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir,pkgName))
             pkg = self.create ()
@@ -1317,7 +1316,9 @@ class PackageFactory (object):
             for sp in pkg.subpackages: sp.options = {}
             dump(pkg, open(specCache,"w"),1)
             pkg.options = self.options
+            pkg.specCache = True
             for sp in pkg.subpackages: sp.options = self.options
+            log("Generated cache: %s" % pkg.pkgName (), DEBUG)
           else:
             forceRecreate = True
             pkg = load(open(specCache))
@@ -1327,14 +1328,24 @@ class PackageFactory (object):
               sp.checksum = '%{nil}'
               sp.options = self.options
             pkg.origSpec = specLines
+            depSpecCache = False
             for p in pkg.fullDependencies:
               if not self.__packageCache.has_key(p):
                 self.__packageCache[p]=self.createWithSpec(p)
+              if self.__packageCache[p].specCache: depSpecCache = True
+            if depSpecCache:
+              log("Recreating package %s cache due its dependency changed" % pkg.pkgName (), DEBUG)
+              continue
             pkg.updateDependentCount()
             chksum = pkg.checksum
+            cachedVersion = pkg.version
             pkg.calculateChecksum(force=True)
-            if pkg.checksum != chksum: continue
+            if (pkg.checksum != chksum) or (cachedVersion != pkg.version):
+              log("Recreating package %s cache due checksum %s vs %s OR version %s vs %s" %
+                      (pkg.pkgName (), pkg.checksum,chksum, pkg.version, cachedVersion), DEBUG)
+              continue
             for sp in pkg.subpackages: sp.checksum = pkg.checksum
+            log("Read from cache: %s" % pkg.pkgName (), DEBUG)
           break
         self.__packageCache[pkgName]=pkg
         if pkg.name != pkgName:
@@ -1909,6 +1920,7 @@ class Package (object):
         self.options = options
         self.status = None
         self.buildRequireToolfile = False
+        self.specCache = False
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -3531,7 +3543,8 @@ def upload(opts, args, factory):
   fullPackageList = uploadablePackages
   if not fullPackageList:
     return statusAndLog(True, "Nothing needs to be uploaded")
-  log("Ready to upload.")
+  fullUploadRepo = opts.repository if opts.syncBack else "%s.%s" % (opts.repository, opts.uploadTmpRepository)
+  log("Ready to upload to %s." % fullUploadRepo)
 
   BootstrapPackage = ""
   CMSCommonPackage = ""
@@ -3662,7 +3675,7 @@ def upload(opts, args, factory):
     else:
       logAndDieOnError(err, "Error while uploading to remote repository.")
     return False
-  log("Upload successfully finished")
+  log("Upload successfully finished to %s" % fullUploadRepo)
   return True
             
 def remove_help ():
