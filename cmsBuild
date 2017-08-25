@@ -25,7 +25,6 @@ from glob import glob
 import itertools
 import pickle
 from hashlib import sha256
-from pickle import dumps, dump, load
 from sys import platform
 
 logLevel = 10 
@@ -1259,7 +1258,7 @@ class PackageFactory (object):
                                     (re.compile ("%i([^_A-Za-z0-9])"), "%{pkginstroot}\\1"),
                                     (re.compile ("^Source:"), "Source0:"),
                                     (re.compile ("^Patch:"), "Patch0:")]
-        self.__basePackageHash = sha256(str([dumps(self),
+        self.__basePackageHash = sha256(str([pickle.dumps(self),
                                              COMMANDS_SH,
                                              COMMANDS_CSH,
                                              SPEC_HEADER,
@@ -1314,14 +1313,14 @@ class PackageFactory (object):
             pkg.initWithSpec (specLines)
             pkg.options = {}
             for sp in pkg.subpackages: sp.options = {}
-            dump(pkg, open(specCache,"w"),1)
+            pickle.dump(pkg, open(specCache,"w"),1)
             pkg.options = self.options
             pkg.specCache = True
             for sp in pkg.subpackages: sp.options = self.options
             log("Generated cache: %s" % pkg.pkgName (), DEBUG)
           else:
             forceRecreate = True
-            pkg = load(open(specCache))
+            pkg = pickle.load(open(specCache))
             if not exists (pkg.specFilename()): continue
             pkg.options = self.options
             for sp in pkg.subpackages:
