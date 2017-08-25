@@ -25,6 +25,7 @@ from glob import glob
 import itertools
 import pickle
 from hashlib import sha256
+from pickle import dumps, dump, load
 from sys import platform
 
 logLevel = 10 
@@ -38,6 +39,8 @@ CMSPKG_CMD="cmspkg"
 SERVER_TMP_UPLOAD_DIRECTORY=None
 rpmEnvironmentScript = "true"
 pip_package_env_script = ""
+PKGFactory=None
+SystemCompilerVersion = {}
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
@@ -89,6 +92,16 @@ def makedirs(path):
   returncode, out = getstatusoutput("mkdir -p %s" % (path,))
   if returncode != 0:
     raise OSError("makedirs() failed (return: %s):\n%s" % (returncode, out)) 
+
+def getPackages(packages): return [ PKGFactory[p] for p in packages ]
+
+def detectCompilerVersion (compilerName):
+    global SystemCompilerVersion
+    if compilerName in SystemCompilerVersion: return SystemCompilerVersion[compilerName]
+    (error, version) = getstatusoutput(COMPILER_DETECTION[compilerName])
+    if error: raise UnknownCompiler ()
+    SystemCompilerVersion[compilerName] = version.strip ("\n")
+    return SystemCompilerVersion[compilerName]
 
 rpm_db_cache = {}
     
@@ -184,7 +197,7 @@ def parseSvnUrl (url):
 def parseGitUrl(url):
   protocol, gitroot, args = parseUrl(url, requestedKind="git",
                                      defaults={"obj": "master/HEAD"})
-  parts = args["obj"].rsplit("/", 1)                                                                                                                                                                                                                                                              
+  parts = args["obj"].rsplit("/", 1)
   if len(parts) != 2:
     parts += ["HEAD"]
   args["branch"], args["tag"] = parts
@@ -721,14 +734,20 @@ class TagCacheAptImpl (object):
         error, output = getstatusoutput ("%s update" % CMSPKG_CMD)
         if error:
           die("Error while executing cmspkg update.\n%s" % output)
-        error, output = getstatusoutput("%s search" % CMSPKG_CMD)
+        error, output = getstatusoutput("%s search --show-revision" % CMSPKG_CMD)
         if error:
           die("Error while executing cmspkg search.\n%s" % output)
         lines = [line for line in output.split("\n") if line]
         chksumRE = re.compile("\s+-\s+.*?SpecChecksum:")
-        pairs = [chksumRE.sub(' ',line).split() for line in lines]
+        items = [ chksumRE.sub(' ',line).split() for line in lines ]
+        pairs =  [ item[0:2] for item in items ]
         try:
           self.cache = dict(pairs)
+        except:
+          die("Malformed cmspkg search output.")
+        pairs = [ [item[0],int(item[2])] for item in items ]
+        try:
+          self.revision_cache = dict(pairs)
         except:
           die("Malformed cmspkg search output.")
        
@@ -878,10 +897,8 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 %dir %{instroot}/%{cmsplatf}/%{pkgcategory}/%{pkgname}/
 """}
 
-
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
-
 
 # Preambles. %dynamic_path_var is defined in rpm-preamble.
 
@@ -929,6 +946,7 @@ if [ X"$(id -u)" = X0 ]; then
     exit 1
 fi
 """
+
 DEFAULT_POST_PREAMBLE = """
 if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFIX; export CMS_INSTALL_PREFIX; fi
 %{relocateConfig}etc/profile.d/init.sh
@@ -1196,14 +1214,11 @@ class CmsOSDumper (object):
         destFile.close ()
 
 class PackageFactory (object):
-    def __init__ (self, options, cmsosDumperClass=CmsOSDumper):
-        self.__package_cache = {}
-        self.__requires_cache = {}
-        self.__syntax = MetaSpecSyntax ()
-        self.__options = options
-        self.__cacheKeyDecorator = ArchitectureDecorator (options.architecture)
-        self.__preamble = self.__getPreamble ()
-        self.__sectionOptions = ReadOnlyDict ({"": "",
+    def __init__ (self, options):
+        self.syntax = MetaSpecSyntax ()
+        self.preamble = self.__getPreamble (options.cmsdist)
+        self.headerMatchingRegexp = HeaderMatchingRegexps ()
+        self.sectionOptions = ReadOnlyDict ({"": "",
                         "%%description": "",
                         "%prep": "",
                         "%build": "",
@@ -1213,7 +1228,7 @@ class PackageFactory (object):
                         "%preun": "",
                         "%postun": "",
                         "%files": "-f %_builddir/files"})
-        self.__sectionPreambles = ReadOnlyDict ({"": DEFAULT_PREAMBLE,
+        self.sectionPreambles = ReadOnlyDict ({"": DEFAULT_PREAMBLE,
                         "%%description": DEFAULT_DESCRIPTION_PREAMBLE,
                         "%prep": DEFAULT_PREP_PREAMBLE,
                         "%build": DEFAULT_BUILD_PREAMBLE,
@@ -1223,8 +1238,7 @@ class PackageFactory (object):
                         "%preun": DEFAULT_PREUN_PREAMBLE,
                         "%postun": DEFAULT_POSTUN_PREAMBLE,
                         "%files": DEFAULT_FILES_PREAMBLE})
-
-        self.__sectionPostambles = {"": "",
+        self.sectionPostambles = ReadOnlyDict ({"": "",
                         "%%description": "",
                         "%prep": DEFAULT_PREP_POSTAMBLE,
                         "%build": DEFAULT_BUILD_POSTAMBLE,
@@ -1233,53 +1247,96 @@ class PackageFactory (object):
                         "%post": "",
                         "%preun": "",
                         "%postun": "",
-                        "%files": ""}
+                        "%files": ""})
         self.__postprocessingRules = [(re.compile ("%\{n\}"), "%{pkgname}"),
-                                       (re.compile ("%\{v\}"), "%{pkgversion}"),
-                                       (re.compile ("%\{i\}"), "%{pkginstroot}"),
-                                       (re.compile ("%n$"), "%{pkgname}"),
-                                       (re.compile ("%v$"), "%{pkgversion}"),
-                                       (re.compile ("%i$"), "%{pkginstroot}"),
-                                       (re.compile ("%n([^_A-Za-z0-9])"), "%{pkgname}\\1"),
-                                       (re.compile ("%v([^_A-Za-z0-9])"), "%{pkgversion}\\1"),
-                                       (re.compile ("%i([^_A-Za-z0-9])"), "%{pkginstroot}\\1"),
-                                       (re.compile ("^Source:"), "Source0:"),
-                                       (re.compile ("^Patch:"), "Patch0:")]
-        self.__cmsosDumper = cmsosDumperClass (options.cmsdist)
-        self.__headerMatchingRegexp = HeaderMatchingRegexps ()
+                                    (re.compile ("%\{v\}"), "%{pkgversion}"),
+                                    (re.compile ("%\{i\}"), "%{pkginstroot}"),
+                                    (re.compile ("%n$"), "%{pkgname}"),
+                                    (re.compile ("%v$"), "%{pkgversion}"),
+                                    (re.compile ("%i$"), "%{pkginstroot}"),
+                                    (re.compile ("%n([^_A-Za-z0-9])"), "%{pkgname}\\1"),
+                                    (re.compile ("%v([^_A-Za-z0-9])"), "%{pkgversion}\\1"),
+                                    (re.compile ("%i([^_A-Za-z0-9])"), "%{pkginstroot}\\1"),
+                                    (re.compile ("^Source:"), "Source0:"),
+                                    (re.compile ("^Patch:"), "Patch0:")]
+        self.__basePackageHash = sha256(str([dumps(self),
+                                             COMMANDS_SH,
+                                             COMMANDS_CSH,
+                                             SPEC_HEADER,
+                                             DEFAULT_RPATH_PREAMBLE,
+                                             INITENV_PREAMBLE,
+                                             COMPILER_DETECTION,
+                                             DEFAULT_SECTIONS,])).hexdigest()
+        self.options = options
+        self.__cacheKeyDecorator = ArchitectureDecorator (options.architecture)
+        self.__package_cache = {}
+        self.__requires_cache = {}
+        self.__packageCache = CacheProxy (self.__package_cache, self.__cacheKeyDecorator)
+        self.__requiresCache = CacheProxy (self.__requires_cache, self.__cacheKeyDecorator)
+        self.checksums_cache = {}
 
-    def __getPreamble (self):
+    def __getPreamble (self, cmsdist):
         try:
-            filename = join (self.__options.cmsdist, "rpm-preamble.file")
+            filename = join (cmsdist, "rpm-preamble.file")
             return open (filename).read ()
         except:
             raise FileNotFound (filename)
-            
+
+    def __getitem__ (self, name):
+        return self.__packageCache[name]
+
+    def __setitem__ (self, name, item):
+        self.__packageCache[name] = item
+
+    def has_key (self, name):
+        return self.__packageCache.has_key(name)
+
+    def getRequiresCache(self):
+        return self.__requiresCache
+
     def create (self):
-        pkg = Package (self.__options)
-        pkg._Package__syntax = self.__syntax
-        pkg._Package__packageCache = CacheProxy (self.__package_cache, 
-                                                 self.__cacheKeyDecorator)
-        pkg._Package__requiresCache = CacheProxy (self.__requires_cache, 
-                                                  self.__cacheKeyDecorator)
-        pkg._Package__preamble = self.__preamble
-        pkg._Package__sectionOptions = self.__sectionOptions
-        pkg._Package__sectionPreambles = self.__sectionPreambles
-        pkg._Package__sectionPostambles = copy.deepcopy (self.__sectionPostambles)
-        pkg._Package__cmsosDumper = self.__cmsosDumper
-        pkg._Package__headerMatchingRegexp = self.__headerMatchingRegexp
-        pkg._Package__factory = self
-        return pkg
+        return Package (self.options)
 
     def createWithSpec (self, pkgName):
-        pkg = self.create ()
-        filename = specFilename (self.__options, pkgName)
-        log ("Creating package using spec file: %s" % filename, DEBUG)
+        if self.has_key(pkgName): return self.__packageCache[pkgName]
+        filename = specFilename (self.options, pkgName)
         try:
             specLines = open (filename).readlines ()
         except IOError, e:
-            raise FileNotFound (filename)            
-        pkg.initWithSpec (specLines)
+            raise FileNotFound (filename)
+        pkg = None
+        specCache = "%s/specCache/%s.%s" %  (self.options.tempdir,pkgName,sha256(self.__basePackageHash +str(specLines)).hexdigest())
+        forceRecreate = False
+        while True:
+          if forceRecreate: print "Recreating package cache(checksum mismatch):",pkgName,pkg.checksum
+          if forceRecreate or (not exists (specCache)):
+            getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir,pkgName))
+            pkg = self.create ()
+            pkg.initWithSpec (specLines)
+            pkg.options = {}
+            for sp in pkg.subpackages: sp.options = {}
+            dump(pkg, open(specCache,"w"),1)
+            pkg.options = self.options
+            for sp in pkg.subpackages: sp.options = self.options
+          else:
+            forceRecreate = True
+            pkg = load(open(specCache))
+            if not exists (pkg.specFilename()): continue
+            pkg.options = self.options
+            for sp in pkg.subpackages:
+              sp.checksum = '%{nil}'
+              sp.options = self.options
+            pkg.origSpec = specLines
+            for p in pkg.fullDependencies:
+              if not self.__packageCache.has_key(p):
+                self.__packageCache[p]=self.createWithSpec(p)
+            pkg.updateDependentCount()
+            chksum = pkg.checksum
+            pkg.calculateChecksum(force=True)
+            if pkg.checksum != chksum: continue
+            for sp in pkg.subpackages: sp.checksum = pkg.checksum
+          break
+        self.__packageCache[pkgName]=pkg
         if pkg.name != pkgName:
           log ("FATAL: Package name '%s' and spec name '%s' does not match" % (pkg.name, pkgName))
           raise MalformedSpec
@@ -1671,12 +1728,6 @@ class LinkPackageFromCache (BuilderAction):
         cachedRpmName = self.cachedRpmName
         return """A link was expected from %(officialRpmName)s to %(cachedRpmName)s, but it not found. """ % locals ()
 
-def detectCompilerVersion (compilerName):
-    (error, version) = getstatusoutput(COMPILER_DETECTION[compilerName])
-    if error:
-        raise UnknownCompiler ()
-    return version.strip ("\n")
-
 class ChecksumCalculator (object):
     def __init__ (self):
         self.__adder = md5adder ()
@@ -1719,40 +1770,37 @@ class ChecksumCalculator (object):
 class SubPackage (object):
     def __init__ (self, parent, name):
         self.subname        = name
-        self.parent         = parent
         self.subpackages    = []
         self.sources        = []
-        #self.updateFromParent()
 
-    def updateFromParent (self):
-        self.name           = '%s-%s' % (self.parent.name, self.subname)
-        self.group          = self.parent.group
-        self.version        = self.parent.version
-        self.realVersion    = self.parent.realVersion
-        self.pkgRevision    = self.parent.pkgRevision
-        self.pkgrel         = self.parent.pkgrel
-        self.pkgdir         = self.parent.pkgdir
-        self.options        = self.parent.options
-        self.cmsplatf       = self.parent.cmsplatf
-        self.workDir        = self.parent.workDir
-        self.installDir     = self.parent.installDir
-        self.tempDirPrefix  = self.parent.tempDirPrefix
-        self.builddir       = self.parent.builddir
-        self.sourcedir      = self.parent.sourcedir
-        self.specdir        = self.parent.specdir
-        self.checksum       = self.parent.checksum
-        self.requires       = [ self.parent.pkgName() ]
-        self.dependencies   = [ self.parent ] + self.parent.dependencies
-        self.origDependencies = [ self.parent ] + self.parent.origDependencies
-        self.buildDependencies = [ self.parent ] + self.parent.buildDependencies
-        self.origBuildDependencies = [ self.parent ] + self.parent.origBuildDependencies
-        self.fullDependencies = [ self.parent ] + self.parent.fullDependencies
+    def updateFromParent (self, parent):
+        self.name           = '%s-%s' % (parent.name, self.subname)
+        self.group          = parent.group
+        self.version        = parent.version
+        self.realVersion    = parent.realVersion
+        self.pkgRevision    = parent.pkgRevision
+        self.pkgrel         = parent.pkgrel
+        self.pkgdir         = parent.pkgdir
+        self.options        = parent.options
+        self.cmsplatf       = parent.cmsplatf
+        self.workDir        = parent.workDir
+        self.installDir     = parent.installDir
+        self.tempDirPrefix  = parent.tempDirPrefix
+        self.builddir       = parent.builddir
+        self.sourcedir      = parent.sourcedir
+        self.specdir        = parent.specdir
+        self.checksum       = parent.checksum
+        self.dependencies   = [ parent.name ] + parent.dependencies
+        self.origDependencies = [ parent.name ] + parent.origDependencies
+        self.buildDependencies = [ parent.name ] + parent.buildDependencies
+        self.origBuildDependencies = [ parent.name ] + parent.origBuildDependencies
+        self.fullDependencies = [ parent.name ] + parent.fullDependencies
         self.dependentCounter = 0
-        self.patches        = self.parent.patches
-        self.rpmdir         = self.parent.rpmdir
+        self.patches        = parent.patches
+        self.rpmdir         = parent.rpmdir
         self.rpmfilename    = '%s/%s+%s+%s-%s-%s.%s.rpm' % (self.cmsplatf, self.group, self.name, self.version, '1', self.pkgRevision, self.cmsplatf)
-        self.srpmfilename   = self.parent.srpmfilename
-        self.pkginstroot    = self.parent.pkginstroot
+        self.srpmfilename   = parent.srpmfilename
+        self.pkginstroot    = parent.pkginstroot
 
     def dumpSpecFragment(self, computeSpecChecksum = True):
         importName = 'subpackage-%s.file' % self.subname
@@ -1770,9 +1818,6 @@ class SubPackage (object):
         if not self.rpmdir or not self.rpmfilename:
             self.updateFromParent()
         return join(self.rpmdir, self.rpmfilename)
-
-    def dumpCmsos (self):
-        self.parent.dumpCmsos()
 
     def __repr__ (self):
         return "<SubPackage name=%(name)s>" % self.__dict__
@@ -1802,22 +1847,25 @@ class SubPackage (object):
         else:
             return cmp(self.parent, other.parent)
 
-
 class Package (object):
     tmpspec = property (lambda self : self.__getTmpSpecName ())
-    preamble = property (lambda self : self.__preamble)
-    sectionOptions = property (lambda self : self.__sectionOptions)
-    sectionPreambles = property (lambda self : self.__sectionPreambles)
-    sectionPostambles = property (lambda self : self.__sectionPostambles)
     sourcedir = property (lambda self : self.__getSourcedir ())
     specdir = property (lambda self : self.__getSpecdir ())
     pkgdir = property (lambda self : self.__getPkgdir ())
+
+    def clean(self):
+        del self.sections
+        del self.specPreHeader
+        del self.pkgreqs
+        del self.directpkgreqs
+        del self.spec
+        del self.requiresStatement
+        del self.origSpec
 
     def __init__ (self, options):
         self.workDir = options.workDir
         self.installDir = options.installDir
         self.tempDirPrefix = options.tempDirPrefix
-        # FIXME: actually detect gcc.
         self.compilerRealVersion = ""
         self.name = ""
         self.realVersion = ""
@@ -1828,9 +1876,6 @@ class Package (object):
         self.subname = ""
         self.parent = None
         self.subpackages = []
-        self.env = ""
-        self.urls = []
-        self.requires = []
         self.imports = []
         self.buildrequires = []
         self.sources = []
@@ -1848,16 +1893,11 @@ class Package (object):
         self.srpmfilename = None
         self.pkgRevision = '1'
         self.specPreHeader = ""
-        #For online: pkgRevision is always architecture
-        if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
         self.rpmVersion = "1"
         self.requiresStatement = "Requires: gcc"
         self.sections = {}
-        self.dependentCounter = 0 
-        self.__sectionOptions = None
-        self.__sectionPreambles = None
-        self.__sectionPostambles =  None
-
+        self.dependentCounter = 0
+        self.installPostambles =  ""
         self.dependencies = []
         self.origDependencies = []
         self.buildDependencies = []
@@ -1868,12 +1908,8 @@ class Package (object):
         self.checksum = "%{nil}"
         self.options = options
         self.status = None
-        self.__packageCache = None 
-        self.__requiresCache = None
-        self.__syntax = None
-        self.__preamble = ""
         self.buildRequireToolfile = False
-   
+
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
     
@@ -1892,9 +1928,10 @@ class Package (object):
             #to have only %{installroot}/ and remove next 2 lines.
             if section == "%files":
                 self.sections[section][''] = '%{installroot}/'
-            self.sections[section][''] += self.sectionPostambles[section]
+            self.sections[section][''] += PKGFactory.sectionPostambles[section]
+            if section == "%install": self.sections[section][''] += self.installPostambles
             if section=="%post" and self.options.buildWithRpath: self.sections[section][''] += DEFAULT_RPATH_PREAMBLE
-    
+
     def initWithSpec (self, specLines):
         """ This parses the spec files and creates a structure with its contents.
         """
@@ -1907,32 +1944,27 @@ class Package (object):
         self.expandSpec ()
         if self.name == compilerName:
             self.requiresStatement = ""
-            self.compiler = self
+            self.compilerRealVersion = self.realVersion
         else:
-            if self.__packageCache.has_key (compilerName):
-                self.compiler = self.__packageCache[compilerName]
-            else:
+            if not PKGFactory.has_key (compilerName):
+                compilerPKG = None
                 if self.options.systemCompiler == True:
-                    self.compiler = self.__factory.create ()
-                    self.compiler.name = "system-compiler"
-                    version = detectCompilerVersion (compilerName)
-                    self.compilerRealVersion = version
-                    self.compiler.realVersion = version
+                    compilerPKG = PKGFactory.create ()
+                    compilerPKG.name = "system-compiler"
+                    compilerPKG.realVersion = detectCompilerVersion (compilerName)
                 else:
-                    self.compiler = self.__factory.createWithSpec (compilerName)
-                    self.compilerRealVersion = self.compiler.realVersion
-                self.__packageCache[compilerName] = self.compiler
+                    compilerPKG = PKGFactory.createWithSpec (compilerName)
+                PKGFactory[compilerName] = compilerPKG
+            self.compilerRealVersion = PKGFactory[compilerName].realVersion
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
-                self.dependencies.append (self.compiler)
-                self.origDependencies.append (self.compiler)
+                self.dependencies.append (compilerName)
+                self.origDependencies.append (compilerName)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
-        self.compilerRealVersion = self.compiler.realVersion
         self.generateInitEnv ()
         self.createDefaultSections ()
         self.parseSections ()
         self.dumpSpec ()
-        self.dumpCmsos ()
         self.origRequires, self.sources, self.patches, self.origBuildRequires = self.getRequiresAndSources ()
         self.parseRequires ()
         self.dumpSpec ()
@@ -1959,15 +1991,14 @@ class Package (object):
             log ("FATAL: Error unpacking results: \n%s" % result)
             raise e
         # update subpackages
-        for subpackage in self.subpackages:
-            subpackage.updateFromParent()
+        for subpackage in self.subpackages: subpackage.updateFromParent(self)
+        self.clean()
         
     def parseRevision (self):
         for line in self.origSpec:
-            match = self.__syntax.REVISION.match (line)
+            match = PKGFactory.syntax.REVISION.match (line)
             if match:
                 self.pkgRevision = match.group(1)
-                if isOnline(self.cmsplatf): self.pkgRevision += '.'+self.cmsplatf
                 return True
         return False
 
@@ -1978,8 +2009,8 @@ class Package (object):
         subpackages = {}
         self.subpackages = []
         for line in self.origSpec:
-            imatch = self.__syntax.IMPORT.match (line)
-            smatch = self.__syntax.SUBPACKAGE.match (line)
+            imatch = PKGFactory.syntax.IMPORT.match (line)
+            smatch = PKGFactory.syntax.SUBPACKAGE.match (line)
             if imatch:
                 imports.append (imatch.group (1).strip (" \n") + ".file")
             elif smatch:
@@ -2022,12 +2053,14 @@ class Package (object):
             match = sectionRe.match (line)
             if match:
                 # Close the previous section and open a new one.
-                self.sections[currentSection][currentSubSection] += self.sectionPostambles[currentSection]
+                self.sections[currentSection][currentSubSection] += PKGFactory.sectionPostambles[currentSection]
+                if currentSection == "%install": self.sections[currentSection][currentSubSection] +=  self.installPostambles
                 currentSection, currentSubSection = match.groups ()
-                self.sections[currentSection][currentSubSection] = self.sectionPreambles[currentSection]
+                self.sections[currentSection][currentSubSection] = PKGFactory.sectionPreambles[currentSection]
             else:
                 self.sections[currentSection][currentSubSection] += line
-        self.sections[currentSection][currentSubSection] += self.sectionPostambles[currentSection]
+        self.sections[currentSection][currentSubSection] += PKGFactory.sectionPostambles[currentSection]
+        if currentSection == "%install": self.sections[currentSection][currentSubSection] +=  self.installPostambles
         if "%post" in self.sections and self.options.buildWithRpath: self.sections["%post"][''] += DEFAULT_RPATH_PREAMBLE
         
         # If no BUILDIF conditions we are done. 
@@ -2046,13 +2079,12 @@ class Package (object):
                 old = self.sections[section][subsection]
                 self.sections[section][subsection] = "%s || exit 0\n" % self.buildCondition + old
 
-    def calculateChecksum (self):
+    def calculateChecksum (self, force=False):
         """ 
         """
         checksumCalculator = ChecksumCalculator ()
-        
-        if self.checksum != "%{nil}":
-            return
+
+        if (not force) and (self.checksum != "%{nil}"): return
         # In the case --use-system-compiler option is specified, the compiler itself
         # is called "system-compiler" and the checksum is given by its version rather
         # than the spec.
@@ -2066,21 +2098,21 @@ class Package (object):
 
         checksumCalculator.addStrings (self.origSpec)
         checksumCalculator.addStrings (DEFAULT_SECTIONS.values ())
-        checksumCalculator.addStrings (self.sectionOptions.values ())    
-        checksumCalculator.addStrings (self.sectionPreambles.values ())    
-        checksumCalculator.addStrings (self.sectionPostambles.values ())
+        checksumCalculator.addStrings (PKGFactory.sectionOptions.values ())
+        checksumCalculator.addStrings (PKGFactory.sectionPreambles.values ())
+        checksumCalculator.addStrings (PKGFactory.sectionPostambles.values ()+[self.installPostambles])
+
         if self.options.buildWithRpath: checksumCalculator.addStrings (DEFAULT_RPATH_PREAMBLE)
         
-            
         for filename in self.imports:
             checksumCalculator.addFile (abspath (filename))
 
         for subpackage in self.subpackages:
             checksumCalculator.addString( subpackage.dumpSpecFragment(not self.options.repository.split('.')[0] == "comp") )
 
-        for pkg in self.dependencies:
-            checksumCalculator.addPkg (pkg)
-        for pkg in self.buildDependencies:
+        for pkg in getPackages(self.dependencies+self.buildDependencies):
+            #for a, v in pkg.__dict__.iteritems():
+            #  print a,v
             checksumCalculator.addPkg (pkg)
         remotefileRE = re.compile (".*:.*/.*")
         for patch in self.patches:
@@ -2094,12 +2126,6 @@ class Package (object):
             filename = join (abspath (self.options.cmsdist), source)
             if exists (filename):
                 checksumCalculator.addFile (filename)
-        # FIXME: should we add downloaded sources checksums to the global checksum? This is actually
-        #        tricky because at the moment the sources are downloaded *after* the checksums
-        #        are calculated and they are put in a directory which has the global checksum in
-        #        the name. We could fetch sources first and drop the global checksum from the 
-        #        sources download dir, but this means that we will be using always the same 
-        #        directory for the sources, even if they might be different (for example when downloading them from cvs). 
         self.checksum = checksumCalculator.getChecksum ()
         self.version = calculateHumanReadableVersion (self)
         if self.name == self.options.pipPackage:
@@ -2108,16 +2134,16 @@ class Package (object):
 
     def generateRequires (self, dependencies, origDependencies):
         requiresPkgs = [ "%s+%s+%s" % (pkg.group, pkg.name, pkg.version) 
-                         for pkg in dependencies
+                         for pkg in getPackages(dependencies)
                          if pkg.name != "system-compiler" ]
         pkgreqsPkgs = [ "%s/%s/%s " % (pkg.group, pkg.name, pkg.version) 
-                        for pkg in dependencies
+                        for pkg in getPackages(dependencies)
                         if pkg.name != "system-compiler" ]
         directpkgreqsPkgs = [ "%s/%s/%s " % (pkg.group, pkg.name, pkg.version) 
-                        for pkg in origDependencies
+                        for pkg in getPackages(origDependencies)
                         if pkg.name != "system-compiler" ]
         requiredtoolsPkgs = [ pkg.name
-                              for pkg in dependencies
+                              for pkg in getPackages(dependencies)
                               if pkg.name != "system-compiler" ]
         requires = " ".join (requiresPkgs)
         pkgreqs = " ".join (pkgreqsPkgs)
@@ -2135,7 +2161,7 @@ class Package (object):
         requires, pkgreqs, directpkgreqs, requiredtools = self.generateRequires(self.dependencies, self.origDependencies)
         bldrequires, bldpkgreqs, blddirectpkgreqs, bldrequiredtools = self.generateRequires(self.origBuildDependencies, self.origBuildDependencies)
         allDepsPkgs = " ".join([ "%s/%s/%s " % (pkg.group, pkg.name, pkg.version) 
-                        for pkg in self.fullDependencies
+                        for pkg in getPackages(self.fullDependencies)
                         if pkg.name != "system-compiler" ])
         if not allDepsPkgs: allDepsPkgs = "%{nil}"
         #After rewrite of Requires we split pkgeqs and directpkgreqs to avoid RPM macro length limit
@@ -2168,15 +2194,15 @@ class Package (object):
         return
 
     def updateDependencies (self, require, origDependencies, dependencies, buildRequires=False):
-        if self.__packageCache.has_key (require):
-            pkg = self.__packageCache[require]
+        if PKGFactory.has_key (require):
+            pkg = PKGFactory[require]
         else:
-            pkg = self.__factory.createWithSpec (require)
-            self.__packageCache[require] = pkg
-        origDependencies.insert (0, pkg)
-        self.updateChildDependencies(pkg, dependencies, pkg.dependencies)
+            pkg = PKGFactory.createWithSpec (require)
+            PKGFactory[require] = pkg
+        origDependencies.insert (0, require)
+        self.updateChildDependencies(require, dependencies, pkg.dependencies)
         if buildRequires:
-            self.updateChildDependencies(pkg, dependencies, pkg.buildDependencies)
+            self.updateChildDependencies(require, dependencies, pkg.buildDependencies)
 
     def parseRequires (self):
         """This function is responsible for finding all the required dependencies for a given spec.
@@ -2190,31 +2216,37 @@ class Package (object):
             self.updateDependencies(require, self.origDependencies, self.dependencies)
         if self.buildRequireToolfile:
             deps = self.dependencies[:]
-            for pkg in deps:
-                dep = pkg.name
+            for dep in deps:
                 if not dep.endswith("-toolfile"):  continue
-                if not self.__packageCache.has_key(dep.replace("-toolfile","")): continue
+                if not PKGFactory.has_key(dep.replace("-toolfile","")): continue
                 if not dep in self.origBuildRequires: self.origBuildRequires.append(dep)
-                if pkg in self.origDependencies: self.origDependencies.remove(pkg)
-                self.dependencies.remove(pkg)
+                if dep in self.origDependencies: self.origDependencies.remove(dep)
+                self.dependencies.remove(dep)
         for require in self.origBuildRequires:
             self.updateDependencies(require, self.origBuildDependencies, self.buildDependencies, True)
         for dep in self.dependencies:
             if dep in self.origBuildDependencies: self.origBuildDependencies.remove(dep)
             if dep in self.buildDependencies:     self.buildDependencies.remove(dep)
         self.fullDependencies = self.dependencies + self.buildDependencies
-        for dep in self.fullDependencies:
-            dep.dependentCounter += 1
-        self.dependencies.sort()
-        self.origDependencies.sort()
-        self.buildDependencies.sort()
-        self.origBuildDependencies.sort()
-        self.fullDependencies.sort()
+        self.updateDependentCount()
+        self.dependencies          = self.sortPkgs(self.dependencies)
+        self.origDependencies      = self.sortPkgs(self.origDependencies)
+        self.buildDependencies     = self.sortPkgs(self.buildDependencies)
+        self.origBuildDependencies = self.sortPkgs(self.origBuildDependencies)
+        self.fullDependencies      = self.sortPkgs(self.fullDependencies)
+
+    def sortPkgs(self, deps):
+        pkgs=getPackages(deps)
+        pkgs.sort()
+        return [ pkg.name for pkg in pkgs]
+
+    def updateDependentCount(self):
+        for dep in getPackages(self.fullDependencies): dep.dependentCounter += 1
 
     def dumpSpec (self, saveScripts=False):
         self.spec = "\n".join([self.specPreHeader, 
                                SPEC_HEADER % self.__dict__, 
-                               self.preamble])
+                               PKGFactory.preamble])
         for section in self.sections.keys ():
             for subsection in self.sections[section].keys ():
                 sectionContents = self.sections[section][subsection].strip ("\n ")
@@ -2230,12 +2262,12 @@ class Package (object):
                     if (section in ["%build","%install","%prep"]) and (subsection==""):
                       secScript="cmsdist-%s.sh" % section[1:]
                       sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
-                  self.spec += "\n\n%s %s %s\n" % (section, subsection, self.sectionOptions[section])
-                  self.spec += sectionContents
-        self.spec = self.__factory.postProcessSpec (self.spec)
+                    self.spec += "\n\n%s %s %s\n" % (section, subsection, PKGFactory.sectionOptions[section])
+                    self.spec += sectionContents
+        self.spec = PKGFactory.postProcessSpec (self.spec)
 
         for subpackage in self.subpackages:
-            subpackage.updateFromParent()
+            subpackage.updateFromParent(self)
             self.spec += '\n\n' + subpackage.dumpSpecFragment()
 
     def __getTmpSpecName (self):
@@ -2245,11 +2277,11 @@ class Package (object):
     def rpmEvalStrings (self, *strings):
         self.spec = "\n".join ([self.specPreHeader,
                                 SPEC_HEADER % self.__dict__,
-                                self.preamble,
+                                PKGFactory.preamble,
                                 self.sections[''][''],
                                 "%description"] + list (strings)) 
         f = file (self.tmpspec, "w")
-        f.write (self.__factory.postProcessSpec (self.spec).replace('%%', '%'))
+        f.write (PKGFactory.postProcessSpec (self.spec).replace('%%', '%'))
         f.close ()
         commandPrefix = getCommandPrefix (self.options)
         evalCommand = "%s ; %s rpm -q --specfile %s --info %s" % (rpmEnvironmentScript, commandPrefix,
@@ -2291,42 +2323,35 @@ class Package (object):
     def generateInitEnv (self):
         """ Parses the spec file and generates the code for init.sh/init.csh
         """
-        self.initSh = """cat <<\EOF_INIT_SH > %i/etc/profile.d/init.sh\n"""        
-        self.initCsh = """cat <<\EOF_INIT_CSH > %i/etc/profile.d/init.csh\n"""
+        initSh = """cat <<\EOF_INIT_SH > %i/etc/profile.d/init.sh\n"""
+        initCsh = """cat <<\EOF_INIT_CSH > %i/etc/profile.d/init.csh\n"""
 
         upperNameDict = {"uppername": self.name.upper ().replace ("-", "_")}
 
         if self.name == "gcc":
-            self.initSh += COMMANDS_SH["+PATH"] % {"var": "PATH", "value": "%{i}/bin-real"}
-            self.initCsh += COMMANDS_CSH["+PATH"] % {"var": "PATH", "value": "%{i}/bin-real"}
+            initSh += COMMANDS_SH["+PATH"] % {"var": "PATH", "value": "%{i}/bin-real"}
+            initCsh += COMMANDS_CSH["+PATH"] % {"var": "PATH", "value": "%{i}/bin-real"}
         for command, var, value in INITENV_PREAMBLE:
-            self.initSh += COMMANDS_SH[command] % {"var": var % upperNameDict, "value": value}
-            self.initCsh += COMMANDS_CSH[command] % {"var": var % upperNameDict, "value": value}            
+            initSh += COMMANDS_SH[command] % {"var": var % upperNameDict, "value": value}
+            initCsh += COMMANDS_CSH[command] % {"var": var % upperNameDict, "value": value}
             
         for line in self.spec:
-            match = self.__syntax.INITENV.match (line)
+            match = PKGFactory.syntax.INITENV.match (line)
             if match:
                 command, var, value = [x.strip (" \t") for x in match.groups ()]
-                self.initSh += COMMANDS_SH[command] % {"var": var, "value": value}
-                self.initCsh += COMMANDS_CSH[command] % {"var": var, "value": value}
-            buildifMatch = self.__syntax.BUILDIF.match (line)
+                initSh += COMMANDS_SH[command] % {"var": var, "value": value}
+                initCsh += COMMANDS_CSH[command] % {"var": var, "value": value}
+            buildifMatch = PKGFactory.syntax.BUILDIF.match (line)
             if not self.buildCondition and buildifMatch:
                 self.buildCondition = buildifMatch.group (1)
-        self.initSh += "\nEOF_INIT_SH\n"
-        self.initCsh += "\nEOF_INIT_CSH\n"
-        self.__createProfileDScript = "mkdir -p %i/etc/profile.d\n"
-        self.sectionPostambles["%install"] += "\n".join ([self.__createProfileDScript,
-                                                          self.initSh,
-                                                          self.initCsh])
+        initSh += "\nEOF_INIT_SH\n"
+        initCsh += "\nEOF_INIT_CSH\n"
+        createProfileDScript = "mkdir -p %i/etc/profile.d\n"
+        self.installPostambles += "\n".join ([createProfileDScript, initSh, initCsh])
 
     def getFinalSpec (self):
         self.dumpSpec (saveScripts=True)
         return self.spec
-    
-    def dumpCmsos (self):
-        if not exists (self.sourcedir):
-            makedirs (self.sourcedir)
-        self.__cmsosDumper.dump (self.sourcedir)
     
     def __repr__ (self):
         return "<Package name=%(name)s>" % self.__dict__
@@ -2337,7 +2362,7 @@ class Package (object):
     
     def __ne__ (self, other):
         return not self.__eq__ (other)
-    
+
     def __cmp__ (self, other):
         """ Package A is greater than package B if
             Package A depends on package B.
@@ -2357,16 +2382,16 @@ class Package (object):
             return moredeps
         else:
             return cmp (self.name, other.name)
-    
+
     def getRequiresAndSources (self, subpackage=''):
-        if self.__requiresCache.has_key (self.name):
-            return self.__requiresCache[self.name]
+        if PKGFactory.getRequiresCache().has_key (self.name):
+            return PKGFactory.getRequiresCache()[self.name]
         spec = file (self.tmpspec, "w")
         text = "\n".join([self.specPreHeader,
                           SPEC_HEADER % self.__dict__,
-                          self.__factory.postProcessSpec (self.preamble),
+                          PKGFactory.postProcessSpec (PKGFactory.preamble),
                           "%%description",
-                          self.__factory.postProcessSpec (self.sections[''][subpackage])])
+                          PKGFactory.postProcessSpec (self.sections[''][subpackage])])
         spec.write (text)
         spec.close ()
         deps = []; sources = [] ; patches = []
@@ -2375,7 +2400,7 @@ class Package (object):
         buildDeps    = []
         queryCommand = "%s ; %s rpm -q --info --specfile %s %s 2>/dev/null" % (rpmEnvironmentScript, getCommandPrefix (self.options),
                                                                   self.tmpspec, self.options.rpmQueryDefines)
-        regexps = self.__headerMatchingRegexp
+        regexps = PKGFactory.headerMatchingRegexp
         matchers = [(regexps.REQUIRES_REGEXP, deps),
                     (regexps.REMOTE_SOURCE_REGEXP, sources),
                     (regexps.REMOTE_PATCH_REGEXP, patches),
@@ -2413,7 +2438,7 @@ class Package (object):
                          for source in localSources])
         patches.extend ([join (cmsdistPath, patch + ".patch") 
                         for patch in localPatches])
-        self.__requiresCache[self.name] = (deps, sources, patches, buildDeps)
+        PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps)
         return (deps, sources, patches, buildDeps)
 
 def parseOptions():
@@ -2677,7 +2702,6 @@ def prepareSaveSpec (p):
     for directory in [p.specdir, p.sourcedir]:
         log ("Creating directory %s" % directory, DEBUG)
         if not exists (directory): makedirs (directory)
-    p.dumpCmsos ()
 
 def saveSpec (p):
     f = file (p.finalSpecFilename (), 'w')
@@ -2756,33 +2780,20 @@ def checkIfOnServer (pkg):
     """ Check if the rpm associated to pkg can be downloaded from the apt
         server.
     """
-    log ("Checking if package %s can be downloaded from apt servers" % pkg.pkgName(), DEBUG)
-    if tags_cache.cache.has_key(pkg.pkgName()) and isDefaultRevision(pkg.pkgRevision):
+    pkgName = pkg.pkgName()
+    log ("Checking if package %s can be downloaded from apt servers" % pkgName, DEBUG)
+    if pkgName in tags_cache.cache:
+      if isDefaultRevision(pkg.pkgRevision): return True
+      pkgRevision = tags_cache.revision_cache[pkgName]
+      if pkg.pkgRevision <= pkgRevision:
+        log ("RPM %s found in apt repository with a revision greater than the current one. Accepting package." % pkgName, DEBUG)
         return True
-    error, output = getstatusoutput ("%s -f show %s" % (CMSPKG_CMD, pkg.pkgName()))
-    if error or not output:
-        log ("RPM %s not found in apt repository." % pkg.pkgName (), DEBUG)
-        return False
-    pkgName = None
-    pkgRevision = None
-   
-    lines = [line for line in output.split("\n") if line]
-    assert(lines)
-    for line in lines:
-        key, value = [l.strip() for l in line.split(":", 1)]
-        log ("Parsing cmspkg show. key: %s,i value: %s." % (key,value), DEBUG)
-        if key == "Package":
-            pkgName = value
-        if key == "Version":
-            pkgRevision = value.split("-",1)[1]
-        if key == "Description":
-            break
-    if pkg.pkgRevision <= pkgRevision and pkgName == pkg.pkgName ():
-        log ("RPM %s found in apt repository with a revision greater than the current one. Accepting package." % pkg.pkgName (), DEBUG)
-        return True
-    log("""RPM %s is found in the apt repository, but it has a earlier revision (%s)
-than the current one(%s). Building current package.""" % (pkg.pkgName(), pkgRevision, pkg.pkgRevision), DEBUG)
-    return False
+      log("""RPM %s is found in the apt repository, but it has a earlier revision (%s) 
+than the current one(%s). Building current package.""" % (pkgName, pkgRevision, pkg.pkgRevision), DEBUG)
+      return False
+    else:
+      log ("RPM %s not found in apt repository." % pkgName, DEBUG)
+      return False
 
 def checkCanInstallRpm (pkg):
     officialRpmLocation = pkg.rpmLocation()
@@ -2862,8 +2873,8 @@ def installApt (pkg, scheduler):
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via cmspkg.", DEBUG)
     for dep in pkg.dependencies:
-      scheduler.forceDone("check-%s" % dep.pkgName())
-      scheduler.forceDone("install-%s" % dep.pkgName())
+      scheduler.forceDone("check-%s" % dep)
+      scheduler.forceDone("install-%s" % dep)
 
 def scheduleInstallPackage(pkg, scheduler):
   if pkg.name == "system-compiler":
@@ -2877,8 +2888,7 @@ def scheduleInstallPackage(pkg, scheduler):
     # subpackages were already built as part of the main package, but the RPMs still need to be symlinked
     return checkCanInstallRpm(pkg)
   
-  if not bootstrapped:
-    return False
+  if not bootstrapped: return False
 
   scheduler.log("Checking if %s is cached." % pkg.name)
   actionName = "install-%s" % pkg.pkgName()
@@ -3039,7 +3049,7 @@ def installPackage(pkg, scheduler):
         pkg_error = True
     if pkg_error: raise RpmBuildFailed (pkg)
   installRpm(pkg, pkg.options.bootstrap)
-  scheduler.log("Done")
+  scheduler.log("Done %s" % pkg.pkgName ())
   f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
   f.write (pkg.checksum)
   f.close ()
@@ -3150,18 +3160,12 @@ class BuildChecker (object):
 # sources, build, and install the resulting package.
 # Notice that in both cases the action completes successfully.
 def checkPackageInCache(pkg, scheduler):
-  # make sure subpackages are properly up-to-date with the definitions in their
-  # parents
-  if pkg.parent:
-    pkg.updateFromParent()
-
   pkgName = pkg.pkgName()
   scheduler.log("Starting to process package %s" % pkgName)
   sourcedir = pkg.sourcedir
   if not exists (sourcedir):
     log ("Creating directory %s" % sourcedir, DEBUG)
     makedirs (sourcedir)
-    pkg.dumpCmsos ()
   # Check if it possible to install package and enqueue 
   # serial task to do it.
   # FIXME: Clean up the fact queuing of tasks is actually
@@ -3180,15 +3184,17 @@ def checkPackageInCache(pkg, scheduler):
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
   if pkg.options.pipPackage and [ s for s in pkg.sources if s[:6] == "pip://" ]:
-    pip = [ p.pkgName() for p in pkg.fullDependencies if p.name == pkg.options.pipPackage ][0]
+    pip = [ p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == pkg.options.pipPackage ][0]
     if not rpm_db_cache.has_key(pip): fetchDependencies += [ "install-"+pip ]
-  scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
+  pkgSources = pkg.sources + pkg.patches
+  if pkgSources:
+    scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
   buildActionDependencies = []
-  for p in pkg.origDependencies + pkg.origBuildDependencies:
+  for p in getPackages(pkg.origDependencies + pkg.origBuildDependencies):
     if not isPackageInstalled(p):
       scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
       buildActionDependencies.append("install-%s" % p.pkgName())
-  buildActionDependencies.append("fetch-%s" % pkgName)
+  if pkgSources: buildActionDependencies.append("fetch-%s" % pkgName)
   installActionDependencies = ["build-%s" % pkgName]
   scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
   scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
@@ -3237,7 +3243,6 @@ def build(opts, args, factory):
     fatal("unable to find a working rpm.")
   rpmCacheUpdate(opts)
   packages = [factory.createWithSpec(pkgName) for pkgName in args]
-  packages.sort()
   for pkg in packages:
     logMessage = "Package %s requested." % pkg.pkgName ()
     if not isDefaultRevision(pkg.pkgRevision):
@@ -3245,9 +3250,9 @@ def build(opts, args, factory):
     log (logMessage)
     if pkg.fullDependencies:
       log ("This will bring in also the following packages: ")
-      deps = sorted(pkg.fullDependencies, key = lambda d: d.pkgName().lower())
+      deps = sorted(pkg.fullDependencies)
       finalString = "\n".join (["%s (%s)" % (dep.pkgName (), dep.checksum) 
-                                for dep in deps])
+                                for dep in getPackages(deps)])
       log (finalString)
   
   if opts.specsOnly:
@@ -3412,7 +3417,7 @@ def allPackagesToUpload (args, factory):
   def allDeps(pkg, factory, dep_cache={}):
     if pkg in dep_cache: return dep_cache[pkg]
     deps = [pkg]
-    for dep in pkg.fullDependencies:
+    for dep in getPackages(pkg.fullDependencies):
       for subdep in allDeps(dep, factory, dep_cache):
         if not subdep in deps: deps.append(subdep)
     dep_cache[pkg] = deps
@@ -3745,7 +3750,7 @@ if __name__ == "__main__":
         
       # Create the work area and a tmp dir for it it does not exists and cd to it.
       opts.tempdir = join(opts.workDir, opts.tempDirPrefix)
-      getstatusoutput("rm -rf %s/cache; mkdir -p %s/cache" % (opts.tempdir, opts.tempdir))
+      getstatusoutput("rm -rf %s/cache; mkdir -p %s/{cache,specCache}" % (opts.tempdir, opts.tempdir))
       chdir (opts.workDir)
       CMSPKG_CMD = join(opts.workDir,"common",CMSPKG_CMD) + " --architecture %s" % opts.architecture
 
@@ -3826,7 +3831,7 @@ if __name__ == "__main__":
       while not successfulTransaction:
         successfulTransaction = True 
         checksums_cache = {}
-        factory = PackageFactory(opts)
+        PKGFactory = PackageFactory(opts)
         for command in commandSpec:
           if command == "bootstrap":
             # If the apt-init.sh file is missing, do the bootstrap,
@@ -3842,14 +3847,14 @@ if __name__ == "__main__":
             rpmEnvironmentScript = "source "+rpmEnvironmentScript
             tags_cache.update()
           elif command == "deprecate-local":
-            doDeprecateLocal(opts, args[1:], factory)
+            doDeprecateLocal(opts, args[1:], PKGFactory)
           elif command == "build":
-            build(opts, args[1:], factory)
+            build(opts, args[1:], PKGFactory)
           elif command == "upload":
             # We continue trying unless some fatal error occurs (which exits
             # immediately).  or the remote repository is not consistent with the
             # current state.
-            successfulTransaction = upload(opts, args[1:], factory)
+            successfulTransaction = upload(opts, args[1:], PKGFactory)
             cleanup_server_upload(opts)
             if not successfulTransaction:
               log("Looks like repository changed while we were building. Trying again.")
