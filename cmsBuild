@@ -1312,12 +1312,13 @@ class PackageFactory (object):
             pkg = self.create ()
             pkg.initWithSpec (specLines)
             pkg.options = {}
+            pkg.installPostambles = ""
             for sp in pkg.subpackages: sp.options = {}
             pickle.dump(pkg, open(specCache,"w"),1)
             pkg.options = self.options
             pkg.specCache = True
             for sp in pkg.subpackages: sp.options = self.options
-            log("Generated cache: %s" % pkg.pkgName (), DEBUG)
+            log("Generated cache: %s" % pkg.pkgName ())
           else:
             forceRecreate = True
             pkg = pickle.load(open(specCache))
@@ -1335,6 +1336,7 @@ class PackageFactory (object):
               log("Recreating package %s cache due its dependency changed" % pkg.pkgName (), DEBUG)
               continue
             pkg.updateDependentCount()
+            pkg.generateInitEnv()
             chksum = pkg.checksum
             cachedVersion = pkg.version
             pkg.calculateChecksum(force=True)
@@ -1344,7 +1346,7 @@ class PackageFactory (object):
               continue
             for sp in pkg.subpackages: sp.checksum = pkg.checksum
             pkg.specCache = False
-            log("Read from cache: %s" % pkg.pkgName (), DEBUG)
+            log("Read from cache: %s" % pkg.pkgName ())
           break
         self[pkgName]=pkg
         if pkg.name != pkgName:
@@ -1907,6 +1909,7 @@ class Package (object):
         self.requiresStatement = "Requires: gcc"
         self.sections = {}
         self.dependentCounter = 0
+        self.installPostamblesEnv = {"SH": "", "CSH" : ""}
         self.installPostambles =  ""
         self.dependencies = []
         self.origDependencies = []
@@ -1971,6 +1974,7 @@ class Package (object):
                 self.origDependencies.append (compilerName)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
+        self.setInitEnv ()
         self.generateInitEnv ()
         self.createDefaultSections ()
         self.parseSections ()
@@ -2330,6 +2334,20 @@ class Package (object):
     def rpmCachePath (self):
         return join (abspath ("RPMS/cache"), self.checksum, self.rpmfilename)
 
+    def setInitEnv (self):
+      initSh = ""
+      initCsh = ""
+      for line in self.spec:
+        match = PKGFactory.syntax.INITENV.match (line)
+        if match:
+          command, var, value = [x.strip (" \t") for x in match.groups ()]
+          initSh += COMMANDS_SH[command] % {"var": var, "value": value}
+          initCsh += COMMANDS_CSH[command] % {"var": var, "value": value}
+        buildifMatch = PKGFactory.syntax.BUILDIF.match (line)
+        if not self.buildCondition and buildifMatch:
+          self.buildCondition = buildifMatch.group (1)
+      self.installPostamblesEnv = { "SH": initSh, "CSH": initCsh }
+
     def generateInitEnv (self):
         """ Parses the spec file and generates the code for init.sh/init.csh
         """
@@ -2345,19 +2363,12 @@ class Package (object):
             initSh += COMMANDS_SH[command] % {"var": var % upperNameDict, "value": value}
             initCsh += COMMANDS_CSH[command] % {"var": var % upperNameDict, "value": value}
             
-        for line in self.spec:
-            match = PKGFactory.syntax.INITENV.match (line)
-            if match:
-                command, var, value = [x.strip (" \t") for x in match.groups ()]
-                initSh += COMMANDS_SH[command] % {"var": var, "value": value}
-                initCsh += COMMANDS_CSH[command] % {"var": var, "value": value}
-            buildifMatch = PKGFactory.syntax.BUILDIF.match (line)
-            if not self.buildCondition and buildifMatch:
-                self.buildCondition = buildifMatch.group (1)
+        if self.installPostamblesEnv["SH"]: initSh += self.installPostamblesEnv["SH"]
+        if self.installPostamblesEnv["CSH"]: initCsh += self.installPostamblesEnv["CSH"]
         initSh += "\nEOF_INIT_SH\n"
         initCsh += "\nEOF_INIT_CSH\n"
         createProfileDScript = "mkdir -p %i/etc/profile.d\n"
-        self.installPostambles += "\n".join ([createProfileDScript, initSh, initCsh])
+        self.installPostambles = "\n".join ([createProfileDScript, initSh, initCsh])
 
     def getFinalSpec (self):
         self.dumpSpec (saveScripts=True)
