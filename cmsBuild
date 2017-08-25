@@ -1297,7 +1297,7 @@ class PackageFactory (object):
         return Package (self.options)
 
     def createWithSpec (self, pkgName):
-        if self.has_key(pkgName): return self.__packageCache[pkgName]
+        if self.has_key(pkgName): return self[pkgName]
         filename = specFilename (self.options, pkgName)
         try:
             specLines = open (filename).readlines ()
@@ -1329,9 +1329,8 @@ class PackageFactory (object):
             pkg.origSpec = specLines
             depSpecCache = False
             for p in pkg.fullDependencies:
-              if not self.__packageCache.has_key(p):
-                self.__packageCache[p]=self.createWithSpec(p)
-              if self.__packageCache[p].specCache: depSpecCache = True
+              if not self.has_key(p): self[p]=self.createWithSpec(p)
+              if self[p].specCache: depSpecCache = True
             if depSpecCache:
               log("Recreating package %s cache due its dependency changed" % pkg.pkgName (), DEBUG)
               continue
@@ -1344,9 +1343,10 @@ class PackageFactory (object):
                       (pkg.pkgName (), pkg.checksum,chksum, pkg.version, cachedVersion), DEBUG)
               continue
             for sp in pkg.subpackages: sp.checksum = pkg.checksum
+            pkg.specCache = False
             log("Read from cache: %s" % pkg.pkgName (), DEBUG)
           break
-        self.__packageCache[pkgName]=pkg
+        self[pkgName]=pkg
         if pkg.name != pkgName:
           log ("FATAL: Package name '%s' and spec name '%s' does not match" % (pkg.name, pkgName))
           raise MalformedSpec
@@ -1919,7 +1919,6 @@ class Package (object):
         self.options = options
         self.status = None
         self.buildRequireToolfile = False
-        self.specCache = False
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
