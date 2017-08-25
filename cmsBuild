@@ -1319,10 +1319,8 @@ class PackageFactory (object):
             forceRecreate = True
             pkg = pickle.load(open(specCache))
             if not exists (pkg.specFilename()): continue
-            pkg.options = self.options
-            for sp in pkg.subpackages:
-              sp.checksum = '%{nil}'
-              sp.options = self.options
+            pkg.setOptions (self.options)
+            for sp in pkg.subpackages: sp.checksum = '%{nil}'
             pkg.origSpec = specLines
             depSpecCache = False
             for p in pkg.fullDependencies:
