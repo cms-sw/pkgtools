@@ -1311,13 +1311,9 @@ class PackageFactory (object):
             getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir,pkgName))
             pkg = self.create ()
             pkg.initWithSpec (specLines)
-            pkg.options = {}
-            pkg.installPostambles = ""
-            for sp in pkg.subpackages: sp.options = {}
             pickle.dump(pkg, open(specCache,"w"),1)
-            pkg.options = self.options
+            pkg.setOptions (self.options)
             pkg.specCache = True
-            for sp in pkg.subpackages: sp.options = self.options
             log("Generated cache: %s" % pkg.pkgName ())
           else:
             forceRecreate = True
@@ -1873,6 +1869,13 @@ class Package (object):
         del self.spec
         del self.requiresStatement
         del self.origSpec
+        del self.installPostambles
+        self.options = {}
+        for sp in self.subpackages: sp.options = {}
+
+    def setOptions(self, options):
+      self.options = options
+      for sp in self.subpackages: sp.options =  options
 
     def __init__ (self, options):
         self.workDir = options.workDir
