@@ -1083,7 +1083,7 @@ class PackageFactory (object):
               continue
             for sp in pkg.subpackages: sp.checksum = pkg.checksum
             pkg.specCache = False
-            log("Read from cache: %s" % pkg.pkgName ())
+            log("Read from cache: %s" % pkg.pkgName (), DEBUG)
           break
         self[pkgName]=pkg
         if pkg.name != pkgName:
