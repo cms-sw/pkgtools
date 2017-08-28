@@ -2938,7 +2938,7 @@ def checkPackageInCache(pkg, scheduler):
   fetchDependencies = []
   if pkg.name.endswith("-patch"):
     baseTool = pkg.name[:-6]
-    baseToolVersion = [d.version for d in pkg.dependencies if d.name == baseTool]
+    baseToolVersion = [d.version for d in getPackages(pkg.dependencies) if d.name == baseTool]
     if len(baseToolVersion)>0:
       baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
       if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
