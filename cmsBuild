@@ -490,9 +490,6 @@ class DownloadOptions(object):
     self.cmsdist = options.cmsdist 
 
 def download (source, dest, options):
-    # Syntactic sugar for git:/some/path to be equal to git+:///some/path
-    if source.startswith("git:") and not source.startswith("git://"):
-      source = "git+://" + source[4:]
     # Syntactic sugar to allow the following urls for tag collector:
     #
     # cmstc:[base.]release[.tagset[.tagset[...]]]/src.tar.gz
@@ -2172,13 +2169,16 @@ class Package (object):
                     (regexps.LOCAL_SOURCE_REGEXP, localSources),
                     (regexps.LOCAL_PATCH_REGEXP, localPatches),
                     (regexps.BUILD_REQUIRES_REGEXP, buildDeps)]
+        def fixSource(source):
+          if source.startswith("git:") and not source.startswith("git://"): source = "git://" + source[4:]
+          return source
         for line in popen (queryCommand).readlines ():
             line = re.sub ("[\s]+", " ", line).strip ("\n\t ")
             for rule, target in matchers:
                 match = rule.match (line)
                 if not match:
                     continue
-                target.extend ([element 
+                target.extend ([ element if regexps.REMOTE_SOURCE_REGEXP!=rule else fixSource(element)
                                 for element in match.group (1).split ()])
                 break
         cmsdistPath = abspath (self.options.cmsdist)
@@ -3365,7 +3365,7 @@ def upload(opts, args, factory):
         uploadSum=uploadSum,
         checksum=checksum,
         checksum_in=checksum_in)
-  
+
   (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, sources]))
   logAndDieOnError(err, "Error while creating the local repository.")
 
