@@ -1078,7 +1078,7 @@ class PackageFactory (object):
               log("Recreating package %s cache due checksum %s vs %s OR version %s vs %s" %
                       (pkg.pkgName (), pkg.checksum,chksum, pkg.version, cachedVersion), DEBUG)
               continue
-            for sp in pkg.subpackages: sp.checksum = pkg.checksum
+            for sp in pkg.subpackages: sp.updateFromParent(pkg)
             pkg.specCache = False
             log("Read from cache: %s" % pkg.pkgName (), DEBUG)
           break
@@ -1518,6 +1518,7 @@ class SubPackage (object):
         self.subname        = name
         self.subpackages    = []
         self.sources        = []
+        self.parent         = None
 
     def updateFromParent (self, parent):
         self.name           = '%s-%s' % (parent.name, self.subname)
@@ -1547,6 +1548,7 @@ class SubPackage (object):
         self.rpmfilename    = '%s/%s+%s+%s-%s-%s.%s.rpm' % (self.cmsplatf, self.group, self.name, self.version, '1', self.pkgRevision, self.cmsplatf)
         self.srpmfilename   = parent.srpmfilename
         self.pkginstroot    = parent.pkginstroot
+        self.parent         = parent
 
     def dumpSpecFragment(self, computeSpecChecksum = True):
         importName = 'subpackage-%s.file' % self.subname
@@ -1560,9 +1562,7 @@ class SubPackage (object):
         return "%(group)s+%(name)s+%(version)s" % self.__dict__
 
     def rpmLocation(self):
-        # make sure all the information is available, otherwise update from the parent package
-        if not self.rpmdir or not self.rpmfilename:
-            self.updateFromParent()
+        assert(self.parent)
         return join(self.rpmdir, self.rpmfilename)
 
     def __repr__ (self):
