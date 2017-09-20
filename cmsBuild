@@ -1051,6 +1051,7 @@ class PackageFactory (object):
             getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir,pkgName))
             pkg = self.create ()
             pkg.initWithSpec (specLines)
+            pkg.depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)])).hexdigest()
             pickle.dump(pkg, open(specCache,"w"),1)
             pkg.setOptions (self.options)
             pkg.specCache = True
@@ -1067,20 +1068,25 @@ class PackageFactory (object):
               if not self.has_key(p): self[p]=self.createWithSpec(p)
               if self[p].specCache: depSpecCache = True
             if depSpecCache:
-              log("Recreating package %s cache due its dependency changed" % pkg.pkgName (), DEBUG)
+              log("Recreating package %s cache due its dependency changed" % pkg.pkgName ())
               continue
             pkg.updateDependentCount()
             pkg.generateInitEnv()
             chksum = pkg.checksum
             cachedVersion = pkg.version
             pkg.calculateChecksum(force=True)
-            if (pkg.checksum != chksum) or (cachedVersion != pkg.version):
-              log("Recreating package %s cache due checksum %s vs %s OR version %s vs %s" %
-                      (pkg.pkgName (), pkg.checksum,chksum, pkg.version, cachedVersion), DEBUG)
+            regen_msg = ""
+            if   (pkg.checksum != chksum):       regen_msg = "checksum %s vs %s" %(pkg.checksum, chksum)
+            elif (cachedVersion != pkg.version): regen_msg = "version  %s vs %s" %(pkg.version, cachedVersion)
+            else:
+              depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)])).hexdigest()
+              if (depSum != pkg.depSum): regen_msg = "dependencies checksum %s vs %s" %(depSum, pkg.depSum)
+            if regen_msg:
+              log("Recreating package %s cache: %s" % (pkg.pkgName (), regen_msg))
               continue
             for sp in pkg.subpackages: sp.updateFromParent(pkg)
             pkg.specCache = False
-            log("Read from cache: %s" % pkg.pkgName (), DEBUG)
+            log("Read from cache: %s" % pkg.pkgName ())
           break
         self[pkgName]=pkg
         if pkg.name != pkgName:
