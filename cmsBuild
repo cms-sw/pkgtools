@@ -2776,6 +2776,7 @@ def installPackage(pkg, scheduler):
   if not checkCanInstallRpm (pkg):
     raise RpmBuildFailed (pkg)
   scheduler.log("Trying to install the rpm package %s just built." % pkg.pkgName ())
+  pkg_error = False
   if pkg.options.bootstrap:
     scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName ())
     rpm_env = rpmEnvironmentScript
@@ -2783,7 +2784,6 @@ def installPackage(pkg, scheduler):
     error, output = getstatusoutput (command)
     if error: raise RpmBuildFailed (pkg)
     localPaths = [l for l in output.split("\n") if l.startswith(pkg.options.workDir)]
-    pkg_error = False
     if localPaths:
       scheduler.log("Error: Local path dependency found for %s\n  %s" % (pkg.pkgName (), "\n  ".join(localPaths)))
       pkg_error = True
@@ -2812,12 +2812,13 @@ def installPackage(pkg, scheduler):
       if miss_deps:
         scheduler.log("Error: Package %s requires '%s' while there is no direct dependency in spec file" % (pkg.pkgName (), ",".join(sorted(miss_deps.keys()))))
         pkg_error = True
-    if pkg_error: raise RpmBuildFailed (pkg)
+    if pkg_error and not pkg.options.ignoreCompileErrors: raise RpmBuildFailed (pkg)
   installRpm(pkg, pkg.options.bootstrap)
   scheduler.log("Done %s" % pkg.pkgName ())
   f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
   f.write (pkg.checksum)
   f.close ()
+  if pkg_error: raise RpmBuildFailed (pkg)
   scheduler.reschedule()
 
 from time import sleep
