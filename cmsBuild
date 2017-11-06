@@ -35,11 +35,14 @@ DEFAULT_CVS_SERVER=":pserver:anonymous@cmscvs.cern.ch:2401/local/reps/CMSSW"
 DEFAULT_CVS_PASSWORD="AA_:yZZ3e"
 DEFAULT_SPEC_REPOSITORY_MODULE="CMSDIST"
 CMSPKG_CMD="cmspkg"
+REF_CMSPKG_CMD=None
 SERVER_TMP_UPLOAD_DIRECTORY=None
 rpmEnvironmentScript = "true"
 pip_package_env_script = ""
 PKGFactory=None
 SystemCompilerVersion = {}
+BlackListReferencePkgs = []
+reference_rpm_db_cache = {}
 
 removeInitialSpace = re.compile ("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
@@ -103,7 +106,112 @@ def detectCompilerVersion (compilerName):
     return SystemCompilerVersion[compilerName]
 
 rpm_db_cache = {}
-    
+
+#################################################################
+#Utilities functions for installing packages from ref repository#
+#################################################################
+def should_install_from_reference(pkg):
+  if not pkg.options.reference: return False
+  if len([ True for ex in BlackListReferencePkgs if ex.match(pkg.name) ]): return False
+  return is_package_installed(pkg, reference_rpm_db_cache)
+
+def get_cmspkg_repository(cmspkg):
+  e, o = getstatusoutput("%s repository" % cmspkg)
+  if e:
+    print "Error: Unable to run ",ref_cmspkg
+    print o
+    exit (1)
+  data = {}
+  for l in o.split("\n"):
+    if ":" in l:
+      x = [ i.strip() for i in l.split(':',1) ]
+      data[x[0]]=x[1]
+  return data
+
+def is_package_installed(pkg, rpm_cache):
+  return ((pkg.pkgName () in rpm_cache) and
+     (rpm_cache[pkg.pkgName ()][0] == pkg.pkgRevision) and
+     (rpm_cache[pkg.pkgName ()][1] == pkg.checksum))
+
+def check_reference (opts):
+  global REF_CMSPKG_CMD, BlackListReferencePkgs
+  if not opts.reference: return
+  ref_cmspkg = join(opts.reference, "common","cmspkg")
+  if not exists (ref_cmspkg):
+    print "Error: Path %s is not a valid cmspkg installation area" % opts.reference
+    exit (1)
+  REF_CMSPKG_CMD = "%s -a %s" % (ref_cmspkg, opts.architecture)
+  ok = True
+  #ref_data = get_cmspkg_repository (REF_CMSPKG_CMD)
+  #local_data = get_cmspkg_repository (CMSPKG_CMD)
+  #for v in [ "Server", "Repository", "ServerPath"]:
+  #  if (not v in ref_data) or (not v in local_data): ok = False
+  #  elif ref_data[v]!=local_data[v]: ok = False
+  if not ok:
+    print "Error: Can not use directory %s as cmspkg reference area." % opts.reference
+    print "Error: Repository details mismatched"
+    print "Local Server:",local_data
+    print "Reference Server:",ref_data
+    exit(1)
+  log ("Using reference repository:%s" % opts.reference, DEBUG)
+  black_list_file = join(dirname(cmsBuildFilename),"black_list_reference_packages.txt")
+  black_list_pkgs = [ opts.blackList ]
+  if exists(black_list_file): black_list_pkgs += open(black_list_file).readlines()
+  for pkgs in [ p.strip() for p in black_list_pkgs ]:
+    if (not pkgs) or (pkgs.startswith("#")): continue
+    for pkg in [ p.strip() for p in pkgs.split(",")]:
+      if pkg:
+        BlackListReferencePkgs.append(re.compile("^"+pkg+"$"))
+        log ("Black listing package %s" % pkg, DEBUG)
+  rpmCacheUpdate(opts, reference_rpm_db_cache, REF_CMSPKG_CMD+" env -- ")
+  return
+
+def install_reference(pkg):
+  ref_permission_error = 'Error: You do not have write permission'
+  log ("About to build reference package %s using cmspkg..." % pkg.pkgName (), DEBUG)
+  command = "%s env -- rpm -qi %s" % (REF_CMSPKG_CMD, pkg.pkgName ())
+  error, info = getstatusoutput (command)
+  if ref_permission_error in info: error=False
+  if error:
+    log ("Command:\n %(command)s failed with the following message: %(info)s" % locals (), DEBUG)
+    raise RpmInstallFailed (pkg, info)
+  command = "%s env -- rpm -q --provides %s" % (REF_CMSPKG_CMD, pkg.pkgName ())
+  error, provides = getstatusoutput (command)
+  if 'Error: You do not have write permission' in info: error=False
+  if error:
+    log ("Command:\n %(command)s failed with the following message: %(provides)s" % locals (), DEBUG)
+    raise RpmInstallFailed (pkg, provides)
+  pkg_parts = pkg.pkgName ().split("+",2)
+  args = {"cmsroot" : pkg.options.workDir, "refroot" : pkg.options.reference, "cmsplatf" : pkg.options.architecture}
+  args['pkgdir'] = join(pkg.options.architecture,*pkg_parts)
+  tmp_path = join(pkg.options.tempdir, "reference", pkg.pkgName ())
+  makedirs(tmp_path)
+  tmp_spec = join(tmp_path, "package.spec")
+  spec = open(tmp_spec,"w")
+  infoReg = re.compile("^(Name|Version|Release|Group|License|Packager|Vendor|Summary)\s*:.*")
+  for l in info.split("\n"):
+    if infoReg.match(l):
+      spec.write(l+"\n")
+  for l in provides.split("\n"):
+    if ref_permission_error in l: continue
+    spec.write("Provides: "+l+"\n")
+  spec.write("Obsoletes: %s\n" % pkg.pkgName ())
+  spec.write("Prefix: %s\n" % pkg.options.installDir)
+  spec.write(REFERENCE_PACKAGE_POST % args)
+  spec.close()
+  command = "%s; rpmbuild -bb --define '_topdir %s' %s" % (rpmEnvironmentScript, tmp_path, tmp_spec)
+  error, output = getstatusoutput (command)
+  if error:
+    log ("Command:\n %(command)s failed with the following message: %(output)s" % locals (), DEBUG)
+    raise RpmInstallFailed (pkg, output)
+  e, rpm_path = getstatusoutput ("find %s -name '*.rpm'" % (tmp_path))
+  command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, rpm_path)
+  error, output = getstatusoutput (command)
+  if error:
+    log ("Command:\n %(command)s failed with the following message: %(output)s" % locals (), DEBUG)
+    raise RpmInstallFailed (pkg, output)
+############################################################
+
 def downloadUrllib2(source, destDir, options, cmscache=False):
     try:
       dest = "/".join([destDir.rstrip("/"), basename(source)])
@@ -955,7 +1063,7 @@ class HeaderMatchingRegexps (object):
 class PackageFactory (object):
     def __init__ (self, options):
         self.syntax = MetaSpecSyntax ()
-        self.preamble = self.__getPreamble (options.cmsdist)
+        self.preamble = self.__getPreamble (options)
         self.headerMatchingRegexp = HeaderMatchingRegexps ()
         self.sectionOptions = ReadOnlyDict ({"": "",
                         "%%description": "",
@@ -1014,10 +1122,18 @@ class PackageFactory (object):
         self.__requiresCache = CacheProxy (self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
 
-    def __getPreamble (self, cmsdist):
+    def __getPreamble (self, options):
         try:
-            filename = join (cmsdist, "rpm-preamble.file")
-            return open (filename).read ()
+            filename = join (options.cmsdist, "rpm-preamble.file")
+            prefile = open (filename)
+            if options.reference:
+              data = ["%%define refroot %s\n" % options.reference]
+              for l in  prefile.readlines():
+                if 's|\\\\Q%{instroot}\\\\E|' in l:
+                  l = l.replace('s|\\\\Q%{instroot}\\\\E|','s|\\\\Q%{refroot}\\\\E|%{cmsroot}|g;s|\\\\Q%{instroot}\\\\E|')
+                data.append(l)
+              return "".join(data)
+            else: return prefile.read()
         except:
             raise FileNotFound (filename)
 
@@ -2325,6 +2441,15 @@ def parseOptions():
                                     action="store_true",
                                     help="""Added rpath to the executables. This is done at post install time.""",
                                     default=None)
+    advancedBuildOptions.add_option("--reference",
+                                    dest="reference",
+                                    default=None,
+                                    metavar="PATH",
+                                    help="Path to an existing installation which can be used to install already available packages.")
+    advancedBuildOptions.add_option("--black-list",
+                                    dest="blackList",
+                                    default="",
+                                    help="CSV of package(s) which should not be taken from reference repostiroy.")
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
     # FIXME: change option to --no-deprecate and do the deprecation 
@@ -2629,7 +2754,16 @@ def installRpm (pkg, bootstrap):
         raise RpmInstallFailed (pkg, output)
     log ("Done installing via rpm.", DEBUG)
 
-def installApt (pkg, scheduler):
+def installApt (pkg, scheduler, cache=[]):
+    if pkg.options.reference:
+      if pkg.name in cache: return
+      cache.append(pkg.name)
+      for dep in getPackages(pkg.dependencies): installApt(dep, scheduler, cache)
+      if should_install_from_reference(pkg):
+        if not is_package_installed(pkg, rpm_db_cache): install_reference(pkg)
+        scheduler.forceDone("check-%s" % pkg)
+        scheduler.forceDone("install-%s" % pkg)
+        return
     command = "%s -f -j 1 install %s" % (CMSPKG_CMD, pkg.pkgName ())
     error, output = getstatusoutput (command)
     log ("About to install %s using cmspkg..." % pkg.pkgName (), DEBUG)
@@ -3440,16 +3574,18 @@ def getSpecRepository (url, options):
         sys.exit (1)
     return destDir
 
-def rpmCacheUpdate(opts):
+def rpmCacheUpdate(opts, cache=None, rpm_env=None):
     if hasattr (opts, "bootstrap") and opts.bootstrap == True:
-        rpm_db_cache.clear()
-        rpmQueryCommand = "%s ; rpm -qa --queryformat '%%{NAME} %%{RELEASE} %%{SUMMARY}\n' | sed 's|CMS Experiment package SpecChecksum:||'" % rpmEnvironmentScript
+        if not rpm_env: rpm_env=rpmEnvironmentScript+"; "
+        if cache is None: cache=rpm_db_cache
+        cache.clear()
+        rpmQueryCommand = "%s rpm -qa --queryformat '%%{NAME} %%{RELEASE} %%{SUMMARY}\n' | sed 's|CMS Experiment package SpecChecksum:||'" % rpm_env
         error, output = getstatusoutput (rpmQueryCommand)
         if error:
             die("Error while executing rpm -qa.\n%s" % output)
         for p in output.split("\n"):
             n,r,c = p.split(" ",2)
-            rpm_db_cache[n]=[r,c]
+            cache[n]=[r,c]
     return
 
 if __name__ == "__main__":
@@ -3588,6 +3724,7 @@ if __name__ == "__main__":
               symlink(envSh.replace(opts.workDir+"/"+opts.architecture,"."), rpmEnvironmentScript)
             rpmEnvironmentScript = "source "+rpmEnvironmentScript
             tags_cache.update()
+            if opts.reference: check_reference(opts)
           elif command == "deprecate-local":
             doDeprecateLocal(opts, args[1:], PKGFactory)
           elif command == "build":

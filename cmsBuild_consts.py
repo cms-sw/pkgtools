@@ -1,4 +1,56 @@
 from sys import platform
+
+REFERENCE_PACKAGE_POST = """
+%%prep
+%%build
+%%install
+%%postun
+rm -rf "$RPM_INSTALL_PREFIX/%(pkgdir)s"
+%%description
+No description
+%%files
+%%post
+PKG="%(pkgdir)s"
+REF="%(refroot)s"
+DIR="%(cmsroot)s"
+if [ ! -e "$REF/$PKG" ] ; then exit 0 ; fi
+mkdir -p "$DIR/$PKG"
+SCRAM_PROJECT=false
+if [ -d "$REF/$PKG/.SCRAM" ] ; then SCRAM_PROJECT=true ; fi
+for d in $(find "$REF/$PKG" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
+  if [ "$d" = "etc" ] && [ -e "$REF/$PKG/etc/profile.d" ]  ; then
+    mkdir "$DIR/$PKG/$d"
+    for sd in $(find "$REF/$PKG/$d" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
+      if [ "$sd" = "profile.d" ] && [ -e "$REF/$PKG/$d/$sd/init.sh" ] ; then
+        rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
+        chmod -R +w $DIR/$PKG/$d/$sd
+        find "$DIR/$PKG/$d/$sd" -name '*.sh' -o -name '*.csh' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
+      elif [ "$sd" = "scram.d" ] ; then
+        rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
+        chmod -R +w $DIR/$PKG/$d/$sd
+        find "$DIR/$PKG/$d/$sd" -name '*.xml' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
+      else
+        ln -s "$REF/$PKG/$d/$sd" "$DIR/$PKG/$d/$sd"
+      fi
+    done
+  elif [ "$d" = "tools" ] && [ -d "$REF/$PKG/$d/selected" ] ; then
+    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+    chmod -R +w $DIR/$PKG/$d/$sd
+    find "$DIR/$PKG/$d" -name '*.xml' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
+  elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = ".SCRAM" ] ; then
+    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+  elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = "config" ] ; then
+    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+  else
+    ln -s $REF/$PKG/$d $DIR/$PKG/$d
+  fi
+done
+if [ "$SCRAM_PROJECT" = "true" ] ; then
+  chmod -R +w "$DIR/$PKG/.SCRAM" "$DIR/$PKG/config"
+  $DIR/$PKG/config/SCRAM/projectAreaRename.pl "$REF" "$DIR" %(cmsplatf)s "$DIR/$PKG"
+fi
+"""
+
 # Macros for creating git repo out of sources and applying patches
 PATCH_SOURCE_MACROS = """
 %define package_init_source  if [ ! -d .git ] ; then git init && git add . && git commit -a -m 'init repo' && _PKGTOOLS_PKG_BASE_DIR=`/bin/pwd` && PKGTOOLS_PATCH_NUM=0 ; fi
