@@ -1125,15 +1125,7 @@ class PackageFactory (object):
     def __getPreamble (self, options):
         try:
             filename = join (options.cmsdist, "rpm-preamble.file")
-            prefile = open (filename)
-            if options.reference:
-              data = ["%%define refroot %s\n" % options.reference]
-              for l in  prefile.readlines():
-                if 's|\\\\Q%{instroot}\\\\E|' in l:
-                  l = l.replace('s|\\\\Q%{instroot}\\\\E|','s|\\\\Q%{refroot}\\\\E|%{cmsroot}|g;s|\\\\Q%{instroot}\\\\E|')
-                data.append(l)
-              return "".join(data)
-            else: return prefile.read()
+            return open (filename).read ()
         except:
             raise FileNotFound (filename)
 
@@ -2124,6 +2116,7 @@ class Package (object):
         self.spec = "\n".join([self.specPreHeader, 
                                SPEC_HEADER % self.__dict__, 
                                PKGFactory.preamble])
+        if self.options.reference: self.spec += format(SPEC_REFERENCE_REPO, reference_repo=self.options.reference)
         for section in self.sections.keys ():
             for subsection in self.sections[section].keys ():
                 sectionContents = self.sections[section][subsection].strip ("\n ")
@@ -2139,6 +2132,8 @@ class Package (object):
                     if (section in ["%build","%install","%prep"]) and (subsection==""):
                       secScript="cmsdist-%s.sh" % section[1:]
                       sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
+                    if self.options.reference and (section in ["%install"]):
+                      sectionContents+="\n%{relocateReference}\n"
                     self.spec += "\n\n%s %s %s\n" % (section, subsection, PKGFactory.sectionOptions[section])
                     self.spec += sectionContents
         self.spec = PKGFactory.postProcessSpec (self.spec)

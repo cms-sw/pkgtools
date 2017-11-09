@@ -23,20 +23,14 @@ for d in $(find "$REF/$PKG" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
     for sd in $(find "$REF/$PKG/$d" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
       if [ "$sd" = "profile.d" ] && [ -e "$REF/$PKG/$d/$sd/init.sh" ] ; then
         rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
-        chmod -R +w $DIR/$PKG/$d/$sd
-        find "$DIR/$PKG/$d/$sd" -name '*.sh' -o -name '*.csh' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
       elif [ "$sd" = "scram.d" ] ; then
         rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
-        chmod -R +w $DIR/$PKG/$d/$sd
-        find "$DIR/$PKG/$d/$sd" -name '*.xml' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
       else
         ln -s "$REF/$PKG/$d/$sd" "$DIR/$PKG/$d/$sd"
       fi
     done
   elif [ "$d" = "tools" ] && [ -d "$REF/$PKG/$d/selected" ] ; then
     rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
-    chmod -R +w $DIR/$PKG/$d/$sd
-    find "$DIR/$PKG/$d" -name '*.xml' -type f | xargs -n1 perl -p -i -e "s|\Q$REF\E|$DIR|g"
   elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = ".SCRAM" ] ; then
     rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
   elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = "config" ] ; then
@@ -45,10 +39,12 @@ for d in $(find "$REF/$PKG" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
     ln -s $REF/$PKG/$d $DIR/$PKG/$d
   fi
 done
+find $DIR/$PKG -type f | xargs --no-run-if-empty chmod +w
 if [ "$SCRAM_PROJECT" = "true" ] ; then
   chmod -R +w "$DIR/$PKG/.SCRAM" "$DIR/$PKG/config"
   $DIR/$PKG/config/SCRAM/projectAreaRename.pl "$REF" "$DIR" %(cmsplatf)s "$DIR/$PKG"
 fi
+find $DIR/$PKG -type f | xargs --no-run-if-empty grep -Il '%(refroot)s' | xargs -n1 --no-run-if-empty perl -p -i -e "s|\\Q%(refroot)s\\E|$DIR|g"
 """
 
 # Macros for creating git repo out of sources and applying patches
@@ -196,6 +192,10 @@ COMMANDS_CSH = {"SETV":     """set %(var)s="%(value)s"\n""",
                 "ALIAS":    """alias %(var)s "%(value)s"\n""",
                 "ALIAS_SH": "",
                 "ALIAS_CSH":"""alias %(var)s "%(value)s"\n"""}
+
+SPEC_REFERENCE_REPO = """
+%%define relocateReference find %%{instroot} -type f | xargs --no-run-if-empty grep -Il '%(reference_repo)s' | xargs -n1 --no-run-if-empty perl -p -i -e "s|\\\\Q%(reference_repo)s\\\\E|%%{cmsroot}|g;"
+"""
 
 SPEC_HEADER = """
 %%define pkgname        %(name)s
