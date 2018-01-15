@@ -2094,7 +2094,6 @@ class Package (object):
         for require in self.origBuildRequires:
             self.updateDependencies(require, self.origBuildDependencies, self.buildDependencies, True)
         for dep in self.dependencies:
-            if dep in self.origBuildDependencies: self.origBuildDependencies.remove(dep)
             if dep in self.buildDependencies:     self.buildDependencies.remove(dep)
         self.fullDependencies = self.dependencies + self.buildDependencies
         self.updateDependentCount()
@@ -3085,7 +3084,7 @@ def checkPackageInCache(pkg, scheduler):
   if pkgSources:
     scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
   buildActionDependencies = []
-  for p in getPackages(pkg.origDependencies + pkg.origBuildDependencies):
+  for p in getPackages(list(set(pkg.origDependencies + pkg.origBuildDependencies))):
     if not isPackageInstalled(p):
       scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
       buildActionDependencies.append("install-%s" % p.pkgName())
