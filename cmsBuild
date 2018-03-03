@@ -526,11 +526,16 @@ def download (source, dest, options):
       if not exists (join (dest, filename)):
         symlink (realFile, join (dest, filename))
       return True
-    cachedFile = "%s/SOURCES/%s/%s/%s" % (options.server.rstrip ("/"), options.repository, checksum, filename)
-    downloadOptions = DownloadOptions(options)
-    log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
-    getstatusoutput ("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
-    success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions, True)
+    srepos  = [options.repository]
+    srepos += ['cms'] if srepos[0].startswith('comp') else ['comp']
+    success = False
+    for repo in srepos:
+      cachedFile = "%s/SOURCES/%s/%s/%s" % (options.server.rstrip ("/"), repo, checksum, filename)
+      downloadOptions = DownloadOptions(options)
+      log ("Trying to fetch cached file: %s" % cachedFile, DEBUG)
+      getstatusoutput ("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
+      success = downloadHandlers["http"] (cachedFile, downloadDir, downloadOptions, True)
+      if success: break
     if not success:
       log ("Trying to fetch source file: %s" % source, DEBUG)
       success = downloadHandler (source, downloadDir, downloadOptions)
