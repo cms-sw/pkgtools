@@ -645,6 +645,14 @@ def parseNoCompilerLine(specLines):
             return True
     return False
 
+def parseNoDependencyLine(specLines):
+
+    findNoDepRe = re.compile ("^## NO_AUTO_DEPENDENCY")
+    for line in specLines:
+        if findNoDepRe.match(line):
+            return True
+    return False
+
 def parseBuildRequireToolfileLine(specLines):
 
     findBRToolfileRe = re.compile ("^## BUILDREQUIRE-TOOLFILE")
@@ -1878,6 +1886,7 @@ class Package (object):
         self.__syntax = None
         self.__preamble = ""
         self.buildRequireToolfile = False
+        self.noAutoDependency = False
    
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -1930,6 +1939,7 @@ class Package (object):
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append (self.compiler)
                 self.origDependencies.append (self.compiler)
+        self.noAutoDependency = parseNoDependencyLine(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
         self.compilerRealVersion = self.compiler.realVersion
@@ -2236,6 +2246,8 @@ class Package (object):
                       sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (secScript,secScript,sectionContents)
                   self.spec += "\n\n%s %s %s\n" % (section, subsection, self.sectionOptions[section])
                   self.spec += sectionContents
+                  if not self.noAutoDependency:
+                    if section in ["%install"]: self.spec += "\n%{?AutoSetupDependencies:%AutoSetupDependencies}"
         self.spec = self.__factory.postProcessSpec (self.spec)
 
         for subpackage in self.subpackages:
@@ -3719,6 +3731,7 @@ if __name__ == "__main__":
         fatal ("You have SCRAM runtime environment set. Please run it from a fresh shell.")
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
+    environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
 
     packages = {}
