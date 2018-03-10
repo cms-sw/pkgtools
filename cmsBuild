@@ -2248,6 +2248,7 @@ class Package (object):
                   self.spec += sectionContents
                   if not self.noAutoDependency:
                     if section in ["%install"]: self.spec += "\n%{?AutoSetupDependencies:%AutoSetupDependencies}"
+                    if section in ["%post"]: self.spec += "\n%{?AutoSetupDependenciesRelocate:%AutoSetupDependenciesRelocate}"
         self.spec = self.__factory.postProcessSpec (self.spec)
 
         for subpackage in self.subpackages:
