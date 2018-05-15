@@ -1918,10 +1918,10 @@ class Package (object):
         self.parseRevision ()
         compilerName = self.options.compilerName
         self.compilerName = compilerName
-        self.expandSpec ()
         if self.name == compilerName:
             self.requiresStatement = ""
             self.compiler = self
+            self.expandSpec ()
         else:
             if self.__packageCache.has_key (compilerName):
                 self.compiler = self.__packageCache[compilerName]
@@ -1936,6 +1936,7 @@ class Package (object):
                     self.compiler = self.__factory.createWithSpec (compilerName)
                     self.compilerRealVersion = self.compiler.realVersion
                 self.__packageCache[compilerName] = self.compiler
+            self.expandSpec ()
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append (self.compiler)
                 self.origDependencies.append (self.compiler)
@@ -2991,7 +2992,8 @@ def buildPackage(pkg, scheduler):
   if err:
     return "ERROR: unable to find working rpmbuild"
  
-  rpmbuildCommand = "%(rpmenv)s ; TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+  rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git ; %(rpmenv)s ; " \
+                    " TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                     " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                     " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
   rpmbuildCommand = rpmbuildCommand.strip()
