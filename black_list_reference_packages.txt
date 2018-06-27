@@ -5,4 +5,5 @@ rpm
 SCRAMV1
 cms-common
 cms-git-tools
-
+.+-toolfile
+.+-tool-conf
