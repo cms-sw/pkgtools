@@ -710,9 +710,6 @@ class NotCorrectlyBootstrapped (Exception):
 class UnknownCompiler (Exception):
     pass
 
-# The initial id for a given tag. Change to 1 if you always want to have -cms.
-INITIAL_ID = 0
-    
 def tagToId (tag, origTag):
     return int ((tag or 0) and (tag.replace (origTag, "") or 1))
 
@@ -893,7 +890,9 @@ class TagCacheAptImpl (object):
             checksum = getPkgChecksumFile (linkName, self.options)
             tempTag = getPkgName(package).replace (pkgInfo.id (), "").strip ("-")
             tags[tempTag] = checksum
-        for i in itertools.count(INITIAL_ID):
+        # Use --force-tag to always append the tag (e.g. "-cms") to the package name,
+        # even if it is the first version being built.
+        for i in itertools.count(1 if self.options.forcetag else 0):
             finalTag = idToTag (i, tag)
             if finalTag not in tags:
                 break
@@ -2386,6 +2385,11 @@ def parseOptions():
                       metavar="NAME",
                       help="Name of the tag. Default is constructed from the --repository <repo>.",
                       default="")
+    parser.add_option("--force-tag",
+                      dest="forcetag",
+                      action="store_true",
+                      help="Always append the tag to the package name. Default is to build the first version of package without the tag.",
+                      default=False)
     parser.add_option("--builders",
                       dest="workersPoolSize",
                       metavar="N",
