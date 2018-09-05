@@ -644,7 +644,8 @@ def download (source, dest, options):
         symlink (realFile, join (dest, filename))
       return True
     srepos  = [options.repository]
-    srepos += ['cms'] if srepos[0].startswith('comp') else ['comp']
+    for exrepo in ['cms', 'comp', 'cms.week0', 'cms.week1']:
+      if not exrepo in srepos: srepos.append(exrepo)
     success = False
     for repo in srepos:
       cachedFile = "%s/SOURCES/%s/%s/%s" % (options.server.rstrip ("/"), repo, checksum, filename)
