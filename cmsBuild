@@ -665,7 +665,7 @@ def download (source, dest, options):
         f.write ("%s\n" % source)
         f.close ()
         if exists (realFile) and not exists (join (dest, filename)):
-            symlink (realFile, join (dest, filename))        
+            symlink (realFile, join (dest, filename))
     return success
 
 class MalformedUrl (Exception):
@@ -1067,7 +1067,7 @@ class ReadOnlyDict (dict):
 class HeaderMatchingRegexps (object):
     def __init__ (self):
         self.REQUIRES_REGEXP = re.compile ("^Requires: (.*)")
-        self.REMOTE_SOURCE_REGEXP = re.compile ("^[Ss]ource[0-9]*: (.*:.*/.*)")
+        self.REMOTE_SOURCE_REGEXP = re.compile ("^([Ss]ource[0-9]*): (.*:.*/.*)")
         self.REMOTE_PATCH_REGEXP = re.compile ("^[Pp]atch[0-9]*: (.*:.*/.*)")
         self.LOCAL_SOURCE_REGEXP = re.compile ("^[Ss]ource[0-9]*: (.*)")
         self.LOCAL_PATCH_REGEXP = re.compile ("^[Pp]atch[0-9]*: (.*)")
@@ -1759,6 +1759,7 @@ class Package (object):
         self.imports = []
         self.buildrequires = []
         self.sources = []
+        self.sourcesNumbers = {}
         self.patches = []
         self.pkgreqs = "%{nil}"
         self.directpkgreqs = "%{nil}"
@@ -1850,7 +1851,7 @@ class Package (object):
         self.createDefaultSections ()
         self.parseSections ()
         self.dumpSpec ()
-        self.origRequires, self.sources, self.patches, self.origBuildRequires = self.getRequiresAndSources ()
+        self.origRequires, self.sources, self.patches, self.origBuildRequires, self.sourcesNumbers = self.getRequiresAndSources ()
         self.parseRequires ()
         self.dumpSpec ()
         # FIXME: saveSpec should really be done once.
@@ -2307,14 +2308,21 @@ class Package (object):
         def fixSource(source):
           if source.startswith("git:") and not source.startswith("git://"): source = "git://" + source[4:]
           return source
+        sourcesNumbers = {}
         for line in popen (queryCommand).readlines ():
             line = re.sub ("[\s]+", " ", line).strip ("\n\t ")
             for rule, target in matchers:
                 match = rule.match (line)
                 if not match:
                     continue
-                target.extend ([ element if regexps.REMOTE_SOURCE_REGEXP!=rule else fixSource(element)
-                                for element in match.group (1).split ()])
+                if regexps.REMOTE_SOURCE_REGEXP!=rule:
+                  target.extend ([ element for element in match.group (1).split ()])
+                else:
+                  for src_num, url in [match.groups()]:
+                    for element in url.split():
+                      element = fixSource(element.strip())
+                      target.append(element)
+                      sourcesNumbers[element]=src_num
                 break
         cmsdistPath = abspath (self.options.cmsdist)
         # If no site is set, simply returns the original dependency name.
@@ -2338,8 +2346,8 @@ class Package (object):
                          for source in localSources])
         patches.extend ([join (cmsdistPath, patch + ".patch") 
                         for patch in localPatches])
-        PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps)
-        return (deps, sources, patches, buildDeps)
+        PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps, sourcesNumbers)
+        return (deps, sources, patches, buildDeps, sourcesNumbers)
 
 def parseOptions():
     parser = OptionParser(usage="""
