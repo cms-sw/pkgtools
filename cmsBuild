@@ -2,7 +2,7 @@
 #
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
-
+import pdb  # TODO-zm remove
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
@@ -634,7 +634,22 @@ class DownloadOptions(object):
         self.cmsdist = options.cmsdist
 
 
-def download(source, dest, options):
+def download(source, dest, options, pkg=None):
+    # FIXME `options` are the same as `pkg.options`
+    # TODO-zm
+    # /root/source
+    # root - pkg_name
+    # source - pkg_source
+    # options - argParse options
+    # TODO-zm
+    def parseOptions (list):
+        return
+
+    pdb.set_trace()  #TODO-zm revmove
+    """
+    TODO If pkg_name pkg_source in options, try to download from path
+    """
+
     # Syntactic sugar to allow the following urls for tag collector:
     #
     # cmstc:[base.]release[.tagset[.tagset[...]]]/src.tar.gz
@@ -2520,6 +2535,14 @@ def parseOptions():
                       help="When uploading, copy the temporary directory to the production one.",
                       default=False)
     advancedBuildOptions = OptionGroup(parser, "Advanced build options")
+    advancedBuildOptions.add_option("--source",
+                                    dest="localSources",
+                                    action="append",
+                                    # nargs='+', works only with newer argpars
+                                    # type="str",
+                                    help="Overwrite given package's source location to local directory "
+                                         "(package:source=directory, can be repeated multiple times).",
+                                    default=None)
     advancedBuildOptions.add_option("--use-system-compiler",
                                     dest="systemCompiler",
                                     action="store_true",
@@ -2783,7 +2806,7 @@ def fetchSources(pkg, scheduler):
     for url in downloadables:
         if urlRe.match(url):
             try:
-                success = download(url, sourcedir, pkg.options)
+                success = download(url, sourcedir, pkg.options, pkg)
             except MalformedUrl, e:
                 return str(e)
         else:
@@ -3782,6 +3805,42 @@ def rpmCacheUpdate(opts, cache=None, rpm_env=None):
             cache[n] = [r, c]
     return
 
+def checkOptionsLocalSource(opts):
+    """
+    checks if opts.localSources is correct format `package:source=directory` and process it
+    Could be made callback function in advancedBuildOptions.add_option
+    """
+    # check this option is given
+    if opts.localSources is None:
+        return  # opts.localSources is empty, return
+    sourceOptionDict = {}
+    for sourceOption in opts.localSources:
+        # check if sourceOption in correct format
+        if '=' not in sourceOption :
+            fatal("ERROR: --source option is incorrectly given. Should be 'package:source=directory'.")
+        pkg_and_source, dir_path = sourceOption.split("=")
+        pkg = source = None
+        if ":" in pkg_and_source:
+            pkg, source = pkg_and_source.split(":")
+        else:
+            pkg = pkg_and_source
+            source = "Source"
+        #check if given directory path is correct
+        if not exists(dir_path):
+            fatal("WARNING: the following direcotry for package %s and source %s does not exist: %s" % (pkg, source, dir_path))
+        if not os.path.isdir(dir_path):
+            fatal("WARNING: the given path for package %s and source %s is not a directory: %s" % (pkg, source, dir_path))
+        # TODO-zm should check if its empty directory?
+        if len(os.listdir(dir_path)) == 0:
+            log("WARNING: the following direcotry for package %s and source %s is empty: %s" % (pkg, source, dir_path))
+
+        # put extracted options to dictory
+        if pkg not in sourceOptionDict:
+            sourceOptionDict[pkg]= {source: dir_path}
+        else:
+            sourceOptionDict[pkg][source]=dir_path
+        opts.localSources = sourceOptionDict
+
 
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
@@ -3792,6 +3851,7 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
+    checkOptionsLocalSource(opts)
 
     packages = {}
     # tags_cache = TagCacheAptImpl (opts)
