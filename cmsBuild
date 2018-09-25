@@ -2535,11 +2535,15 @@ def parseOptions():
                       help="When uploading, copy the temporary directory to the production one.",
                       default=False)
     advancedBuildOptions = OptionGroup(parser, "Advanced build options")
+    # TODO-zm for dumping out sources
+    advancedBuildOptions.add_option("--sources",
+                                    dest="sources",
+                                    action="store_true",
+                                    help="Outputs formatted sources. Do not build.",
+                                    default=False)
     advancedBuildOptions.add_option("--source",
                                     dest="localSources",
                                     action="append",
-                                    # nargs='+', works only with newer argpars
-                                    # type="str",
                                     help="Overwrite given package's source location to local directory "
                                          "(package:source=directory, can be repeated multiple times).",
                                     default=None)
@@ -3340,7 +3344,12 @@ def build(opts, args, factory):
     if opts.specsOnly:
         log("SPECS files written")
         sys.exit(0)
-
+    if opts.sources:
+        for pkg in packages:
+            log("Sources for %s are :" % pkg.name)
+            for key, value in pkg.sourcesNumbers.iteritems():
+                log("%s : %s" % (value, key))
+        return
     if opts.pretend:
         log("Option --pretend specified. Not building.")
         return
