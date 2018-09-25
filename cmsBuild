@@ -3823,14 +3823,13 @@ def checkOptionsLocalSource(opts):
             source = "Source"
         #check if given directory path is correct
         if not exists(dir_path):
-            fatal("WARNING: the following direcotry for package %s and source %s does not exist: %s" % (pkg, source, dir_path))
+            fatal("WARNING: the following directory for package %s and source %s does not exist: %s" % (pkg, source, dir_path))
         if not os.path.isdir(dir_path):
             fatal("WARNING: the given path for package %s and source %s is not a directory: %s" % (pkg, source, dir_path))
-        # TODO-zm should check if its empty directory?
+        # if directory is empty, say its fatal
         if len(os.listdir(dir_path)) == 0:
-            log("WARNING: the following direcotry for package %s and source %s is empty: %s" % (pkg, source, dir_path))
-
-        # put extracted options to dictory
+            fatal("WARNING: the following directory for package %s and source %s is empty: %s" % (pkg, source, dir_path))
+        # put extracted options to dictionary
         if pkg not in sourceOptionDict:
             sourceOptionDict[pkg]= {source: dir_path}
         else:
