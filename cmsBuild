@@ -2967,10 +2967,6 @@ def scheduleInstallPackage(pkg, scheduler):
 
     scheduler.log("Checking if %s is cached." % pkg.name)
     actionName = "install-%s" % pkg.pkgName()
-    if checkIfInstalled(pkg):
-        scheduler.log("%s already in rpm database. Not building." % pkg.name)
-        scheduler.serial(actionName, [], installDoneDummy)
-        return True
     if checkCanInstallRpm(pkg):
         scheduler.log("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName())
         scheduler.serial(actionName, [], installRpm, pkg, bootstrapped)
