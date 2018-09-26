@@ -3823,7 +3823,7 @@ def checkOptionsLocalSource(opts):
         # check if sourceOption in correct format
         if '=' not in sourceOption :
             fatal("ERROR: --source option is incorrectly given. Should be 'package:source=directory'.")
-        pkg_and_source, dir_path = sourceOption.split("=")
+        pkg_and_source, source_path = sourceOption.split("=")
         pkg = source = None
         if ":" in pkg_and_source:
             pkg, source = pkg_and_source.split(":")
@@ -3831,18 +3831,18 @@ def checkOptionsLocalSource(opts):
             pkg = pkg_and_source
             source = "Source"
         #check if given directory path is correct
-        if not exists(dir_path):
-            fatal("WARNING: the following directory for package %s and source %s does not exist: %s" % (pkg, source, dir_path))
-        if not os.path.isdir(dir_path):
-            fatal("WARNING: the given path for package %s and source %s is not a directory: %s" % (pkg, source, dir_path))
-        # if directory is empty, say its fatal
-        if len(os.listdir(dir_path)) == 0:
-            fatal("WARNING: the following directory for package %s and source %s is empty: %s" % (pkg, source, dir_path))
+        if not exists(source_path):
+            fatal("WARNING: the following path for package %s and source %s does not exist: %s" % (pkg, source, source_path))
+        if not os.path.isdir(source_path) or not os.path.isfile(source_path):
+            fatal("WARNING: the given path for package %s and source %s is not a directory or a file: %s" % (pkg, source, source_path))
+        # if it is an empty directory is empty, fail
+        if os.path.isdir(source_path) and len(os.listdir(source_path)) == 0:
+            fatal("WARNING: the following directory for package %s and source %s is empty: %s" % (pkg, source, source_path))
         # put extracted options to dictionary
         if pkg not in sourceOptionDict:
-            sourceOptionDict[pkg]= {source: dir_path}
+            sourceOptionDict[pkg]= {source: source_path}
         else:
-            sourceOptionDict[pkg][source]=dir_path
+            sourceOptionDict[pkg][source]=source_path
         opts.localSources = sourceOptionDict
 
 
