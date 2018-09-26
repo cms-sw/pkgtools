@@ -636,19 +636,8 @@ class DownloadOptions(object):
 
 def download(source, dest, options, pkg=None):
     # FIXME `options` are the same as `pkg.options`
-    # TODO-zm
-    # /root/source
-    # root - pkg_name
-    # source - pkg_source
-    # options - argParse options
-    # TODO-zm
-    def parseOptions (list):
-        return
-
-    pdb.set_trace()  #TODO-zm revmove
-    """
-    TODO If pkg_name pkg_source in options, try to download from path
-    """
+    source_name = pkg.sourcesNumbers[source] if pkg else None
+    pdb.set_trace()  #TODO-zm removex
 
     # Syntactic sugar to allow the following urls for tag collector:
     #
@@ -2535,7 +2524,6 @@ def parseOptions():
                       help="When uploading, copy the temporary directory to the production one.",
                       default=False)
     advancedBuildOptions = OptionGroup(parser, "Advanced build options")
-    # TODO-zm for dumping out sources
     advancedBuildOptions.add_option("--sources",
                                     dest="sources",
                                     action="store_true",
@@ -3835,7 +3823,7 @@ def checkOptionsLocalSource(opts):
             fatal("WARNING: the following path for package %s and source %s does not exist: %s" % (pkg, source, source_path))
         if not os.path.isdir(source_path) or not os.path.isfile(source_path):
             fatal("WARNING: the given path for package %s and source %s is not a directory or a file: %s" % (pkg, source, source_path))
-        # if it is an empty directory is empty, fail
+        # if it is an empty directory, fail
         if os.path.isdir(source_path) and len(os.listdir(source_path)) == 0:
             fatal("WARNING: the following directory for package %s and source %s is empty: %s" % (pkg, source, source_path))
         # put extracted options to dictionary
