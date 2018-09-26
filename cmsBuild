@@ -2,7 +2,6 @@
 #
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
-import pdb  # TODO-zm remove
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
@@ -634,6 +633,49 @@ class DownloadOptions(object):
         self.cmsdist = options.cmsdist
 
 
+def getLocalSources(pkg, source_name, downloadDir, filename):
+    # check if given package's source location is overwritten to local file
+    options = pkg.options
+    local_source_dict = options.localSources
+    # TODO-zm what todo for Source and Source0 being equal
+    if (not pkg.name in local_source_dict) or (not source_name in local_source_dict[pkg.name]):
+        return
+    log("Package %s source %s is taken from local path  %s" % pkg.name, source_name)
+
+    #TODO-zm
+    """
+    .rpm 4
+    none 20
+    .supp 1
+    .tgz 84
+    .tar.gz 149
+    .bz2 24
+    .py 1
+    .hpp 2
+    .tar.xz 2
+    .zip 10
+    """
+    if "TODO it is  file":
+        print "Check it as a file"
+
+    if filename.endswith(".tgz") or filename.endswith(".tar.gz"):
+        return
+    if filename.endswith(".tar.xz"):
+        return
+    elif filename.endswith(".bz2"):
+        return
+    elif filename.endswith(".zip"):
+        return
+    elif filename.endswith(".rpm"):
+        print"Sorry, will not override"
+    else:
+        fatal("DEVELOP ERROR file extension for :")
+
+    # TODO-zm download a from path
+    # turiu supakuoti tame pathe esancius duomenis ir numuvinti localiai
+    return
+
+
 def download(source, dest, options, pkg=None):
     # FIXME `options` are the same as `pkg.options`
     source_name = pkg.sourcesNumbers[source] if pkg else None
@@ -680,6 +722,9 @@ def download(source, dest, options, pkg=None):
             raise downloadDir
 
     realFile = join(downloadDir, filename)
+    if source_name:
+        getLocalSources(pkg, source_name, downloadDir, filename)  # todo to be called
+
     if exists(realFile):
         if not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
