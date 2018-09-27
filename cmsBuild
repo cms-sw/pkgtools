@@ -3856,7 +3856,7 @@ def checkOptionsLocalSource(opts):
         if not exists(source_path):
             fatal("The following path for package %s and source %s does not exist: %s" % (
                 pkg, source, source_path))
-        if not os.path.isdir(source_path) or not os.path.isfile(source_path):
+        if not os.path.isdir(source_path) and not os.path.isfile(source_path):
             fatal("The given path for package %s and source %s is not a directory or a file: %s" % (
                 pkg, source, source_path))
         # if it is an empty directory, fail
