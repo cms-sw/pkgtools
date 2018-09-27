@@ -3854,14 +3854,14 @@ def checkOptionsLocalSource(opts):
             source = "Source"
         # check if given directory path is correct
         if not exists(source_path):
-            fatal("WARNING: the following path for package %s and source %s does not exist: %s" % (
+            fatal("The following path for package %s and source %s does not exist: %s" % (
                 pkg, source, source_path))
         if not os.path.isdir(source_path) or not os.path.isfile(source_path):
-            fatal("WARNING: the given path for package %s and source %s is not a directory or a file: %s" % (
+            fatal("The given path for package %s and source %s is not a directory or a file: %s" % (
                 pkg, source, source_path))
         # if it is an empty directory, fail
         if os.path.isdir(source_path) and len(os.listdir(source_path)) == 0:
-            fatal("WARNING: the following directory for package %s and source %s is empty: %s" % (
+            fatal("The following directory for package %s and source %s is empty: %s" % (
                 pkg, source, source_path))
         # put extracted options to dictionary
         if pkg not in sourceOptionDict:
