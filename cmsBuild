@@ -648,7 +648,7 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     elif os.path.isfile(local_source_path):
         error, output = getstatusoutput("cp -f %s %s/%s" % (local_source_path, downloadDir, filename))
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
-        error, output = getstatusoutput("tar -cvf %s/%s %s" % (downloadDir, filename, local_source_path))
+        error, output = getstatusoutput("tar -czf %s/%s %s" % (downloadDir, filename, local_source_path))
     elif filename.endswith(".tar.xz"):
         error, output = getstatusoutput("tar -cJf %s/%s %s" % (downloadDir, filename, local_source_path))
     elif filename.endswith(".bz2"):
