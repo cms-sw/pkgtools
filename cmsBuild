@@ -637,42 +637,31 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     # check if given package's source location is overwritten to local file
     options = pkg.options
     local_source_dict = options.localSources
-    # TODO-zm what todo for Source and Source0 being equal
     if (not pkg.name in local_source_dict) or (not source_name in local_source_dict[pkg.name]):
         return
     log("Package %s source %s is taken from local path  %s" % pkg.name, source_name)
 
-    # TODO-zm
-    """
-    .rpm 4
-    none 20
-    .supp 1
-    .tgz 84
-    .tar.gz 149
-    .bz2 24
-    .py 1
-    .hpp 2
-    .tar.xz 2
-    .zip 10
-    """
-    if "TODO it is  file":
-        print "Check it as a file"
-
-    if filename.endswith(".tgz") or filename.endswith(".tar.gz"):
+    local_source_path = local_source_dict[pkg.name][source_name]
+    if filename.endswith(".rpm") or line.endswith("none"):
+        log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
-    if filename.endswith(".tar.xz"):
-        return
+    elif os.path.isfile(local_source_path):
+        error, output = getstatusoutput("cp -f %s %s/%s" % (local_source_path, downloadDir, filename))
+    elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
+        error, output = getstatusoutput("tar -cvf %s/%s %s" % (downloadDir, filename, local_source_path))
+    elif filename.endswith(".tar.xz"):
+        error, output = getstatusoutput("tar -cJf %s/%s %s" % (downloadDir, filename, local_source_path))
     elif filename.endswith(".bz2"):
-        return
+        error, output = getstatusoutput("tar -cvjSf %s/%s %s" % (downloadDir, filename, local_source_path))
     elif filename.endswith(".zip"):
-        return
-    elif filename.endswith(".rpm"):
-        print"Sorry, will not override"
+        error, output = getstatusoutput("zip -r %s/%s %s" % (downloadDir, filename, local_source_path))
     else:
-        fatal("DEVELOP ERROR file extension for :")
+        fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
 
-    # TODO-zm download a from path
-    # turiu supakuoti tame pathe esancius duomenis ir numuvinti localiai
+    if error:
+        fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
+              "\n\t filename: %s \n\t source: %s \n\t local source path: %s " %
+              (error, output, filename, source_name, local_source_path))
     return
 
 
@@ -722,7 +711,7 @@ def download(source, dest, options, pkg=None):
 
     realFile = join(downloadDir, filename)
     if source_name:
-        getLocalSources(pkg, source_name, downloadDir, filename)  # todo to be called
+        getLocalSources(pkg, source_name, downloadDir, filename)
 
     if exists(realFile):
         if not exists(join(dest, filename)):
@@ -3879,6 +3868,12 @@ def checkOptionsLocalSource(opts):
             sourceOptionDict[pkg] = {source: source_path}
         else:
             sourceOptionDict[pkg][source] = source_path
+
+        # to solve inconsistent Source and Source0 naming in recipes
+        if source is "Source":
+            sourceOptionDict[pkg]["Source0"] = source_path
+        elif source is "Source0":
+            sourceOptionDict[pkg]["Source"] = source_path
         opts.localSources = sourceOptionDict
 
 
