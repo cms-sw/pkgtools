@@ -641,9 +641,9 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
         return
 
     local_source_path = local_source_dict[pkg.name][source_name]
-    log("Package %s source %s is taken from local path  %s" % pkg.name, source_name, local_source_path)
+    log("Package %s source %s is taken from local path  %s" % (pkg.name, source_name, local_source_path))
     cmd = None
-    if filename.endswith(".rpm") or line.endswith("none"):
+    if filename.endswith(".rpm") or filename.endswith("none"):
         log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
     elif os.path.isfile(local_source_path):
