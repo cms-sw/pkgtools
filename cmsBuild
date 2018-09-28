@@ -639,25 +639,27 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     local_source_dict = options.localSources
     if (not pkg.name in local_source_dict) or (not source_name in local_source_dict[pkg.name]):
         return
-    log("Package %s source %s is taken from local path  %s" % pkg.name, source_name)
 
     local_source_path = local_source_dict[pkg.name][source_name]
+    log("Package %s source %s is taken from local path  %s" % pkg.name, source_name, local_source_path)
+    cmd = None
     if filename.endswith(".rpm") or line.endswith("none"):
         log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
     elif os.path.isfile(local_source_path):
-        error, output = getstatusoutput("cp -f %s %s/%s" % (local_source_path, downloadDir, filename))
+        cmd = "cp -f %s %s/%s" % (local_source_path, downloadDir, filename)
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
-        error, output = getstatusoutput("tar -czf %s/%s %s" % (downloadDir, filename, local_source_path))
+        cmd = "tar -czf %s/%s %s" % (downloadDir, filename, local_source_path)
     elif filename.endswith(".tar.xz"):
-        error, output = getstatusoutput("tar -cJf %s/%s %s" % (downloadDir, filename, local_source_path))
+        cmd = "tar -cJf %s/%s %s" % (downloadDir, filename, local_source_path)
     elif filename.endswith(".bz2"):
-        error, output = getstatusoutput("tar -cvjSf %s/%s %s" % (downloadDir, filename, local_source_path))
+        cmd = "tar -cvjSf %s/%s %s" % (downloadDir, filename, local_source_path)
     elif filename.endswith(".zip"):
-        error, output = getstatusoutput("zip -r %s/%s %s" % (downloadDir, filename, local_source_path))
+        cmd = "zip -r %s/%s %s" % (downloadDir, filename, local_source_path)
     else:
         fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
 
+    error, output = getstatusoutput(cmd)
     if error:
         fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
               "\n\t filename: %s \n\t source: %s \n\t local source path: %s " %
