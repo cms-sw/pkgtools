@@ -710,7 +710,7 @@ def download(source, dest, options, pkg=None):
             raise downloadDir
 
     realFile = join(downloadDir, filename)
-    if source_name:
+    if source_name and options.localSources:
         getLocalSources(pkg, source_name, downloadDir, filename)
 
     if exists(realFile):
