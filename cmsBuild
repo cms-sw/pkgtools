@@ -642,22 +642,24 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
         return
 
     local_source_path = local_source_dict[pkg_name][source_name]
-
     log("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
     cmd = None
+    ls_basename = os.path.basename(local_source_path)
+    ls_dirname = os.path.dirname(local_source_path)
     if filename.endswith(".rpm") or filename.endswith("none"):
         log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
+
     elif os.path.isfile(local_source_path):
         cmd = "cp -f %(local_source_path)s %(downloadDir)s/%(filename)s" % locals()
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
-        cmd = "cd %(local_source_path)s; tar -czf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
+        cmd = "cd %(ls_dirname)s; tar -czf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
     elif filename.endswith(".tar.xz"):
-        cmd = "cd %(local_source_path)s; tar -cJf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
+        cmd = "cd %(ls_dirname)s; tar -cJf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
     elif filename.endswith(".bz2"):
-        cmd = "cd %(local_source_path)s; tar -cvjSf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
+        cmd = "cd %(ls_dirname)s; tar -cvjSf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
     elif filename.endswith(".zip"):
-        cmd = "cd %(local_source_path)s; zip -r %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
+        cmd = "cd %(ls_dirname)s; zip -r %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
     else:
         fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
 
