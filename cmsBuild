@@ -637,28 +637,31 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     # check if given package's source location is overwritten to local file
     options = pkg.options
     local_source_dict = options.localSources
-    if (not pkg.name in local_source_dict) or (not source_name in local_source_dict[pkg.name]):
+    pkg_name = pkg.name
+    if (not pkg_name in local_source_dict) or (not source_name in local_source_dict[pkg_name]):
         return
 
-    local_source_path = local_source_dict[pkg.name][source_name]
-    log("Package %s source %s is taken from local path  %s" % (pkg.name, source_name, local_source_path))
+    local_source_path = local_source_dict[pkg_name][source_name]
+
+    log("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
     cmd = None
     if filename.endswith(".rpm") or filename.endswith("none"):
         log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
     elif os.path.isfile(local_source_path):
-        cmd = "cp -f %s %s/%s" % (local_source_path, downloadDir, filename)
+        cmd = "cp -f %(local_source_path)s %(downloadDir)s/%(filename)s" % locals()
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
-        cmd = "tar -czf %s/%s %s" % (downloadDir, filename, local_source_path)
+        cmd = "cd %(local_source_path)s; tar -czf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
     elif filename.endswith(".tar.xz"):
-        cmd = "tar -cJf %s/%s %s" % (downloadDir, filename, local_source_path)
+        cmd = "cd %(local_source_path)s; tar -cJf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
     elif filename.endswith(".bz2"):
-        cmd = "tar -cvjSf %s/%s %s" % (downloadDir, filename, local_source_path)
+        cmd = "cd %(local_source_path)s; tar -cvjSf %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
     elif filename.endswith(".zip"):
-        cmd = "zip -r %s/%s %s" % (downloadDir, filename, local_source_path)
+        cmd = "cd %(local_source_path)s; zip -r %(downloadDir)s/%(filename)s %(local_source_path)s; cd -" % locals()
     else:
         fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
 
+    log("The command executed to package local sources: %s" % cmd)
     error, output = getstatusoutput(cmd)
     if error:
         fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
