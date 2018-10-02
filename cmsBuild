@@ -641,7 +641,7 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     if (not pkg_name in local_source_dict) or (not source_name in local_source_dict[pkg_name]):
         return
 
-    local_source_path = local_source_dict[pkg_name][source_name]
+    local_source_path = local_source_dict[pkg_name][source_name].rstrip("/$")
     log("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
     cmd = None
     ls_basename = os.path.basename(local_source_path)
