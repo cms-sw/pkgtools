@@ -717,6 +717,7 @@ def download(source, dest, options, pkg=None):
             raise downloadDir
 
     realFile = join(downloadDir, filename)
+    # This will will use source from local file system if --source for package was passed
     if source_name and options.localSources:
         getLocalSources(pkg, source_name, downloadDir, filename)
 
@@ -2151,7 +2152,19 @@ class Package(object):
             filename = join(abspath(self.options.cmsdist), source)
             if exists(filename):
                 checksumCalculator.addFile(filename)
-        self.checksum = checksumCalculator.getChecksum()
+
+        # FIXME could be part of checksumCalculator
+        if self.options.localSources and self.name in self.options.localSources:
+            # recalculate hash based on file system if --source flag for pkg
+            source_v_list = []
+            for source_k, source_v in self.options.localSources[self.name].iteritems():
+                source_v_list.append(source_v)
+            cmd = "tar cf - %s 2>&1 | md5sum" % (" ".join(source_v_list))
+            exit, result = getstatusoutput(cmd)
+            self.checksum = result.split()[0]
+        else:
+            self.checksum = checksumCalculator.getChecksum()
+
         self.version = calculateHumanReadableVersion(self)
         if self.name == self.options.pipPackage:
             global pip_package_env_script
