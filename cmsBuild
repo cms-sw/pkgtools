@@ -535,14 +535,14 @@ def downloadPip(source, dest, options):
     error, output = getstatusoutput(comm)
     if error:
         log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
-        source, comm, error, output))
+            source, comm, error, output))
         return False
 
     comm2 = 'cd ' + tempdir + '; tar cfz ' + dest + '/' + tarball + ' files.list `cat files.list`'
     error, output = getstatusoutput(comm2)
     if error:
         log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
-        source, comm, error, output))
+            source, comm, error, output))
         return False
 
     return True
@@ -1238,7 +1238,7 @@ class PackageFactory(object):
             raise FileNotFound(filename)
         pkg = None
         specCache = "%s/specCache/%s.%s" % (
-        self.options.tempdir, pkgName, sha256(self.__basePackageHash + str(specLines)).hexdigest())
+            self.options.tempdir, pkgName, sha256(self.__basePackageHash + str(specLines)).hexdigest())
         forceRecreate = False
         while True:
             if forceRecreate or (not exists(specCache)):
@@ -1762,7 +1762,7 @@ class SubPackage(object):
         self.patches = parent.patches
         self.rpmdir = parent.rpmdir
         self.rpmfilename = '%s/%s+%s+%s-%s-%s.%s.rpm' % (
-        self.cmsplatf, self.group, self.name, self.version, '1', self.pkgRevision, self.cmsplatf)
+            self.cmsplatf, self.group, self.name, self.version, '1', self.pkgRevision, self.cmsplatf)
         self.srpmfilename = parent.srpmfilename
         self.pkginstroot = parent.pkginstroot
         self.parent = parent
@@ -2246,7 +2246,7 @@ class Package(object):
                         if (section in ["%build", "%install", "%prep"]) and (subsection == ""):
                             secScript = "cmsdist-%s.sh" % section[1:]
                             sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (
-                            secScript, secScript, sectionContents)
+                                secScript, secScript, sectionContents)
                         if self.options.reference and (section in ["%install"]):
                             sectionContents += "\n%{relocateReference}\n"
                         self.spec += "\n\n%s %s %s\n" % (section, subsection, PKGFactory.sectionOptions[section])
@@ -2400,8 +2400,8 @@ class Package(object):
         localPatches = []
         buildDeps = []
         queryCommand = "%s ; %s rpm -q --info --specfile %s %s 2>/dev/null" % (
-        rpmEnvironmentScript, getCommandPrefix(self.options),
-        self.tmpspec, self.options.rpmQueryDefines)
+            rpmEnvironmentScript, getCommandPrefix(self.options),
+            self.tmpspec, self.options.rpmQueryDefines)
         regexps = PKGFactory.headerMatchingRegexp
         matchers = [(regexps.REQUIRES_REGEXP, deps),
                     (regexps.REMOTE_SOURCE_REGEXP, sources),
@@ -2803,7 +2803,7 @@ def checkIfInstalled(pkg):
         revision = rpm_db_cache[pkg.pkgName()][0]
         if revision >= pkg.pkgRevision:
             log("RPM %s found in RPM db with Revision %s (bigger than pkgRevision = %s)" % (
-            pkg.pkgName(), revision, pkg.pkgRevision), DEBUG)
+                pkg.pkgName(), revision, pkg.pkgRevision), DEBUG)
             return True
         return False
     log("RPM %s found in RPM db." % pkg.pkgName(), DEBUG)
@@ -2954,7 +2954,7 @@ def scheduleInstallPackage(pkg, scheduler):
         return True
     if checkIfOnServer(pkg):
         scheduler.log("%s is available from remote repository \"%s\". Not building. Downloading and installing..." % (
-        pkg.name, pkg.options.repository))
+            pkg.name, pkg.options.repository))
         scheduler.serial(actionName, [], installApt, pkg, scheduler)
         return True
     return False
@@ -2993,7 +2993,7 @@ def buildPackage(pkg, scheduler):
     # if this is a subpackge do not try to build it, it should have been built as part of its parent
     if pkg.parent:
         scheduler.log("Not building Subpackage %s, it should have been built as part of Package %s." % (
-        pkg.name, pkg.parent.name))
+            pkg.name, pkg.parent.name))
         return
 
     scheduler.log("Creating directory %s if not existing." % pkg.builddir)
@@ -3053,7 +3053,7 @@ def buildPackage(pkg, scheduler):
             return "Error happened before any log output."
         logLines = open(logfile).readlines()
         return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
-        pkg.name, logfile, "".join(logLines[-20:]))
+            pkg.name, logfile, "".join(logLines[-20:]))
     if output:
         return output
     scheduler.log("Build successful.")
@@ -3106,7 +3106,7 @@ def installPackage(pkg, scheduler):
                 if not d in all_provides: miss_deps[d] = 1
             if miss_deps:
                 scheduler.log("Error: Package %s requires '%s' while there is no direct dependency in spec file" % (
-                pkg.pkgName(), ",".join(sorted(miss_deps.keys()))))
+                    pkg.pkgName(), ",".join(sorted(miss_deps.keys()))))
                 pkg_error = True
         if pkg_error and not pkg.options.ignoreCompileErrors: raise RpmBuildFailed(pkg)
     installRpm(pkg, pkg.options.bootstrap)
@@ -3336,7 +3336,7 @@ def isPackageInstalled(pkg):
                 if rpm_db_cache[pkgName][0] < pkg.pkgRevision:
                     return False
             log("Package %s with same/newer revision %s is already installed" % (
-            pkgName, str(rpm_db_cache[pkgName][0])), DEBUG)
+                pkgName, str(rpm_db_cache[pkgName][0])), DEBUG)
             return True
     else:
         instDir = join(pkg.options.workDir, pkg.pkgrel)
@@ -3852,11 +3852,11 @@ if __name__ == "__main__":
         if opts.architecture.startswith("osx"):
             if not sys.platform == "darwin":
                 fatal("Cannot build architecture %s on linux. Did you mean %s?" % (
-                opts.architecture, opts.architecture.replace("osx106", "slc5")))
+                    opts.architecture, opts.architecture.replace("osx106", "slc5")))
         if opts.architecture.startswith("slc"):
             if not sys.platform.startswith("linux"):
                 fatal("Cannot build architecture %s on osx. Did you mean %s?" % (
-                opts.architecture, opts.architecture.replace("slc5", "osx106")))
+                    opts.architecture, opts.architecture.replace("slc5", "osx106")))
 
         # Force the architecture and extract ancillary options like the compiler
         # version, the compiler name, whether to force 32 bit builds on linux and
@@ -3898,7 +3898,7 @@ if __name__ == "__main__":
         arch_data = opts.architecture.split("_", 2)
         arch_data[2] = re.sub('^[a-z]+', '', arch_data[2])
         opts.rpmQueryDefines = '--define "cmscompilerv  %s" --define "cmsos %s"' % (
-        arch_data[2], "_".join(arch_data[0:2]))
+            arch_data[2], "_".join(arch_data[0:2]))
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
 
