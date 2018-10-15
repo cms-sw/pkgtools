@@ -343,7 +343,7 @@ def parseGitUrl(url):
         args["gitroot"] = gitroot
     if not "filter" in args:
         args["filter"] = "*"
-    args["filter"] = sanitize(args["filter"]);
+    args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
 
 
@@ -2450,8 +2450,8 @@ class Package(object):
                           PKGFactory.postProcessSpec(self.sections[''][subpackage])])
         spec.write(text)
         spec.close()
-        deps = [];
-        sources = [];
+        deps = []
+        sources = []
         patches = []
         localSources = []
         localPatches = []
@@ -2817,7 +2817,7 @@ def saveSpec(p):
     # Fix for RPM 4.4.: We need to add something at the end of the spec file otherwise
     # any multiline macro in the %post section does not expant properly if it is not followed
     # by any other command/comment.
-    f.write("\n#\n");
+    f.write("\n#\n")
     f.close()
 
 
@@ -2945,8 +2945,8 @@ def getScriptlets(pkg, relocation, original):
 def installRpm(pkg, bootstrap):
     """ Installs an rpm
     """
-    error = 1;
-    output = "";
+    error = 1
+    output = ""
     command = "#No command"
     if bootstrap:
         command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
