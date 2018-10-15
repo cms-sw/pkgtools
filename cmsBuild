@@ -2121,7 +2121,7 @@ class Package(object):
             self.version = calculateHumanReadableVersion(self)
             return
 
-        checksumCalculator.addStrings(self.origSpec)
+        checksumCalculator.addStrings(self.origSpec)  # TODO - here it adds string to calculate
         checksumCalculator.addStrings(DEFAULT_SECTIONS.values())
         checksumCalculator.addStrings(PKGFactory.sectionOptions.values())
         checksumCalculator.addStrings(PKGFactory.sectionPreambles.values())
@@ -2786,6 +2786,9 @@ def parseOptions():
     if not re.match("^[a-zA-Z0-9_]+$", opts.uploadTmpRepository):
         fatal(
             "Tmp upload repository name '%s' contains invalid characters. Allowed characters are: a-zA-Z0-9_" % opts.uploadTmpRepository)
+
+    if opts.localSources and 'upload' in args:
+        fatal("'upload' option can not be used together with '--source' flag.")
 
     return opts, args
 
