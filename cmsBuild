@@ -2,7 +2,6 @@
 #
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
-
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
@@ -344,7 +343,7 @@ def parseGitUrl(url):
         args["gitroot"] = gitroot
     if not "filter" in args:
         args["filter"] = "*"
-    args["filter"] = sanitize(args["filter"]);
+    args["filter"] = sanitize(args["filter"])
     return protocol, gitroot, args
 
 
@@ -634,7 +633,48 @@ class DownloadOptions(object):
         self.cmsdist = options.cmsdist
 
 
-def download(source, dest, options):
+def getLocalSources(pkg, source_name, downloadDir, filename):
+    # check if given package's source location is overwritten to local file
+    options = pkg.options
+    local_source_dict = options.localSources
+    pkg_name = pkg.name
+    if (not pkg_name in local_source_dict) or (not source_name in local_source_dict[pkg_name]):
+        return
+
+    local_source_path = local_source_dict[pkg_name][source_name].rstrip("/$")
+    log("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
+    cmd = None
+    ls_basename = os.path.basename(local_source_path)
+    ls_dirname = os.path.dirname(local_source_path)
+    if filename.endswith(".rpm") or filename.endswith("none"):
+        log("WARNING: the filename extension is not overwritable: %s " % filename)
+        return
+    elif os.path.isfile(local_source_path):
+        cmd = "cp -f %(local_source_path)s %(downloadDir)s/%(filename)s" % locals()
+    elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
+        cmd = "cd %(ls_dirname)s; tar -czf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
+    elif filename.endswith(".tar.xz"):
+        cmd = "cd %(ls_dirname)s; tar -cJf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
+    elif filename.endswith(".bz2"):
+        cmd = "cd %(ls_dirname)s; tar -cvjSf %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
+    elif filename.endswith(".zip"):
+        cmd = "cd %(ls_dirname)s; zip -r %(downloadDir)s/%(filename)s %(ls_basename)s; cd -" % locals()
+    else:
+        fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
+
+    log("The command executed to package local sources: %s" % cmd)
+    error, output = getstatusoutput(cmd)
+    if error:
+        fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
+              "\n\t filename: %s \n\t source: %s \n\t local source path: %s " %
+              (error, output, filename, source_name, local_source_path))
+    return
+
+
+def download(source, dest, options, pkg=None):
+    # FIXME `options` are the same as `pkg.options`
+    source_name = pkg.sourcesNumbers[source] if pkg else None
+
     # Syntactic sugar to allow the following urls for tag collector:
     #
     # cmstc:[base.]release[.tagset[.tagset[...]]]/src.tar.gz
@@ -676,6 +716,10 @@ def download(source, dest, options):
             raise downloadDir
 
     realFile = join(downloadDir, filename)
+    # This will will use source from local file system if --source for package was passed
+    if source_name and options.localSources:
+        getLocalSources(pkg, source_name, downloadDir, filename)
+
     if exists(realFile):
         if not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
@@ -1714,6 +1758,16 @@ class ChecksumCalculator(object):
         checksums_cache[filename] = checksum
         self.__checksums[filename] = checksum
 
+    def addDir(self, directory):
+        cmd = "tar cf - %s 2>&1 | md5sum" % directory
+        error, result = getstatusoutput(cmd)
+        # FIXME we ignore the error since cmd always return true due to '|'
+        # if error:
+        #     fatal("Error while running command: \n\t %s" % cmd)
+        #     log(cmd)
+
+        self.addString(result.split()[0])
+
     def addPkg(self, pkg):
         if pkg.name == "system-compiler":
             filename = pkg.name
@@ -2107,7 +2161,18 @@ class Package(object):
             filename = join(abspath(self.options.cmsdist), source)
             if exists(filename):
                 checksumCalculator.addFile(filename)
+
+        if self.options.localSources and self.name in self.options.localSources:
+            # recalculate hash based on file system if --source flag for pkg
+            for source_k in sorted(self.options.localSources[self.name].keys()):
+                source_v = self.options.localSources[self.name][source_k]
+                if os.path.isfile(source_v):
+                    checksumCalculator.addFile(source_v)
+                else:
+                    checksumCalculator.addDir(source_v)
+
         self.checksum = checksumCalculator.getChecksum()
+
         self.version = calculateHumanReadableVersion(self)
         if self.name == self.options.pipPackage:
             global pip_package_env_script
@@ -2393,8 +2458,8 @@ class Package(object):
                           PKGFactory.postProcessSpec(self.sections[''][subpackage])])
         spec.write(text)
         spec.close()
-        deps = [];
-        sources = [];
+        deps = []
+        sources = []
         patches = []
         localSources = []
         localPatches = []
@@ -2520,6 +2585,17 @@ def parseOptions():
                       help="When uploading, copy the temporary directory to the production one.",
                       default=False)
     advancedBuildOptions = OptionGroup(parser, "Advanced build options")
+    advancedBuildOptions.add_option("--sources",
+                                    dest="sources",
+                                    action="store_true",
+                                    help="Outputs formatted sources. Do not build.",
+                                    default=False)
+    advancedBuildOptions.add_option("--source",
+                                    dest="localSources",
+                                    action="append",
+                                    help="Overwrite given package's source location to local directory "
+                                         "(package:source=directory, can be repeated multiple times).",
+                                    default=None)
     advancedBuildOptions.add_option("--use-system-compiler",
                                     dest="systemCompiler",
                                     action="store_true",
@@ -2719,6 +2795,9 @@ def parseOptions():
         fatal(
             "Tmp upload repository name '%s' contains invalid characters. Allowed characters are: a-zA-Z0-9_" % opts.uploadTmpRepository)
 
+    if opts.localSources and 'upload' in args:
+        fatal("'upload' option can not be used together with '--source' flag.")
+
     return opts, args
 
 
@@ -2746,7 +2825,7 @@ def saveSpec(p):
     # Fix for RPM 4.4.: We need to add something at the end of the spec file otherwise
     # any multiline macro in the %post section does not expant properly if it is not followed
     # by any other command/comment.
-    f.write("\n#\n");
+    f.write("\n#\n")
     f.close()
 
 
@@ -2783,7 +2862,7 @@ def fetchSources(pkg, scheduler):
     for url in downloadables:
         if urlRe.match(url):
             try:
-                success = download(url, sourcedir, pkg.options)
+                success = download(url, sourcedir, pkg.options, pkg)
             except MalformedUrl, e:
                 return str(e)
         else:
@@ -2791,23 +2870,6 @@ def fetchSources(pkg, scheduler):
         if not success:
             return "Unable to download %s" % url
         scheduler.log("Done fetching %s" % url)
-
-
-def checkIfInstalled(pkg):
-    """ Check if a given rpm is already in the db.
-    """
-    if not pkg.pkgName() in rpm_db_cache:
-        return False
-
-    if not isDefaultRevision(pkg.pkgRevision):
-        revision = rpm_db_cache[pkg.pkgName()][0]
-        if revision >= pkg.pkgRevision:
-            log("RPM %s found in RPM db with Revision %s (bigger than pkgRevision = %s)" % (
-                pkg.pkgName(), revision, pkg.pkgRevision), DEBUG)
-            return True
-        return False
-    log("RPM %s found in RPM db." % pkg.pkgName(), DEBUG)
-    return True
 
 
 def checkIfOnServer(pkg):
@@ -2874,8 +2936,8 @@ def getScriptlets(pkg, relocation, original):
 def installRpm(pkg, bootstrap):
     """ Installs an rpm
     """
-    error = 1;
-    output = "";
+    error = 1
+    output = ""
     command = "#No command"
     if bootstrap:
         command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
@@ -2944,10 +3006,6 @@ def scheduleInstallPackage(pkg, scheduler):
 
     scheduler.log("Checking if %s is cached." % pkg.name)
     actionName = "install-%s" % pkg.pkgName()
-    if checkIfInstalled(pkg):
-        scheduler.log("%s already in rpm database. Not building." % pkg.name)
-        scheduler.serial(actionName, [], installDoneDummy)
-        return True
     if checkCanInstallRpm(pkg):
         scheduler.log("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName())
         scheduler.serial(actionName, [], installRpm, pkg, bootstrapped)
@@ -3321,7 +3379,12 @@ def build(opts, args, factory):
     if opts.specsOnly:
         log("SPECS files written")
         sys.exit(0)
-
+    if opts.sources:
+        for pkg in packages:
+            log("Sources for %s are :" % pkg.name)
+            for key, value in pkg.sourcesNumbers.iteritems():
+                log("%s : %s" % (value, key))
+        return
     if opts.pretend:
         log("Option --pretend specified. Not building.")
         return
@@ -3783,6 +3846,51 @@ def rpmCacheUpdate(opts, cache=None, rpm_env=None):
     return
 
 
+def checkOptionsLocalSource(opts):
+    """
+    checks if opts.localSources is correct format `package:source=directory` and process it
+    Could be made callback function in advancedBuildOptions.add_option
+    """
+    # check this option is given
+    if opts.localSources is None:
+        return  # opts.localSources is empty, return
+    sourceOptionDict = {}
+    for sourceOption in opts.localSources:
+        # check if sourceOption in correct format
+        if '=' not in sourceOption:
+            fatal("ERROR: --source option is incorrectly given. Should be 'package:source=directory'.")
+        pkg_and_source, source_path = sourceOption.split("=")
+        pkg = source = None
+        if ":" in pkg_and_source:
+            pkg, source = pkg_and_source.split(":")
+        else:
+            pkg = pkg_and_source
+            source = "Source"
+        # check if given directory path is correct
+        if not exists(source_path):
+            fatal("The following path for package %s and source %s does not exist: %s" % (
+                pkg, source, source_path))
+        if not os.path.isdir(source_path) and not os.path.isfile(source_path):
+            fatal("The given path for package %s and source %s is not a directory or a file: %s" % (
+                pkg, source, source_path))
+        # if it is an empty directory, fail
+        if os.path.isdir(source_path) and len(os.listdir(source_path)) == 0:
+            fatal("The following directory for package %s and source %s is empty: %s" % (
+                pkg, source, source_path))
+        # put extracted options to dictionary
+        if pkg not in sourceOptionDict:
+            sourceOptionDict[pkg] = {source: source_path}
+        else:
+            sourceOptionDict[pkg][source] = source_path
+
+        # to solve inconsistent Source and Source0 naming in recipes
+        if source is "Source":
+            sourceOptionDict[pkg]["Source0"] = source_path
+        elif source is "Source0":
+            sourceOptionDict[pkg]["Source"] = source_path
+        opts.localSources = sourceOptionDict
+
+
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
     # python from cms external area
@@ -3792,6 +3900,7 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
+    checkOptionsLocalSource(opts)
 
     packages = {}
     # tags_cache = TagCacheAptImpl (opts)
