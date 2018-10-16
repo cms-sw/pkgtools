@@ -1761,8 +1761,12 @@ class ChecksumCalculator(object):
 
     def addDir(self, directory):
         cmd = "tar cf - %s 2>&1 | md5sum" % directory
-        exit, result = getstatusoutput(cmd)
-        result.split()[0]
+        error, result = getstatusoutput(cmd)
+        # FIXME we ignore the error since cmd always return true due to '|'
+        # if error:
+        #     fatal("Error while running command: \n\t %s" % cmd)
+        #     log(cmd)
+
         self.addString(result.split()[0])
 
     def addPkg(self, pkg):
@@ -2867,23 +2871,6 @@ def fetchSources(pkg, scheduler):
         if not success:
             return "Unable to download %s" % url
         scheduler.log("Done fetching %s" % url)
-
-
-def checkIfInstalled(pkg):
-    """ Check if a given rpm is already in the db.
-    """
-    if not pkg.pkgName() in rpm_db_cache:
-        return False
-
-    if not isDefaultRevision(pkg.pkgRevision):
-        revision = rpm_db_cache[pkg.pkgName()][0]
-        if revision >= pkg.pkgRevision:
-            log("RPM %s found in RPM db with Revision %s (bigger than pkgRevision = %s)" % (
-                pkg.pkgName(), revision, pkg.pkgRevision), DEBUG)
-            return True
-        return False
-    log("RPM %s found in RPM db." % pkg.pkgName(), DEBUG)
-    return True
 
 
 def checkIfOnServer(pkg):
