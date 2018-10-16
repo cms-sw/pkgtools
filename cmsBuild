@@ -649,7 +649,6 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     if filename.endswith(".rpm") or filename.endswith("none"):
         log("WARNING: the filename extension is not overwritable: %s " % filename)
         return
-
     elif os.path.isfile(local_source_path):
         cmd = "cp -f %(local_source_path)s %(downloadDir)s/%(filename)s" % locals()
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
