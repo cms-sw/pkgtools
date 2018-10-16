@@ -3381,9 +3381,10 @@ def build(opts, args, factory):
         sys.exit(0)
     if opts.sources:
         for pkg in packages:
-            log("Sources for %s are :" % pkg.name)
-            for key, value in pkg.sourcesNumbers.iteritems():
-                log("%s : %s" % (value, key))
+            for url, src in pkg.sourcesNumbers.iteritems():
+                pkg_dir = 'UNKNOWN'
+                if 'export=' in url: pkg_dir = url.split("export=",1)[1].split('&')[0]
+                log("%s:%s=%s %s" % (pkg.name, src, pkg_dir, url))
         return
     if opts.pretend:
         log("Option --pretend specified. Not building.")
