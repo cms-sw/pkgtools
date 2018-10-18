@@ -557,9 +557,15 @@ downloadHandlers = {'cvs': downloadCvs,
                     'svn': downloadSvn,
                     'pip': downloadPip}
 
+def fixUrl(s):
+    if 'no-cmssdt-cache=1' in s:
+        s = s.replace('no-cmssdt-cache=1','').replace("&&","&").replace("?&","?")
+        if s.endswith('&'): s=s[:-1]
+        if s.endswith('?'): s=s[:-1]
+    return s
 
 def getUrlChecksum(s):
-    m = md5adder(s)
+    m = md5adder(fixUrl(s))
     return m.hexdigest()
 
 
@@ -674,6 +680,9 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
 def download(source, dest, options, pkg=None):
     # FIXME `options` are the same as `pkg.options`
     source_name = pkg.sourcesNumbers[source] if pkg else None
+    noCmssdtCache = True if 'no-cmssdt-cache=1' in source else False
+    source = fixUrl(source)
+    checksum = getUrlChecksum(source)
 
     # Syntactic sugar to allow the following urls for tag collector:
     #
@@ -706,7 +715,6 @@ def download(source, dest, options, pkg=None):
     if not urlTypeRe.match(source):
         raise MalformedUrl(source)
     downloadHandler = downloadHandlers[match.group(1)]
-    checksum = getUrlChecksum(source)
     filename = source.rsplit("/", 1)[1]
     downloadDir = join(cacheDir, checksum[0:2], checksum)
     try:
@@ -739,9 +747,9 @@ def download(source, dest, options, pkg=None):
         log("Trying to fetch source file: %s" % source, DEBUG)
         success = downloadHandler(source, downloadDir, downloadOptions)
     if success:
-        # if '/github.com/' in source:
-        #    r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
-        #    r.close ()
+        if noCmssdtCache:
+            r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
+            r.close ()
         f = open(join(downloadDir, "url"), 'w')
         f.write("%s\n" % source)
         f.close()
