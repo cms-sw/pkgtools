@@ -668,7 +668,7 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
     else:
         fatal("DEVELOP ERROR file extension is unknown for: %s" % filename)
 
-    log("The command executed to package local sources: %s" % cmd)
+    log("The command executed to package local sources: %s" % cmd, DEBUG)
     error, output = getstatusoutput(cmd)
     if error:
         fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
@@ -3876,6 +3876,7 @@ def checkOptionsLocalSource(opts):
             pkg = pkg_and_source
             source = "Source"
         # check if given directory path is correct
+        source_path = abspath(source_path)
         if not exists(source_path):
             fatal("The following path for package %s and source %s does not exist: %s" % (
                 pkg, source, source_path))
