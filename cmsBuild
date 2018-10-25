@@ -836,8 +836,17 @@ def idToTag(tagId, origTag):
 # FIXME: notice that for compatibility with old packages, which were
 # specifying a -CMSXYZ tag by hand, we remove such a suffix from
 # the version. This is probably not needed anymore and can go.
+def fixVersionLine(specLines, version):
+    findRpmRe = re.compile("^(###\s+RPM\s+[^\s]+\s+[^\s]+\s+).+")
+    nLines = []
+    for line in specLines:
+        match = findRpmRe.match(line)
+        if not match: nLines.append(line)
+        else: nLines.append(match.group(1)+" "+version)
+    return nLines
+
 def parseRPMLine(specLines, opts):
-    findRpmRe = re.compile("^### RPM[ ]*([^ ]*)\s*([^ ]*)\s*(.*)")
+    findRpmRe = re.compile("^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
     for line in specLines:
         match = findRpmRe.match(line)
         if not match:
@@ -1308,6 +1317,7 @@ class PackageFactory(object):
                 if not exists(pkg.specFilename()): continue
                 pkg.setOptions(self.options)
                 for sp in pkg.subpackages: sp.checksum = '%{nil}'
+                if pkg.override_version: specLines = fixVersionLine (specLines,pkg.override_version)
                 pkg.origSpec = specLines
                 depSpecCache = False
                 for p in pkg.fullDependencies:
@@ -1366,7 +1376,7 @@ class MetaSpecSyntax(object):
     SUBPACKAGE = property(lambda self: self.__SUBPACKAGE)
 
     def __init__(self):
-        self.__SPEC_HEADER = re.compile("^### RPM[ ]*([^ ]*)\s*([^ ]*)\s*(.*)")
+        self.__SPEC_HEADER = re.compile("^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
         self.__IMPORT = re.compile("^## IMPORT (.*)")
         self.__BUILDIF = re.compile("^## BUILDIF (.*)")
         self.__REVISION = re.compile("^## REVISION (.*)")
@@ -1946,6 +1956,7 @@ class Package(object):
         self.status = None
         self.buildRequireToolfile = False
         self.noAutoDependency = False
+        self.override_version = ""
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -1969,11 +1980,24 @@ class Package(object):
             if section == "%install": self.sections[section][''] += self.installPostambles
             if section == "%post" and self.options.buildWithRpath: self.sections[section][''] += DEFAULT_RPATH_PREAMBLE
 
+    def updateVersion(self):
+        tmp = copy.deepcopy(self)
+        tmp.version = "1.0"
+        tmp.realVersion = "1.0"
+        tmp.compilerName = self.options.compilerName
+        tmp.expandSpec()
+        tmp.createDefaultSections()
+        tmp.parseSections()
+        self.realVersion = tmp.rpmEvalStrings(self.realVersion)
+        self.origSpec = fixVersionLine (self.origSpec,self.realVersion)
+        self.override_version = self.realVersion
+
     def initWithSpec(self, specLines):
         """ This parses the spec files and creates a structure with its contents.
         """
         self.origSpec = specLines
         self.group, self.name, self.realVersion = parseRPMLine(self.origSpec, self.options)
+        if '%' in self.realVersion: self.updateVersion()
         self.version = self.realVersion
         self.parseRevision()
         compilerName = self.options.compilerName
@@ -2075,7 +2099,7 @@ class Package(object):
         """This function checks if a symbol is defined in the current spec file. That is, if rpmbuild evaluates %symbol to a non-empty string.
         Note: I *think* that only the symbols defined in the main section are visible here.
         """
-        tmp = copy.copy(self)
+        tmp = copy.deepcopy(self)
         tmp.createDefaultSections()
         tmp.parseSections()
         value = tmp.rpmEvalStrings(symbol)
@@ -2340,13 +2364,13 @@ class Package(object):
         return join(abspath(self.tempDirPrefix), "tmpspec-%s" % self.name)
 
     def rpmEvalStrings(self, *strings):
-        self.spec = "\n".join([self.specPreHeader,
+        spec = "\n".join([self.specPreHeader,
                                SPEC_HEADER % self.__dict__,
                                PKGFactory.preamble,
                                self.sections[''][''],
                                "%description"] + list(strings))
         f = file(self.tmpspec, "w")
-        f.write(PKGFactory.postProcessSpec(self.spec).replace('%%', '%'))
+        f.write(PKGFactory.postProcessSpec(spec).replace('%%', '%'))
         f.close()
         commandPrefix = getCommandPrefix(self.options)
         evalCommand = "%s ; %s rpm -q --specfile %s --info %s" % (rpmEnvironmentScript, commandPrefix,
