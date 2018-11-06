@@ -501,22 +501,32 @@ def downloadGit(source, dest, options):
 
 def downloadPip(source, dest, options):
     # Valid PIP URL formats are
-    # pip://package/version?[pip_options=options&]output=/tarbalname
+    # pip://package/version?[pip_options=downloadOptions&][pkg_filename=package_source_file&][pip2=pip2_command&][pip3=pip3_command&][python2_src=<0|1>&][python3_src=<0|1>&]&output=/tarbalname
     # pip://package/version/tarbalname
     url_parts = source.split("pip://", 1)[1].split("?", 1)
     opts = []
     if len(url_parts) > 1: opts = url_parts[1].split("&")
     pkg = url_parts[0].split("/")
-    pack = pkg[0].strip()
-    if len(pkg) > 1: pack = pack + '==' + pkg[1].strip()
+    pkg_name = pkg[0].strip()
+    xpkg_name = pkg_name
+    ver=""
+    pack = pkg_name
+    if len(pkg) > 1:
+      ver = pkg[1].strip()
+      pack = pack + '==' + ver
     tarball = source.rsplit("/", 1)[1]
-    # newer pip will need this (but untested)
-    #  comm = 'which pip; pip download --no-deps ' + dest + ' ' + pack
     tempdir = createTempDir(options.workDir, options.tempDirPrefix)
-    pip_opts = "--no-deps --no-binary=:all:"
+    pip_opts = "--no-binary=:all:"
+    py2_src = True
+    py3_src = False
+    pip2="pip"
+    pip3="pip3"
 
     for opt in opts:
-        if opt[:12] == "pip_options=":
+        if opt.startswith("pkg_filename="): xpkg_name=opt.split('=',1)[-1]
+        elif opt.startswith("pip2"): pip2=opt.split('=',1)[-1]
+        elif opt.startswith("pip3"): pip3=opt.split('=',1)[-1]
+        elif opt.startswith("pip_options="):
             pip_optsT = opt[12:].replace("+", " ").replace("%20", " ").replace("%3D", "=")
             # hack here a alternative source location
             pip_opts = ''
@@ -527,23 +537,34 @@ def downloadPip(source, dest, options):
                     i = i + 1
                 else:
                     pip_opts = pip_opts + ' ' + spSrc[i]
-            break
+        elif opt.startswith("python") and '_src=' in opt:
+            m = re.match('^python([23])_src=([01])',opt)
+            if m:
+                val = True if m.group(2)=="1" else False
+                if m.group(1)=="2": py2_src = val
+                else: py3_src = val
+
     comm = ""
-    if pip_package_env_script: comm = ". %s; " % pip_package_env_script
-    comm = comm + ' which pip; pip download ' + pip_opts + ' -d ' + tempdir + ' ' + pack + '; /bin/ls ' + tempdir + '| grep -v files.list > ' + tempdir + '/files.list'
+    if pip_package_env_script: comm = ". %s ;" % pip_package_env_script
+    comm = comm + 'cd ' + tempdir
+    if py2_src: comm = comm + '; '+pip2+' download ' + pip_opts + ' -d . ' + pack
+    if py3_src: comm = comm + '; '+pip3+' download ' + pip_opts + ' -d . ' + pack
+    comm = comm + '; /bin/ls | grep -v files.all > files.all ; grep "^%s\-" files.all | grep "\-%s" > files.list' % (xpkg_name, ver)
+    comm = comm + '; grep -v -f files.list files.all > files.deps; mv files.deps files.all'
+    log("Pip download: %s" % comm, DEBUG)
     error, output = getstatusoutput(comm)
     if error:
         log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
             source, comm, error, output))
         return False
 
-    comm2 = 'cd ' + tempdir + '; tar cfz ' + dest + '/' + tarball + ' files.list `cat files.list`'
+    comm2 = 'cd ' + tempdir + '; tar cfz ' + dest + '/' + tarball + ' files.all files.list `cat files.list`'
     error, output = getstatusoutput(comm2)
     if error:
         log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
             source, comm, error, output))
         return False
-
+    getstatusoutput("rm -rf %s" % tempdir)
     return True
 
 
@@ -1290,11 +1311,22 @@ class PackageFactory(object):
     def create(self):
         return Package(self.options)
 
+    def processIncludes(self, specLines):
+        newOrigSpec = []
+        for line in specLines:
+            incmatch = self.syntax.INCLUDE.match(line)
+            if not incmatch:
+                newOrigSpec.append(line)
+            else:
+                incFilename = join(self.options.cmsdist, incmatch.group(1).strip(" \n")+".file")
+                newOrigSpec.extend (self.processIncludes(open(incFilename).readlines()))
+        return newOrigSpec
+
     def createWithSpec(self, pkgName):
         if self.has_key(pkgName): return self[pkgName]
         filename = specFilename(self.options, pkgName)
         try:
-            specLines = open(filename).readlines()
+            specLines = self.processIncludes(open(filename).readlines())
         except IOError, e:
             raise FileNotFound(filename)
         pkg = None
@@ -1369,6 +1401,7 @@ class PackageFactory(object):
 
 class MetaSpecSyntax(object):
     SPEC_HEADER = property(lambda self: self.__SPEC_HEADER)
+    INCLUDE = property(lambda self: self.__INCLUDE)
     IMPORT = property(lambda self: self.__IMPORT)
     BUILDIF = property(lambda self: self.__BUILDIF)
     INITENV = property(lambda self: self.__INITENV)
@@ -1377,6 +1410,7 @@ class MetaSpecSyntax(object):
 
     def __init__(self):
         self.__SPEC_HEADER = re.compile("^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
+        self.__INCLUDE = re.compile("^## INCLUDE (.*)")
         self.__IMPORT = re.compile("^## IMPORT (.*)")
         self.__BUILDIF = re.compile("^## BUILDIF (.*)")
         self.__REVISION = re.compile("^## REVISION (.*)")
@@ -2067,7 +2101,7 @@ class Package(object):
         return False
 
     def expandSpec(self):
-        """This function is responsible for finding and parsing all the IMPORT and SUBPACKAGE directives for a given spec.
+        """This function is responsible for finding and parsing all the INCLUDE, IMPORT and SUBPACKAGE directives for a given spec.
         """
         imports = []
         subpackages = {}
