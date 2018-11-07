@@ -37,7 +37,6 @@ CMSPKG_CMD = "cmspkg"
 REF_CMSPKG_CMD = None
 SERVER_TMP_UPLOAD_DIRECTORY = None
 rpmEnvironmentScript = "true"
-pip_package_env_script = ""
 PKGFactory = None
 SystemCompilerVersion = {}
 BlackListReferencePkgs = []
@@ -498,34 +497,62 @@ def downloadGit(source, dest, options):
         return False
     return packCheckout(args["tempdir"], args["dest"], args["export"])
 
+def userCommandDependencies(sources):
+    extra_build_deps = {}
+    for s in sources:
+        if not "package_dependency=" in s: continue
+        for d in s.split("package_dependency=",1)[-1].replace(' ','').split("&")[0].split(","):
+            extra_build_deps[d]=1
+    return extra_build_deps.keys()
+
+def downloadCmd (source, dest, options, command, env_pkgs):
+    tarball = source.rsplit("/", 1)[1]
+    tempdir = createTempDir(options.workDir, options.tempDirPrefix)
+    cmd = "cd %s; " % tempdir
+    for d in env_pkgs: cmd = cmd + ". %s; " % PKGFactory[d].getInitEnvScript()
+    cmd = cmd + command
+
+    log("Download command: %s" % cmd)
+    error, output = getstatusoutput(cmd)
+    if error:
+        log("Error while downloading sources from %s.\n\n %s \n %s \n  %s \n " % (
+            source, cmd, error, output))
+        return False
+
+    error, output = getstatusoutput('cd %s; tar cfz %s/%s .' % (tempdir, dest, tarball))
+    if error:
+        log("Error while downloading sources from %s.\n\n %s \n %s \n  %s \n " % (
+            source, cmd, error, output))
+        return False
+    getstatusoutput("rm -rf %s" % tempdir)
+    return True
+
+def downloadUserCommand(source, dest, options):
+    # Valid URL formats are
+    # usercommand://package?command=command-to-run&package_dependency=package[,package[,...]]&output=/tarbalname
+    try: from urllib import unquote
+    except: from urllib.parse import unquote
+    cmd = "echo 'ERROR: Missing command=command-to-run in the source URL.' && false"
+    for opt in source.split("?", 1)[1].split("&"):
+        if opt.startswith("command="):
+            cmd = unquote(opt.split('=',1)[-1])
+    return downloadCmd(source, dest, options, cmd, userCommandDependencies([source]))
 
 def downloadPip(source, dest, options):
     # Valid PIP URL formats are
-    # pip://package/version?[pip_options=downloadOptions&][pkg_filename=package_source_file&][pip2=pip2_command&][pip3=pip3_command&][python2_src=<0|1>&][python3_src=<0|1>&]&output=/tarbalname
+    # pip://package/version?[pip_options=downloadOptions&][pip=pip_command&]&output=/tarbalname
     # pip://package/version/tarbalname
     url_parts = source.split("pip://", 1)[1].split("?", 1)
     opts = []
     if len(url_parts) > 1: opts = url_parts[1].split("&")
     pkg = url_parts[0].split("/")
-    pkg_name = pkg[0].strip()
-    xpkg_name = pkg_name
-    ver=""
-    pack = pkg_name
-    if len(pkg) > 1:
-      ver = pkg[1].strip()
-      pack = pack + '==' + ver
-    tarball = source.rsplit("/", 1)[1]
-    tempdir = createTempDir(options.workDir, options.tempDirPrefix)
-    pip_opts = "--no-binary=:all:"
-    py2_src = True
-    py3_src = False
-    pip2="pip"
-    pip3="pip3"
+    pack = pkg[0].strip()
+    if len(pkg) > 1: pack = pack + '==' + pkg[1].strip()
+    pip_opts = "--no-deps --no-binary=:all:"
+    pip="pip"
 
     for opt in opts:
-        if opt.startswith("pkg_filename="): xpkg_name=opt.split('=',1)[-1]
-        elif opt.startswith("pip2"): pip2=opt.split('=',1)[-1]
-        elif opt.startswith("pip3"): pip3=opt.split('=',1)[-1]
+        if opt.startswith("pip="): pip=opt.split('=',1)[-1]
         elif opt.startswith("pip_options="):
             pip_optsT = opt[12:].replace("+", " ").replace("%20", " ").replace("%3D", "=")
             # hack here a alternative source location
@@ -537,35 +564,9 @@ def downloadPip(source, dest, options):
                     i = i + 1
                 else:
                     pip_opts = pip_opts + ' ' + spSrc[i]
-        elif opt.startswith("python") and '_src=' in opt:
-            m = re.match('^python([23])_src=([01])',opt)
-            if m:
-                val = True if m.group(2)=="1" else False
-                if m.group(1)=="2": py2_src = val
-                else: py3_src = val
-
-    comm = ""
-    if pip_package_env_script: comm = ". %s ;" % pip_package_env_script
-    comm = comm + 'cd ' + tempdir
-    if py2_src: comm = comm + '; '+pip2+' download ' + pip_opts + ' -d . ' + pack
-    if py3_src: comm = comm + '; '+pip3+' download ' + pip_opts + ' -d . ' + pack
-    comm = comm + '; /bin/ls | grep -v files.all > files.all ; grep "^%s\-" files.all | grep "\-%s" > files.list' % (xpkg_name, ver)
-    comm = comm + '; grep -v -f files.list files.all > files.deps; mv files.deps files.all'
-    log("Pip download: %s" % comm, DEBUG)
-    error, output = getstatusoutput(comm)
-    if error:
-        log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
-            source, comm, error, output))
-        return False
-
-    comm2 = 'cd ' + tempdir + '; tar cfz ' + dest + '/' + tarball + ' files.all files.list `cat files.list`'
-    error, output = getstatusoutput(comm2)
-    if error:
-        log("Error while downloading sources from %s using pip.\n\n %s \n %s \n  %s \n " % (
-            source, comm, error, output))
-        return False
-    getstatusoutput("rm -rf %s" % tempdir)
-    return True
+    if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
+    comm = pip + ' download ' + pip_opts + ' --disable-pip-version-check  -d . ' + pack + '; /bin/ls | grep -v files.list > files.list'
+    return downloadCmd(source, dest, options, comm, [options.pipPackage])
 
 
 downloadHandlers = {'cvs': downloadCvs,
@@ -576,7 +577,8 @@ downloadHandlers = {'cvs': downloadCvs,
                     'ftps': downloadUrllib2,
                     'git': downloadGit,
                     'svn': downloadSvn,
-                    'pip': downloadPip}
+                    'pip': downloadPip,
+                    'usercommand': downloadUserCommand}
 
 def fixUrl(s):
     if 'no-cmssdt-cache=1' in s:
@@ -658,6 +660,7 @@ class DownloadOptions(object):
         self.workDir = options.workDir
         self.tempDirPrefix = options.tempDirPrefix
         self.cmsdist = options.cmsdist
+        self.pipPackage = options.pipPackage
 
 
 def getLocalSources(pkg, source_name, downloadDir, filename):
@@ -2100,6 +2103,10 @@ class Package(object):
                 return True
         return False
 
+    def getInitEnvScript(self):
+      return join(self.options.workDir, self.cmsplatf, self.group, self.name,
+                  self.version, "etc/profile.d/init.sh")
+
     def expandSpec(self):
         """This function is responsible for finding and parsing all the INCLUDE, IMPORT and SUBPACKAGE directives for a given spec.
         """
@@ -2240,10 +2247,6 @@ class Package(object):
         self.checksum = checksumCalculator.getChecksum()
 
         self.version = calculateHumanReadableVersion(self)
-        if self.name == self.options.pipPackage:
-            global pip_package_env_script
-            pip_package_env_script = join(self.options.workDir, self.cmsplatf, self.group, self.name, self.version,
-                                          "etc/profile.d/init.sh")
 
     def generateRequires(self, dependencies, origDependencies):
         requiresPkgs = ["%s+%s+%s" % (pkg.group, pkg.name, pkg.version)
@@ -2580,6 +2583,10 @@ class Package(object):
             if [s for s in sources if s.startswith("pip://")]:
                 if not self.options.pipPackage in deps + buildDeps:
                     buildDeps.append(self.options.pipPackage)
+
+        for d in userCommandDependencies(sources):
+            if not d in deps + buildDeps: buildDeps.append(d)
+
         deps = [siteSpecific(d) for d in deps]
         sources.extend([join(cmsdistPath, source + ".file")
                         for source in localSources])
@@ -3378,6 +3385,10 @@ def checkPackageInCache(pkg, scheduler):
     if pkg.options.pipPackage and [s for s in pkg.sources if s[:6] == "pip://"]:
         pip = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == pkg.options.pipPackage][0]
         if not rpm_db_cache.has_key(pip): fetchDependencies += ["install-" + pip]
+    for d in userCommandDependencies(pkg.sources):
+        dep_pkg = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == d][0]
+        if (not rpm_db_cache.has_key(dep_pkg)) and (not "install-"+dep_pkg in fetchDependencies):
+            fetchDependencies += ["install-" + dep_pkg]
     pkgSources = pkg.sources + pkg.patches
     if pkgSources:
         scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
