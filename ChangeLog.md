@@ -30,4 +30,4 @@ List of changes with respect to V00-32-XX branch of pkgtools are
 %define zlib_version 1.2.8
 %endif
 ```
-- Some cleanup of unused functons and moved static data in to separate file.
+- Some cleanup of unused code and moved static data in to separate file.
