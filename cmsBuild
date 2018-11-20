@@ -1291,6 +1291,7 @@ class PackageFactory(object):
         self.__packageCache = CacheProxy(self.__package_cache, self.__cacheKeyDecorator)
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
+        self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
 
     def __getPreamble(self, options):
         try:
@@ -1314,6 +1315,16 @@ class PackageFactory(object):
     def create(self):
         return Package(self.options)
 
+    def updateVirtualPackages(self, cmsdist):
+        pkgs = {}
+        for vp in glob(join(cmsdist,'*','cmsdist_packages.py')):
+            sys.path.insert(0,dirname(vp))
+            pkg = __import__('cmsdist_packages')
+            pkg.packages(pkgs)
+            sys.modules.pop('cmsdist_packages')
+            x=sys.path.pop(0)
+        return pkgs
+
     def processIncludes(self, specLines):
         newOrigSpec = []
         for line in specLines:
@@ -1325,13 +1336,27 @@ class PackageFactory(object):
                 newOrigSpec.extend (self.processIncludes(open(incFilename).readlines()))
         return newOrigSpec
 
-    def createWithSpec(self, pkgName):
-        if self.has_key(pkgName): return self[pkgName]
+    def readSpec(self, pkgName):
+        specLines = []
         filename = specFilename(self.options, pkgName)
         try:
-            specLines = self.processIncludes(open(filename).readlines())
+            if exists(filename):
+                specLines = open(filename).readlines()
+            elif pkgName in self.virtual_packages:
+                cmd = self.virtual_packages[pkgName]
+                e , o = getstatusoutput(cmd)
+                if e:
+                    fatal("Unable to generate package:%s: %s" % (pkgName, o))
+                specLines = [ l+"\n" for l in o.split("\n")]
+            else:
+                raise FileNotFound(filename)
         except IOError, e:
             raise FileNotFound(filename)
+        return self.processIncludes(specLines)
+
+    def createWithSpec(self, pkgName):
+        if self.has_key(pkgName): return self[pkgName]
+        specLines = self.readSpec(pkgName)
         pkg = None
         specCache = "%s/specCache/%s.%s" % (
             self.options.tempdir, pkgName, sha256(self.__basePackageHash + str(specLines)).hexdigest())
