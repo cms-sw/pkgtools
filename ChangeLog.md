@@ -3,6 +3,7 @@ V00-32-XX
 
 List of changes with respect to V00-32-XX branch of pkgtools are
  
+- Auto generation of spec file feature added. Now if cmsdist/dir/cmsdist_packages.py exists then cmsBuild can make use of it and ask for spec files generation e.g. https://github.com/cms-sw/cmsdist/tree/IB/CMSSW_10_4_X/gcc700/pip can generate py-2*.spec for all the pip packages listed https://github.com/cms-sw/cmsdist/blob/IB/CMSSW_10_4_X/gcc700/pip/requirements.txt
 - Make use of existing installation to symlink packages instead of downloading from server. This can save a lot of disk and network band width
   - This feature can be enabled with `--reference path-to-existsing-installation` command-line option
   - `--black-list package-name` can be used to make sure that `package-name` is always install from repository instead of symlink to reference.
