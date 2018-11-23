@@ -1721,11 +1721,8 @@ class BuildPackage(BuilderAction):
         pkg = self.pkg
         if pkg.name == "system-compiler":
             return False
-        if pkg.parent:
-            specfilename = join(pkg.parent.options.cmsdist, "%s.spec" % pkg.parent.name)
-        else:
-            specfilename = join(pkg.options.cmsdist, "%s.spec" % pkg.name)
-        return exists(specfilename)
+        if pkg.parent: return PKGFactory.has_key(pkg.parent.name)
+        return PKGFactory.has_key(pkg.name)
 
     def doExpectedResults(self):
         if self.pkg.name == "system-compiler":
