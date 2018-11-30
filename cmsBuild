@@ -3999,6 +3999,7 @@ if __name__ == "__main__":
         fatal("You have SCRAM runtime environment set. Please run it from a fresh shell.")
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
+    environ["LC_CTYPE"] = "C"
     environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
