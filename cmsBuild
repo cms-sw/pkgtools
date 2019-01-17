@@ -4000,6 +4000,7 @@ if __name__ == "__main__":
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
+    environ["LC_ALL"] = "C"
     environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
