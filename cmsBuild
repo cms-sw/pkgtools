@@ -3728,7 +3728,7 @@ def upload(opts, args, factory):
         useDev=useDev,
         cmspkg_upload_repo=cmspkg_upload_repo)
     (err, uploadDir) = executeScript(opts, migrateRepo, False)
-    logAndDieOnError(err, "Error while checking for parent repository and getting a temp area for upload.")
+    logAndDieOnError(err, "Error while checking for parent repository and getting a temp area for upload: %s" % uploadDir)
 
     uploadDir = getResult(uploadDir, "NEW_TEMP_REPOSITORY:")
     SERVER_TMP_UPLOAD_DIRECTORY = uploadDir
