@@ -974,6 +974,17 @@ def getPkgChecksumFile(officialRpmLocation, buildOptions=None):
     return checksum
 
 
+def package2tag(pkgName, realVersion):
+    fullVersion = pkgName.rsplit("+", 1)[1]
+    if "-" not in pkgName:
+        return ""
+    tag = fullVersion.rsplit("-", 1)[1]
+    # Return tag if it is not part of realVersion
+    if not realVersion.endswith("-" + tag):
+        return tag
+    return ""
+
+
 class TagCacheAptImpl(object):
     """ Concrete implementation of the tag cache which relies on the
         apt repository information and locally found packages. Consistency
@@ -982,15 +993,18 @@ class TagCacheAptImpl(object):
         already in the repository.
     """
 
-    def __init__(self, options):
+    def __init__(self, options, cmspkg_command=None):
         self.options = options
+        if cmspkg_command is None:
+            cmspkg_command = CMSPKG_CMD
+        self.cmspkg_command = cmspkg_command
 
     def update(self):
         if self.options.bootstrap:
-            error, output = getstatusoutput("%s update" % CMSPKG_CMD)
+            error, output = getstatusoutput("%s update" % self.cmspkg_command)
             if error:
                 die("Error while executing cmspkg update.\n%s" % output)
-            error, output = getstatusoutput("%s search --show-revision" % CMSPKG_CMD)
+            error, output = getstatusoutput("%s search --show-revision" % self.cmspkg_command)
             if error:
                 die("Error while executing cmspkg search.\n%s" % output)
             lines = [line for line in output.split("\n") if line]
@@ -1006,6 +1020,12 @@ class TagCacheAptImpl(object):
                 self.revision_cache = dict(pairs)
             except:
                 die("Malformed cmspkg search output.")
+
+    def findPkg(self, pkg):
+        for n in self.cache:
+            if (self.cache[n]==pkg.checksum) and n.startswith(pkg.pkgName(True)):
+                return n
+        return None
 
     def requestTag(self, pkgInfo, tag):
         """ requestTag returns a unique tag (i.e. the mnemonic suffix at the
@@ -1088,14 +1108,7 @@ class TagCacheAptImpl(object):
 
         if not output:
             return None
-        fullVersion = output.rsplit("+", 1)[1]
-        if "-" not in fullVersion:
-            return ""
-        tag = fullVersion.rsplit("-", 1)[1]
-        # Return tag if it is not part of realVersion
-        if not pkg.realVersion.endswith("-" + tag):
-            return tag
-        return ""
+        return package2tag (output, pkg.realVersion)
 
     def packageChecksums(self, package):
         """
@@ -1103,8 +1116,9 @@ class TagCacheAptImpl(object):
         assert (False and "Not implemented for the time being.")
 
 
-global tags_cache
+global tags_cache, extra_tags_cache
 tags_cache = None
+extra_tags_cache = {}
 
 
 class CacheProxy(object):
@@ -1165,6 +1179,13 @@ def calculateHumanReadableVersion(pkg):
         return pkg.realVersion
     log("%s has checksum %s" % (pkg.name, pkg.checksum), DEBUG)
     tag = tags_cache.getTag(pkg)
+    if (tag is None) and extra_tags_cache:
+        for r in extra_tags_cache:
+            expkg = extra_tags_cache[r].findPkg(pkg)
+            if expkg:
+                tag = package2tag(expkg , pkg.realVersion)
+                pkg.pkgExtraRepo = r
+                break
     if tag != None:
         log("%s is aliased to \'%s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
     elif pkg.options.tag:
@@ -2016,6 +2037,7 @@ class Package(object):
         self.buildRequireToolfile = False
         self.noAutoDependency = False
         self.override_version = ""
+        self.pkgExtraRepo = None
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2462,7 +2484,8 @@ class Package(object):
     def finalSpecFilename(self):
         return join(abspath("SPECS"), self.pkgdir, "spec")
 
-    def pkgName(self):
+    def pkgName(self, real=False):
+        if real: return "%(group)s+%(name)s+%(realVersion)s" % self.__dict__
         return "%(group)s+%(name)s+%(version)s" % self.__dict__
 
     def rpmCachePath(self):
@@ -2752,6 +2775,11 @@ def parseOptions():
                                     default=None,
                                     metavar="PATH",
                                     help="Path to an existing installation which can be used to install already available packages.")
+    advancedBuildOptions.add_option("--extra-repositories",
+                                    dest="extraRepositories",
+                                    metavar="NAME",
+                                    help="Comma separated list of extra repositories to look for pre-build packages e.g. cms.week0,cms.week1",
+                                    default=None)
     advancedBuildOptions.add_option("--black-list",
                                     dest="blackList",
                                     default="",
@@ -3198,6 +3226,19 @@ def buildPackage(pkg, scheduler):
                       " TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
+    if pkg.pkgExtraRepo:
+        rep = pkg.pkgExtraRepo
+        exrpm=format("%(tmpdir)s/repo/%(rep)s/%(arch)s/var/cmspkg/rpms/%(rpmname)s",
+                        tmpdir=optionsDict["tmpdir"],
+                        rep=rep,
+                        arch=opts.architecture,
+                        rpmname = basename(pkg.rpmfilename))
+        rpmbuildCommand = format("(echo %(cmspkg)s download %(pkgName)s; %(cmspkg)s download %(pkgName)s; mv %(exrpm)s %(uniqueRpmFilename)s) >%(builddir)s/log 2>&1",
+                                 cmspkg = extra_tags_cache[rep].cmspkg_command,
+                                 pkgName = pkg.pkgName(),
+                                 builddir = pkg.builddir,
+                                 uniqueRpmFilename = uniqueRpmFilename,
+                                 exrpm = exrpm)
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
     error, output = getstatusoutput(rpmbuildCommand)
@@ -4136,6 +4177,15 @@ if __name__ == "__main__":
                         symlink(envSh.replace(opts.workDir + "/" + opts.architecture, "."), rpmEnvironmentScript)
                     rpmEnvironmentScript = "source " + rpmEnvironmentScript
                     tags_cache.update()
+                    if opts.extraRepositories:
+                        for r in opts.extraRepositories.split(","):
+                            if r != opts.repository:
+                                cmscmd = format('%(cmspkg)s -r %(repo)s --path %(tmpdir)s/repo/%(repo)s',
+                                                 cmspkg=CMSPKG_CMD,
+                                                 repo=r,
+                                                 tmpdir=opts.tempdir)
+                                extra_tags_cache[r] = TagCacheAptImpl(opts, cmscmd)
+                                extra_tags_cache[r].update()
                     if opts.reference: check_reference(opts)
                 elif command == "deprecate-local":
                     doDeprecateLocal(opts, args[1:], PKGFactory)
