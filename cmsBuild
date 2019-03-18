@@ -976,7 +976,7 @@ def getPkgChecksumFile(officialRpmLocation, buildOptions=None):
 
 def package2tag(pkgName, realVersion):
     fullVersion = pkgName.rsplit("+", 1)[1]
-    if "-" not in pkgName:
+    if "-" not in fullVersion:
         return ""
     tag = fullVersion.rsplit("-", 1)[1]
     # Return tag if it is not part of realVersion
