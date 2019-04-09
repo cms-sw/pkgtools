@@ -3233,18 +3233,37 @@ def buildPackage(pkg, scheduler):
                         rep=rep,
                         arch=opts.architecture,
                         rpmname = basename(pkg.rpmfilename))
-        rpmbuildCommand = format("(echo %(cmspkg)s download %(pkgName)s; %(cmspkg)s download %(pkgName)s; mv %(exrpm)s %(uniqueRpmFilename)s) >%(builddir)s/log 2>&1",
+        rpmbuildCommandX = format("(echo %(cmspkg)s download %(pkgName)s; %(cmspkg)s download %(pkgName)s; %(cmspkg)s env -- rpm  --requires -qp %(exrpm)s) >%(logfile)s 2>&1",
                                  cmspkg = extra_tags_cache[rep].cmspkg_command,
                                  pkgName = pkg.pkgName(),
-                                 builddir = pkg.builddir,
-                                 uniqueRpmFilename = uniqueRpmFilename,
+                                 logfile=logfile,
                                  exrpm = exrpm)
+        error, output = getstatusoutput(rpmbuildCommandX)
+        if error:
+            if not exists(logfile):
+                return "Error happened before any log output.\n%s" % output
+            logLines = open(logfile).readlines()
+            return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
+                pkg.name, logfile, "".join(logLines[-20:]))
+        allDepsPkgs = ["%s+%s+%s" % (p.group, p.name, p.version)
+                          for p in getPackages(pkg.fullDependencies)
+                          if p.name != "system-compiler"]
+        depOK = True
+        for dep in [l.strip() for l in open(logfile).readlines()]:
+            ditems = dep.split('+',2)
+            if (len(ditems) != 3) or (ditems[1] not in pkg.fullDependencies): continue
+            if dep not in allDepsPkgs:
+                depOK = False
+                break
+        if depOK:
+            rpmbuildCommand ="mv %s %s" % (exrpm, uniqueRpmFilename)
+
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
     error, output = getstatusoutput(rpmbuildCommand)
     if error:
         if not exists(logfile):
-            return "Error happened before any log output."
+            return "Error happened before any log output.\n%s" % output
         logLines = open(logfile).readlines()
         return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
             pkg.name, logfile, "".join(logLines[-20:]))
