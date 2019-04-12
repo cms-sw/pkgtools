@@ -1183,6 +1183,7 @@ def calculateHumanReadableVersion(pkg):
         for r in extra_tags_cache:
             expkg = extra_tags_cache[r].findPkg(pkg)
             if expkg:
+                if expkg in tags_cache.cache: continue
                 tag = package2tag(expkg , pkg.realVersion)
                 pkg.pkgExtraRepo = r
                 break
