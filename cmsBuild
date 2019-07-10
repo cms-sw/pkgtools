@@ -483,10 +483,14 @@ def downloadGit(source, dest, options):
                  "gitroot": gitroot, "dest": dest,
                  "exportpath": exportpath})
     makedirs(exportpath)
+    if "submodules" in args:
+        args["submodules"] = " git submodule update --recursive --init &&"
+    else:
+        args["submodules"] = ""
     command = format("cd %(exportpath)s &&"
                      "git init &&"
                      "git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s &&"
-                     "git reset --hard %(tag)s &&"
+                     "git reset --hard %(tag)s && %(submodules)s"
                      "find . ! -path '%(filter)s' -delete &&"
                      "rm -rf .git .gitattributes .gitignore", **args)
     error, output = getstatusoutput(command % args)
