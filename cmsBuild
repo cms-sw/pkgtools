@@ -892,28 +892,27 @@ def parseRPMLine(specLines, opts):
     raise MalformedSpec
 
 
-def parseNoCompilerLine(specLines):
-    findNoCompilerRe = re.compile("^## NOCOMPILER")
+def parseSpecFlag(specLines, flag):
+    flagRe = re.compile("^##\s+%s\s*$" % flag)
     for line in specLines:
-        if findNoCompilerRe.match(line):
+        if flagRe.match(line):
             return True
     return False
+
+def parseNoCompilerLine(specLines):
+    return parseSpecFlag(specLines, "NOCOMPILER")
 
 
 def parseNoAutoDependencyLine(specLines):
-    findNoDepRe = re.compile("^## NO_AUTO_DEPENDENCY")
-    for line in specLines:
-        if findNoDepRe.match(line):
-            return True
-    return False
+    return parseSpecFlag(specLines, "NO_AUTO_DEPENDENCY")
 
 
 def parseBuildRequireToolfileLine(specLines):
-    findBRToolfileRe = re.compile("^## BUILDREQUIRE-TOOLFILE")
-    for line in specLines:
-        if findBRToolfileRe.match(line):
-            return True
-    return False
+    return parseSpecFlag(specLines, "BUILDREQUIRE-TOOLFILE")
+
+
+def parseUseCompilerVersionLine(specLines):
+    return parseSpecFlag(specLines, "USE_COMPILER_VERSION")
 
 
 class PkgInfo(object):
@@ -2723,7 +2722,7 @@ def parseOptions():
                                     dest="systemCompiler",
                                     action="store_true",
                                     help="""Use the system compiler rather than the one specified in CMSDIST""",
-                                    default=None)
+                                    default=False)
     advancedBuildOptions.add_option("--ignore-compile-errors",
                                     "-k",
                                     dest="ignoreCompileErrors",
@@ -4148,35 +4147,27 @@ if __name__ == "__main__":
         if not m:
             fatal("Malformed architecture string.")
         opts.compilerName, compactCompilerVersion = m.groups()
-        opts.compilerVersion = ".".join([x for x in compactCompilerVersion])
-
-        # Check validity of the system compiler.
-        if opts.compilerName == "gcc" and sys.platform == "darwin":
-            if detectCompilerVersion("gcc") == opts.compilerVersion:
-                opts.systemCompiler = True
-            else:
-                opts.systemCompiler = False
+        opts.compilerVersion = ""
+        if opts.systemCompiler:
+            opts.compilerVersion = detectCompilerVersion(opts.compilerName)
         else:
-            opts.systemCompiler = False
-
-        # Check validity of the spec file.
-        if not opts.systemCompiler:
             pathname = join(opts.cmsdist, "%s.spec" % opts.compilerName)
             try:
                 lines = open(pathname).readlines()
             except IOError, e:
                 fatal("The spec %s does not match the requested architecture %s." % (pathname, opts.architecture))
-            (group, name, version) = parseRPMLine(lines, opts)
-            version = version.split("-")[0]
-            if name != opts.compilerName or version != opts.compilerVersion:
-                msg = "The compiler %s-%s (specified in %s) differs from %s-%s (specified by the architecture %s)."
-                fatal(msg % (name, version, pathname, opts.compilerName,
-                             opts.compilerVersion, opts.architecture))
+            if parseUseCompilerVersionLine(lines):
+                (group, name, version) = parseRPMLine(lines, opts)
+                opts.compilerVersion = version.split("-")[0]
+            else:
+                opts.compilerVersion = ".".join([x for x in compactCompilerVersion])
 
         arch_data = opts.architecture.split("_", 2)
         arch_data[2] = re.sub('^[a-z]+', '', arch_data[2])
-        opts.rpmQueryDefines = '--define "cmscompilerv  %s" --define "cmsos %s"' % (
-            arch_data[2], "_".join(arch_data[0:2]))
+        opts.rpmQueryDefines = '--define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
+            opts.compilerVersion.replace(".",""),
+            arch_data[2],
+            "_".join(arch_data[0:2]))
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
 
