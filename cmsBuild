@@ -25,6 +25,7 @@ import itertools
 import pickle
 from hashlib import sha256
 from cmsBuild_consts import *
+from cmsdist_config import USE_COMPILER_VERSION
 
 logLevel = 10
 NORMAL = 10
@@ -4156,7 +4157,7 @@ if __name__ == "__main__":
                 lines = open(pathname).readlines()
             except IOError, e:
                 fatal("The spec %s does not match the requested architecture %s." % (pathname, opts.architecture))
-            if parseUseCompilerVersionLine(lines):
+            if parseUseCompilerVersionLine(lines) or opts.architecture in USE_COMPILER_VERSION:
                 (group, name, version) = parseRPMLine(lines, opts)
                 opts.compilerVersion = version.split("-")[0]
             else:
