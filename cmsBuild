@@ -2686,6 +2686,11 @@ def parseOptions():
                       metavar="NAME",
                       help="Name of the repository directory on server. E.g. 'cms'.",
                       default="cms")
+    parser.add_option("--weekly",
+                      dest="weekly",
+                      help="Use current week repository. E.g. 'cms.week0 / cms.week1'",
+                      action="store_true",
+                      default=False)
     parser.add_option("--tag",
                       dest="tag",
                       metavar="NAME",
@@ -2860,6 +2865,12 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
+
+    if opts.weekly:
+        from time import time
+        n = int(((time()/86400)+4)/7)%2
+        # "4" - added to set the beginning of new week from sunday since January 1, 1970 was a Thursday
+        opts.repository = opts.repository + '.week{}'.format(n)
 
     # if cmsdist is not set then look for cmsdist/CMSDISTin local directory
     if not opts.cmsdist:
