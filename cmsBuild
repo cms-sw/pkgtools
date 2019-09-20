@@ -9,7 +9,7 @@ from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
 from commands import getstatusoutput
 from urllib2 import urlopen, URLError
-from time import strftime
+from time import strftime, time
 import sys
 import copy
 from ConfigParser import ConfigParser
@@ -2867,7 +2867,6 @@ def parseOptions():
     opts, args = parser.parse_args(None, None)
 
     if opts.weekly:
-        from time import time
         n = int(((time()/86400)+4)/7)%2
         # "4" - added to set the beginning of new week from sunday since January 1, 1970 was a Thursday
         opts.repository = opts.repository + '.week{}'.format(n)
