@@ -1,25 +1,28 @@
 #!/usr/bin/python -u
-#
+from __future__ import print_function
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
+import sys
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
 from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
-from commands import getstatusoutput
-from urllib2 import urlopen, URLError
+if sys.version_info[0] == 2:
+  from commands import getstatusoutput
+  from urllib2 import urlopen, URLError, Request
+else:
+  from subprocess import getstatusoutput
+  from urllib.request import urlopen, Request
+  from urllib.error import URLError
+  def cmp(a, b): return (a > b) - (a < b)
 from time import strftime, time
-import sys
 import copy
-from ConfigParser import ConfigParser
-from ConfigParser import InterpolationMissingOptionError
 import re, os
 import traceback
 from optparse import OptionParser, OptionGroup
 import fnmatch
 from shutil import rmtree
-import urllib2
 from glob import glob
 import itertools
 import pickle
@@ -48,7 +51,7 @@ cmsBuildFilename = abspath(__file__)
 
 
 def fatal(message):
-    print "ERROR: " + message
+    print ("ERROR: " + message)
     sys.exit(1)
 
 
@@ -71,7 +74,7 @@ of the action scheduler/worker during the build.
         message = message()
     if level <= logLevel:
         message = removeInitialSpace.sub("", message)
-        print message
+        print (message)
 
 
 def setLogLevel(options):
@@ -130,8 +133,8 @@ def should_install_from_reference(pkg):
 def get_cmspkg_repository(cmspkg):
     e, o = getstatusoutput("%s repository" % cmspkg)
     if e:
-        print "Error: Unable to run ", ref_cmspkg
-        print o
+        print ("Error: Unable to run ", ref_cmspkg)
+        print (o)
         exit(1)
     data = {}
     for l in o.split("\n"):
@@ -152,7 +155,7 @@ def check_reference(opts):
     if not opts.reference: return
     ref_cmspkg = join(opts.reference, "common", "cmspkg")
     if not exists(ref_cmspkg):
-        print "Error: Path %s is not a valid cmspkg installation area" % opts.reference
+        print ("Error: Path %s is not a valid cmspkg installation area" % opts.reference)
         exit(1)
     REF_CMSPKG_CMD = "%s -a %s" % (ref_cmspkg, opts.architecture)
     ok = True
@@ -162,10 +165,10 @@ def check_reference(opts):
     #  if (not v in ref_data) or (not v in local_data): ok = False
     #  elif ref_data[v]!=local_data[v]: ok = False
     if not ok:
-        print "Error: Can not use directory %s as cmspkg reference area." % opts.reference
-        print "Error: Repository details mismatched"
-        print "Local Server:", local_data
-        print "Reference Server:", ref_data
+        print ("Error: Can not use directory %s as cmspkg reference area." % opts.reference)
+        print ("Error: Repository details mismatched")
+        print ("Local Server:", local_data)
+        print ("Reference Server:", ref_data)
         exit(1)
     log("Using reference repository:%s" % opts.reference, DEBUG)
     black_list_file = join(dirname(cmsBuildFilename), "black_list_reference_packages.txt")
@@ -232,9 +235,9 @@ def install_reference(pkg):
 def downloadUrllib2(source, destDir, options, cmscache=False):
     try:
         dest = "/".join([destDir.rstrip("/"), basename(source)])
-        req = urllib2.Request(source, headers={"Cache-Control": "no-cache"})
-        s = urllib2.urlopen(req)
-        f = file(dest + ".tmp", "w")
+        req = Request(source, headers={"Cache-Control": "no-cache"})
+        s = urlopen(req)
+        f = open(dest + ".tmp", "wb")
         # Read in blocks to avoid using too much memory.
         block_sz = 8192 * 16
         while True:
@@ -244,13 +247,13 @@ def downloadUrllib2(source, destDir, options, cmscache=False):
             f.write(buffer)
         f.close()
         os.rename(dest + ".tmp", dest)
-    except URLError, e:
+    except URLError as e:
         if cmscache:
             log("Internal cached file not available %s: %s" % (source, e), DEBUG)
         else:
             log("Error while downloading %s: %s" % (source, e))
         return False
-    except Exception, e:
+    except Exception as e:
         log("Error while downloading %s: %s" % (source, e))
         return False
     return True
@@ -272,7 +275,7 @@ def parseUrl(url, requestedKind=None, defaults={}, required=[]):
     if deliveryProtocol:
         protocol = deliveryProtocol.strip("+")
     arguments.replace("&amp;", "&")
-    args = defaults.items()
+    args = list(defaults.items())
     parsedArgs = re.split("&", arguments)
     parsedArgs = [x.split("=") for x in parsedArgs]
     parsedArgs = [(len(x) != 2 and [x[0], True]) or x for x in parsedArgs]
@@ -407,7 +410,7 @@ def downloadCvs(source, dest, options):
     pserverUrlRe = re.compile(":pserver:.*")
     isPserver = pserverUrlRe.match(cvsroot)
     cvspassFilename = None
-    if args.has_key("passwd") and isPserver:
+    if 'passwd' in args and isPserver:
         cvspassFilename = join(tempdir, "cvspass")
         f = open(join(tempdir, "cvspass"), "w")
         f.write("/1 %(cvsroot)s %(passwd)s\n" % args)
@@ -594,7 +597,7 @@ def fixUrl(s):
     return s
 
 def getUrlChecksum(s):
-    m = md5adder(fixUrl(s))
+    m = md5adder(fixUrl(s).encode())
     return m.hexdigest()
 
 
@@ -749,7 +752,7 @@ def download(source, dest, options, pkg=None):
     downloadDir = join(cacheDir, checksum[0:2], checksum)
     try:
         makedirs(downloadDir)
-    except OSError, e:
+    except OSError as e:
         if not exists(downloadDir):
             raise downloadDir
 
@@ -1096,8 +1099,8 @@ class TagCacheAptImpl(object):
                 rpmCachePath = join(abspath("RPMS"),
                                     "cache/%(checksum)s/%(cmsplatf)s" % pkg.__dict__)
                 if "%{" in rpmCachePath:
-                    print "ERROR: you seem to be using an old rpm-preamble.file in your CMSDIST."
-                    print "Please make sure you update it to revision 1.20 at least."
+                    print ("ERROR: you seem to be using an old rpm-preamble.file in your CMSDIST.")
+                    print ("Please make sure you update it to revision 1.20 at least.")
                     sys.exit(1)
                 files = listdir(rpmCachePath % pkg.__dict__)
                 if len(files) > 1 + len(pkg.subpackages):
@@ -1126,7 +1129,7 @@ tags_cache = None
 extra_tags_cache = {}
 
 
-class CacheProxy(object):
+class CacheProxy(dict):
     def __init__(self, cache, decorator):
         """ This object is responsible for caching object but keeping in mind the fact that
             different architectures will
@@ -1141,7 +1144,7 @@ class CacheProxy(object):
         self.__cache.__setitem__(self.__decorator(name), item)
 
     def has_key(self, name):
-        return self.__cache.has_key(self.__decorator(name))
+        return self.__decorator(name) in self.__cache
 
 
 class ArchitectureDecorator(object):
@@ -1149,7 +1152,7 @@ class ArchitectureDecorator(object):
         self.__architecture = architecture
 
     def __call__(self, name):
-        return self.__architecture + name
+        return self.__architecture + "/" + name
 
 
 global checksums_cache
@@ -1310,7 +1313,7 @@ class PackageFactory(object):
                                              DEFAULT_RPATH_PREAMBLE,
                                              INITENV_PREAMBLE,
                                              COMPILER_DETECTION,
-                                             DEFAULT_SECTIONS, ])).hexdigest()
+                                             DEFAULT_SECTIONS, ]).encode()).hexdigest()
         self.options = options
         self.__cacheKeyDecorator = ArchitectureDecorator(options.architecture)
         self.__package_cache = {}
@@ -1377,7 +1380,7 @@ class PackageFactory(object):
                 specLines = [ l+"\n" for l in o.split("\n")]
             else:
                 raise FileNotFound(filename)
-        except IOError, e:
+        except IOError as e:
             raise FileNotFound(filename)
         return self.processIncludes(specLines)
 
@@ -1386,21 +1389,21 @@ class PackageFactory(object):
         specLines = self.readSpec(pkgName)
         pkg = None
         specCache = "%s/specCache/%s.%s" % (
-            self.options.tempdir, pkgName, sha256(self.__basePackageHash + str(specLines)).hexdigest())
+            self.options.tempdir, pkgName, sha256((self.__basePackageHash + str(specLines)).encode()).hexdigest())
         forceRecreate = False
         while True:
             if forceRecreate or (not exists(specCache)):
                 getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir, pkgName))
                 pkg = self.create()
                 pkg.initWithSpec(specLines)
-                pkg.depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)])).hexdigest()
-                pickle.dump(pkg, open(specCache, "w"), 1)
+                pkg.depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)]).encode()).hexdigest()
+                pickle.dump(pkg, open(specCache, "wb"), 1)
                 pkg.setOptions(self.options)
                 pkg.specCache = True
                 log("Generated cache: %s" % pkg.pkgName())
             else:
                 forceRecreate = True
-                pkg = pickle.load(open(specCache))
+                pkg = pickle.load(open(specCache,'rb'))
                 if not exists(pkg.specFilename()): continue
                 pkg.setOptions(self.options)
                 for sp in pkg.subpackages: sp.checksum = '%{nil}'
@@ -1424,7 +1427,7 @@ class PackageFactory(object):
                 elif (cachedVersion != pkg.version):
                     regen_msg = "version  %s vs %s" % (pkg.version, cachedVersion)
                 else:
-                    depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)])).hexdigest()
+                    depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)]).encode()).hexdigest()
                     if (depSum != pkg.depSum): regen_msg = "dependencies checksum %s vs %s" % (depSum, pkg.depSum)
                 if regen_msg:
                     log("Recreating package %s cache: %s" % (pkg.pkgName(), regen_msg))
@@ -1685,7 +1688,7 @@ class InstallFromServer(BuilderAction):
         pkgName = self.pkg.pkgName()
         pkgInfo = PkgInfo(self.pkg)
         pkgRealName = pkgInfo.id()
-        pkgsWithSameHash = [p for (p, h) in tags_cache.cache.iteritems() if
+        pkgsWithSameHash = [p for (p, h) in tags_cache.cache.items() if
                             (h == pkgInfo.checksum) and p.startswith(pkgRealName) and (pkgName != p)]
 
         # If a file exists on server we return True
@@ -1846,16 +1849,16 @@ class ChecksumCalculator(object):
         self.__adder.update(string)
 
     def addStrings(self, stringList):
-        self.__adder.update("".join(stringList))
+        self.__adder.update("".join(stringList).encode())
 
     def addFile(self, filename):
         assert (filename[0] == "/")
-        if checksums_cache.has_key(filename):
+        if filename in checksums_cache:
             self.__checksums[filename] = checksums_cache[filename]
             return
         if not exists(filename):
             raise FileNotFound(filename)
-        f = open(filename)
+        f = open(filename, 'rb')
         m = md5adder(f.read())
         f.close()
         checksum = m.hexdigest()
@@ -1881,9 +1884,9 @@ class ChecksumCalculator(object):
 
     def getChecksum(self):
         items = self.__checksums.items()
-        items.sort()
+        items = sorted(items)
         for key, value in items:
-            self.__adder.update(value)
+            self.__adder.update(value.encode())
         return self.__adder.hexdigest()
 
 
@@ -1996,7 +1999,7 @@ class Package(object):
         self.workDir = options.workDir
         self.installDir = options.installDir
         self.tempDirPrefix = options.tempDirPrefix
-        self.compilerRealVersion = ""
+        self.compilerRealVersion = options.compilerVersion
         self.name = ""
         self.realVersion = ""
         self.group = ""
@@ -2138,7 +2141,7 @@ class Package(object):
             [self.pkgrel, self.pkginstroot, self.builddir,
              self.__specdir, self.rpmdir,
              self.rpmfilename, self.srpmfilename] = result
-        except ValueError, e:
+        except ValueError as e:
             log("FATAL: Error unpacking results: \n%s" % result)
             raise e
         # update subpackages
@@ -2177,7 +2180,7 @@ class Package(object):
                 importFilename = join(self.options.cmsdist, importName)
                 self.spec.extend(open(importFilename).readlines())
                 self.imports.append(importFilename)
-        except IOError, e:
+        except IOError as e:
             raise FileNotFound(importFilename)
 
         # Check for sub-packages after all processing all the imports
@@ -2257,7 +2260,7 @@ class Package(object):
         checksumCalculator.addStrings(DEFAULT_SECTIONS.values())
         checksumCalculator.addStrings(PKGFactory.sectionOptions.values())
         checksumCalculator.addStrings(PKGFactory.sectionPreambles.values())
-        checksumCalculator.addStrings(PKGFactory.sectionPostambles.values() + [self.installPostambles])
+        checksumCalculator.addStrings(list(PKGFactory.sectionPostambles.values()) + [self.installPostambles])
 
         if self.options.buildWithRpath: checksumCalculator.addStrings(DEFAULT_RPATH_PREAMBLE)
 
@@ -2269,7 +2272,7 @@ class Package(object):
                 subpackage.dumpSpecFragment(not self.options.repository.split('.')[0] == "comp"))
 
         for pkg in getPackages(self.dependencies + self.buildDependencies):
-            # for a, v in pkg.__dict__.iteritems():
+            # for a, v in pkg.__dict__.items():
             #  print a,v
             checksumCalculator.addPkg(pkg)
         remotefileRE = re.compile(".*:.*/.*")
@@ -2403,8 +2406,7 @@ class Package(object):
         self.fullDependencies = self.sortPkgs(self.fullDependencies)
 
     def sortPkgs(self, deps):
-        pkgs = getPackages(deps)
-        pkgs.sort()
+        pkgs = sorted(getPackages(deps))
         return [pkg.name for pkg in pkgs]
 
     def updateDependentCount(self):
@@ -2456,11 +2458,11 @@ class Package(object):
                                PKGFactory.preamble,
                                self.sections[''][''],
                                "%description"] + list(strings))
-        f = file(self.tmpspec, "w")
+        f = open(self.tmpspec, "w")
         f.write(PKGFactory.postProcessSpec(spec).replace('%%', '%'))
         f.close()
         commandPrefix = getCommandPrefix(self.options)
-        evalCommand = "%s ; %s rpm -q --specfile %s --info %s" % (rpmEnvironmentScript, commandPrefix,
+        evalCommand = "%s ; %s rpm -q --specfile %s --info %s --define 'buildroot /foo'" % (rpmEnvironmentScript, commandPrefix,
                                                                   self.tmpspec, self.options.rpmQueryDefines)
         log(evalCommand, DEBUG)
         error, output = getstatusoutput(evalCommand)
@@ -2537,6 +2539,9 @@ class Package(object):
         self.dumpSpec(saveScripts=True)
         return self.spec
 
+    def __hash__(self):
+        return hash(repr(self))
+
     def __repr__(self):
         return "<Package name=%(name)s>" % self.__dict__
 
@@ -2546,6 +2551,9 @@ class Package(object):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def __lt__(self, other):
+        return self.__cmp__(other)==-1
 
     def __cmp__(self, other):
         """ Package A is greater than package B if
@@ -2570,7 +2578,7 @@ class Package(object):
     def getRequiresAndSources(self, subpackage=''):
         if PKGFactory.getRequiresCache().has_key(self.name):
             return PKGFactory.getRequiresCache()[self.name]
-        spec = file(self.tmpspec, "w")
+        spec = open(self.tmpspec, "w")
         text = "\n".join([self.specPreHeader,
                           SPEC_HEADER % self.__dict__,
                           PKGFactory.postProcessSpec(PKGFactory.preamble),
@@ -2584,7 +2592,7 @@ class Package(object):
         localSources = []
         localPatches = []
         buildDeps = []
-        queryCommand = "%s ; %s rpm -q --info --specfile %s %s 2>/dev/null" % (
+        queryCommand = "%s ; %s rpm -q --info --specfile %s %s --define 'buildroot /foo' 2>/dev/null" % (
             rpmEnvironmentScript, getCommandPrefix(self.options),
             self.tmpspec, self.options.rpmQueryDefines)
         regexps = PKGFactory.headerMatchingRegexp
@@ -2957,7 +2965,7 @@ def prepareSaveSpec(p):
 
 
 def saveSpec(p):
-    f = file(p.finalSpecFilename(), 'w')
+    f = open(p.finalSpecFilename(), 'w')
     # Removes the "Requires:"
     spec = re.sub("Requires:[^+\n]*\n", "\n", re.sub("BuildRequires:[^+\n]*\n", "\n", p.getFinalSpec()))
     f.write(spec)
@@ -2977,12 +2985,12 @@ def fetchLocal(pkg, sourceFilename):
                             basename(sourceFilename.rsplit(".", 1)[0]))
         log("Copying %s to %s" % (sourceFilename, destFilename), DEBUG)
         source = open(sourceFilename)
-        dest = file(destFilename, 'w')
+        dest = open(destFilename, 'w')
         dest.write(source.read())
         dest.close()
         source.close()
         return (sourceFilename, True)
-    except Exception, e:
+    except Exception as e:
         return (sourceFilename, False)
 
 
@@ -3002,7 +3010,7 @@ def fetchSources(pkg, scheduler):
         if urlRe.match(url):
             try:
                 success = download(url, sourcedir, pkg.options, pkg)
-            except MalformedUrl, e:
+            except MalformedUrl as e:
                 return str(e)
         else:
             output, success = fetchLocal(pkg, url)
@@ -3096,7 +3104,7 @@ def installRpm(pkg, bootstrap):
         if not error:
             scripts = getScriptlets(pkg, pkg.options.workDir, "")
             log("Scriptlets: %s" % scripts, DEBUG)
-            postScript = NamedTemporaryFile()
+            postScript = NamedTemporaryFile(mode='w')
             postScript.write(scripts["post"])
             postScript.flush()
             error, output = getstatusoutput("cat %s; sh -e -x %s" % (postScript.name, postScript.name))
@@ -3480,13 +3488,13 @@ def checkPackageInCache(pkg, scheduler):
         baseToolVersion = [d.version for d in getPackages(pkg.dependencies) if d.name == baseTool]
         if len(baseToolVersion) > 0:
             baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
-            if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
+            if not baseToolVersion in rpm_db_cache: fetchDependencies = ["install-%s" % baseToolVersion]
     if pkg.options.pipPackage and [s for s in pkg.sources if s[:6] == "pip://"]:
         pip = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == pkg.options.pipPackage][0]
-        if not rpm_db_cache.has_key(pip): fetchDependencies += ["install-" + pip]
+        if not pip in rpm_db_cache: fetchDependencies += ["install-" + pip]
     for d in userCommandDependencies(pkg.sources):
         dep_pkg = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == d][0]
-        if (not rpm_db_cache.has_key(dep_pkg)) and (not "install-"+dep_pkg in fetchDependencies):
+        if (not dep_pkg in rpm_db_cache) and (not "install-"+dep_pkg in fetchDependencies):
             fetchDependencies += ["install-" + dep_pkg]
     pkgSources = pkg.sources + pkg.patches
     if pkgSources:
@@ -3528,7 +3536,7 @@ def buildSpecs(topLevelPackages):
             makedirs(d)
 
     scheduler.run()
-    for (action, error) in scheduler.errors.iteritems():
+    for (action, error) in scheduler.errors.items():
         log("* The action \"%s\" was not completed successfully because %s" % (action, error))
     if scheduler.brokenJobs:
         sys.exit(1)
@@ -3557,7 +3565,7 @@ def build(opts, args, factory):
         sys.exit(0)
     if opts.sources:
         for pkg in packages:
-            for url, src in pkg.sourcesNumbers.iteritems():
+            for url, src in pkg.sourcesNumbers.items():
                 pkg_dir = 'UNKNOWN'
                 if 'export=' in url: pkg_dir = url.split("export=",1)[1].split('&')[0]
                 log("%s:%s=%s %s" % (pkg.name, src, pkg_dir, url))
@@ -3571,7 +3579,7 @@ def build(opts, args, factory):
 def isPackageInstalled(pkg):
     if pkg.options.bootstrap:
         pkgName = pkg.pkgName()
-        if rpm_db_cache.has_key(pkgName):
+        if pkgName in rpm_db_cache:
             if not isDefaultRevision(pkg.pkgRevision):
                 if rpm_db_cache[pkgName][0] < pkg.pkgRevision:
                     return False
@@ -3606,7 +3614,7 @@ def bootstrap(opts):
             "Unable to fetch file %s. Mispelled architecture/repository name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
         sys.exit(1)
     bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
-    bootstrapFile = open(bootstrapFilename, "w")
+    bootstrapFile = open(bootstrapFilename, "wb")
     bootstrapFile.write(bootstrapContents)
     bootstrapFile.close()
 
@@ -3845,7 +3853,7 @@ def upload(opts, args, factory):
 
     packageNames = [pkg.pkgName() for pkg in fullPackageList]
     pkgChecksums = list(set([p.checksum for p in fullPackageList]))
-    uploadSum = sha256("-".join(pkgChecksums)).hexdigest()
+    uploadSum = sha256("-".join(pkgChecksums).encode()).hexdigest()
     tmpdir = join(opts.workDir, opts.tempDirPrefix, "upload")
     # Create an area locally which has to be merged with the remote repository.
     createEmptyRepository = format(
@@ -4072,7 +4080,7 @@ def checkOptionsLocalSource(opts):
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
     # python from cms external area
-    if environ.has_key("SCRAMRT_SET"):
+    if 'SCRAMRT_SET' in  environ:
         fatal("You have SCRAM runtime environment set. Please run it from a fresh shell.")
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
@@ -4166,7 +4174,7 @@ if __name__ == "__main__":
             pathname = join(opts.cmsdist, "%s.spec" % opts.compilerName)
             try:
                 lines = open(pathname).readlines()
-            except IOError, e:
+            except IOError as e:
                 fatal("The spec %s does not match the requested architecture %s." % (pathname, opts.architecture))
             if parseUseCompilerVersionLine(lines) or opts.architecture in USE_COMPILER_VERSION:
                 (group, name, version) = parseRPMLine(lines, opts)
@@ -4230,25 +4238,25 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log("User requested to abort. Exiting.")
         sys.exit(1)
-    except RpmBuildFailed, e:
+    except RpmBuildFailed as e:
         log("Package %s could not build. Final lines of the build log are: " % e.pkg.name)
         logfile = open("%s/log" % e.pkg.builddir).readlines()
         for line in logfile[-10:]:
             log(line)
         sys.exit(1)
-    except RpmInstallFailed, e:
+    except RpmInstallFailed as e:
         log("The installation of %s could not be completed for the following reason:")
         log(e.why)
         sys.exit(1)
-    except NotCorrectlyBootstrapped, e:
+    except NotCorrectlyBootstrapped as e:
         log("""FATAL: While it seems that you have run bootstrap.sh, 
                the bootstrapped area actually looks broken for the following reason:""")
         log(e.why)
         sys.exit(1)
-    except FileNotFound, e:
+    except FileNotFound as e:
         log("""ERROR! File not found: %(filename)s""" % e.__dict__)
         sys.exit(1)
-    except PlatformDetectionError, e:
+    except PlatformDetectionError as e:
         log("""ERROR: Unable to detect the architecture:""")
         log("%s" % e)
         sys.exit(1)

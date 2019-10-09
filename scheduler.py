@@ -1,10 +1,15 @@
-from Queue import Queue
+from __future__ import print_function
+import sys
+if sys.version_info[0] == 2:
+  from Queue import Queue
+  from StringIO import StringIO
+else:
+  from queue import Queue
+  from io import StringIO
 from threading import Thread
 from time import sleep
 import threading
-import sys
 import traceback
-from StringIO import StringIO
 
 # Helper class to avoid conflict between result
 # codes and quit state transition.
@@ -14,8 +19,8 @@ class _SchedulerQuitCommand(object):
 def transition(what, fromList, toList):
   try:
     fromList.remove(what)
-  except ValueError, e:
-    print what + " not in source list"
+  except ValueError as e:
+    print (what + " not in source list")
     raise e
   toList.append(what)
 
@@ -59,7 +64,7 @@ class Scheduler(object):
     self.pendingJobs.append("final-job")
 
   def run(self):
-    for i in xrange(self.parallelThreads):
+    for i in range(self.parallelThreads):
       t = Thread(target=self.__createWorker())
       t.daemon = True
       t.start()
@@ -73,7 +78,7 @@ class Scheduler(object):
         item[0](*item[1:])
         sleep(0.1)
       except KeyboardInterrupt:
-        print "Ctrl-c received, waiting for workers to finish"
+        print ("Ctrl-c received, waiting for workers to finish")
         while self.workersQueue.full():
           self.workersQueue.get(False)
         self.shout(self.quit)
@@ -91,7 +96,7 @@ class Scheduler(object):
         taskId, item = self.workersQueue.get()
         try:
           result = item[0](*item[1:])
-        except Exception, e:
+        except Exception as e:
           s = StringIO()
           traceback.print_exc(file=s)
           result = s.getvalue()
@@ -109,7 +114,7 @@ class Scheduler(object):
     self.parallelThreads -= 1
 
   def parallel(self, taskId, deps, *spec):
-    if self.jobs.has_key(taskId): return
+    if taskId in self.jobs: return
     self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec}
     self.pendingJobs.append(taskId)
     self.finalJobDeps.append(taskId)
@@ -157,7 +162,7 @@ class Scheduler(object):
 
   # Helper to enqueue commands for all the threads.
   def shout(self, *commandSpec):
-    for x in xrange(self.parallelThreads):
+    for x in range(self.parallelThreads):
       self.__scheduleParallel("quit-" + str(x), commandSpec)
 
   # Helper to enqueu replies to the master thread.
@@ -166,12 +171,12 @@ class Scheduler(object):
 
   def forceDone(self, taskId):
     if taskId in self.doneJobs: return
-    if not self.jobs.has_key(taskId): self.jobs[taskId]={}
+    if not taskId in self.jobs: self.jobs[taskId]={}
     if not taskId in self.pendingJobs: self.pendingJobs.append(taskId)
     transition(taskId, self.pendingJobs, self.doneJobs)
     
   def serial(self, taskId, deps, *commandSpec):
-    if self.jobs.has_key(taskId): return
+    if taskId in self.jobs: return
     spec = [self.doSerial, taskId, deps] + list(commandSpec)
     self.resultsQueue.put((threading.currentThread(), spec))
     self.jobs[taskId] = {"scheduler": "serial", "deps": deps, "spec": spec}
@@ -197,7 +202,7 @@ class Scheduler(object):
       transition(taskId, self.pendingJobs, self.runningJobs)
       try:
         result = commandSpec[0](*commandSpec[1:])
-      except Exception, e:
+      except Exception as e:
         s = StringIO()
         traceback.print_exc(file=s)
         result = s.getvalue()
@@ -216,7 +221,7 @@ class Scheduler(object):
 
   # Helper for printouts.
   def __doLog(self, s):
-    print s
+    print (s)
 
   def reschedule(self):
     self.notifyMaster(self.__rescheduleParallel)
@@ -251,7 +256,7 @@ if __name__ == "__main__":
   scheduler.run()
 
   scheduler = Scheduler(1)
-  for x in xrange(10):
+  for x in range(10):
     scheduler.parallel("test", [], dummyTask)
     scheduler.serial("test", [], dummyTask)
   scheduler.run()
@@ -261,7 +266,7 @@ if __name__ == "__main__":
   assert(len(scheduler.jobs) == 2)
   
   scheduler = Scheduler(10)
-  for x in xrange(50):
+  for x in range(50):
     scheduler.parallel("test" + str(x), [], dummyTask)
   scheduler.run()
   # Notice we have 51 jobs because there is always a toplevel one
@@ -296,9 +301,9 @@ if __name__ == "__main__":
 
   # Check ctrl-C will exit properly.
   scheduler = Scheduler(2)
-  for x in xrange(250):
+  for x in range(250):
     scheduler.parallel("test" + str(x), [], dummyTask)
-  print "Print Control-C to continue"
+  print ("Print Control-C to continue")
   scheduler.run()
 
   # Handle tasks with exceptions.
