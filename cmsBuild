@@ -3849,7 +3849,7 @@ def upload(opts, args, factory):
                          pkg.pkgName().startswith("external+bootstrap-driver+")]
     CMSCommonPackages = [pkg.pkgName() for pkg in fullPackageList if pkg.pkgName().startswith("cms+cms-common+")]
     if BootstrapPackages: BootstrapPackage = "/".join(BootstrapPackages[0].split("+", 2))
-    if CMSCommonPackage: CMSCommonPackage = "/".join(CMSCommonPackages[0].split("+", 2))
+    if CMSCommonPackages: CMSCommonPackage = "/".join(CMSCommonPackages[0].split("+", 2))
 
     packageNames = [pkg.pkgName() for pkg in fullPackageList]
     pkgChecksums = list(set([p.checksum for p in fullPackageList]))
@@ -3904,7 +3904,7 @@ def upload(opts, args, factory):
                             "fi\n"
                             "echo Looking for local cms common build\n"
                             "if [ 'X%(CMSCommonPackage)s' != 'X' ] ; then\n"
-                            "  [ -f common/cmsos ] cp common/cmsos %(tmpdir)s/%(uploadSum)s\n"
+                            "  [ -f %(CMSCommonPackage)s/.package-checksum ] && cp ../common/cmsos %(tmpdir)s/%(uploadSum)s\n"
                             "fi\n",
                             workdir=opts.workDir,
                             tmpdir=tmpdir,
@@ -3943,7 +3943,7 @@ def upload(opts, args, factory):
                 checksum_in=checksum_in)
 
     (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, sources]))
-    logAndDieOnError(err, "Error while creating the local repository.")
+    logAndDieOnError(err, "Error while creating the local repository.\n"+out)
 
     repoInfo = {"uploadDir": uploadDir,
                 "repository": opts.repository,
