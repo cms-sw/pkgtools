@@ -1846,7 +1846,7 @@ class ChecksumCalculator(object):
         self.__checksums = {}
 
     def addString(self, string):
-        self.__adder.update(string)
+        self.__adder.update(string.encode())
 
     def addStrings(self, stringList):
         self.__adder.update("".join(stringList).encode())
