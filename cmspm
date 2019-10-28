@@ -538,7 +538,7 @@ def cmd_frombase(args):
     sys.exit(0)
     
   print "Running scram project..."
-  popen(['scram', 'p', 'CMSSW', project])
+  popen(['scram', '-a', getenv("SCRAM_ARCH"), 'p', 'CMSSW', project])
   os.chdir(project)
   print "Running scram project... DONE"
 
@@ -552,7 +552,7 @@ def cmd_frombase(args):
     print "Running cms-sparse-checkout... DONE"
   else:
     print "Running cms-checkout-topic..."
-    popen('eval `scram run -sh` && git cms-checkout-topic --ssh %s && git cms-addpkg -y FWCore/Version && git cms-checkdeps -A -a' % (release), False, True)
+    popen('eval `scram run -sh` && export NEW_BASE=%s && git cms-checkout-topic --ssh %s && git cms-addpkg -y FWCore/Version && git cms-checkdeps -A -a' % (release, release), False, True)
     print "Running cms-checkout-topic... DONE"
 
   checkBigProducts(release)
