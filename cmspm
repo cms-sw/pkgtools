@@ -538,7 +538,7 @@ def cmd_frombase(args):
     sys.exit(0)
     
   print "Running scram project..."
-  popen(['scram', 'p', 'CMSSW', project])
+  popen(['scram', '-a', getenv("SCRAM_ARCH"), 'p', 'CMSSW', project])
   os.chdir(project)
   print "Running scram project... DONE"
 
