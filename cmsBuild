@@ -897,27 +897,33 @@ def parseRPMLine(specLines, opts):
     raise MalformedSpec
 
 
-def parseSpecFlag(specLines, flag):
-    flagRe = re.compile("^##\s+%s\s*$" % flag)
+def parseSpecFlag(specLines, flag, args=''):
+    flagRe = re.compile("^##\s+%s%s\s*$" % (flag,args))
     for line in specLines:
         if flagRe.match(line):
-            return True
-    return False
+            return line
+    return ''
 
 def parseNoCompilerLine(specLines):
-    return parseSpecFlag(specLines, "NOCOMPILER")
+    return parseSpecFlag(specLines, "NOCOMPILER")!=''
 
 
 def parseNoAutoDependencyLine(specLines):
-    return parseSpecFlag(specLines, "NO_AUTO_DEPENDENCY")
+    return parseSpecFlag(specLines, "NO_AUTO_DEPENDENCY")!=''
 
 
 def parseBuildRequireToolfileLine(specLines):
-    return parseSpecFlag(specLines, "BUILDREQUIRE-TOOLFILE")
+    return parseSpecFlag(specLines, "BUILDREQUIRE-TOOLFILE")!=''
 
 
 def parseUseCompilerVersionLine(specLines):
-    return parseSpecFlag(specLines, "USE_COMPILER_VERSION")
+    return parseSpecFlag(specLines, "USE_COMPILER_VERSION")!=''
+
+
+def parseNoDeleteBuildLogs(specLines):
+    line = parseSpecFlag(specLines, "NO_DELETE_BUILD_LOGS",'(\s+[a-zA-Z0-9_.-]+)+')
+    if not line: return ''
+    return line.split(" NO_DELETE_BUILD_LOGS ",1)[-1].strip()
 
 
 class PkgInfo(object):
@@ -2047,6 +2053,7 @@ class Package(object):
         self.noAutoDependency = False
         self.override_version = ""
         self.pkgExtraRepo = None
+        self.buildLogsToKeep = ""
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2112,6 +2119,7 @@ class Package(object):
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
+        self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
         self.setInitEnv()
@@ -2759,6 +2767,11 @@ def parseOptions():
                                     default="",
                                     metavar="COMMAND",
                                     help="String to prepend to any rpmbuild command")
+    advancedBuildOptions.add_option("--delete-build-directory",
+                                    dest="deleteBuildDirectory",
+                                    action="store_true",
+                                    help="Delete the build directory after successfully building a package.",
+                                    default=False)
     advancedBuildOptions.add_option("--pretend",
                                     dest="pretend",
                                     action="store_true",
@@ -3292,9 +3305,19 @@ def buildPackage(pkg, scheduler):
         logLines = open(logfile).readlines()
         return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
             pkg.name, logfile, "".join(logLines[-20:]))
+    if opts.deleteBuildDirectory:
+      optionsDict["pkgname"] = pkg.name
+      optionsDict["logs"] = "log %s" % pkg.buildLogsToKeep
+      cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
+            "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
+            "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ ; done ; " \
+            "rm -rf %(builddir)s && " \
+            "mv %(tmpdir)s/%(pkgname)s-logs %(builddir)s" % optionsDict
+      scheduler.log("Build logs cleanup %s" % pkg.name)
+      e, o = getstatusoutput(cmd)
     if output:
         return output
-    scheduler.log("Build successful.")
+    scheduler.log("Build successful %s." % pkg.name)
 
     # link the RPM from the unique name to the friendly name
     symlink(uniqueRpmFilename, finalRpmFilename)
