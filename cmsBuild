@@ -3248,6 +3248,7 @@ def buildPackage(pkg, scheduler):
     if pkg.options.ignoreCompileErrors:
         optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\""
     optionsDict["tmpdir"] = join(opts.workDir, opts.tempDirPrefix)
+    optionsDict["xtmpdir"] = join(pkg.builddir, 'cmsdist-tmp')
     optionsDict["rpmenv"] = rpmEnvironmentScript
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                         "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
@@ -3260,8 +3261,9 @@ def buildPackage(pkg, scheduler):
     if err:
         return "ERROR: unable to find working rpmbuild"
 
-    rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git ; %(rpmenv)s ; " \
-                      " TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+    rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; "\
+                      "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
+                      "TMPDIR=%(xtmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
     if pkg.pkgExtraRepo:
