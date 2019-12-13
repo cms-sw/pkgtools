@@ -2443,13 +2443,15 @@ class Package(object):
                                 secScript, secScript, sectionContents)
                         if self.options.reference and (section in ["%install"]):
                             sectionContents += "\n%{relocateReference}\n"
+                        if not self.noAutoDependency:
+                            if section in ["%install"]:
+                                sectionContents += "\n%{?AutoSetupDependencies:%AutoSetupDependencies}"
+                            if section in ["%post"]:
+                                rConf = '%{relocateConfig}'
+                                replicateStr = '%%{?AutoSetupDependenciesRelocate:%%AutoSetupDependenciesRelocate}\n%s' % rConf
+                                sectionContents = replicateStr.join(sectionContents.split(rConf,1))
                         self.spec += "\n\n%s %s %s\n" % (section, subsection, PKGFactory.sectionOptions[section])
                         self.spec += sectionContents
-                        if not self.noAutoDependency:
-                            if section in [
-                                "%install"]: self.spec += "\n%{?AutoSetupDependencies:%AutoSetupDependencies}"
-                            if section in [
-                                "%post"]: self.spec += "\n%{?AutoSetupDependenciesRelocate:%AutoSetupDependenciesRelocate}"
         self.spec = PKGFactory.postProcessSpec(self.spec)
 
         for subpackage in self.subpackages:
