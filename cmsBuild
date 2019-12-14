@@ -237,7 +237,8 @@ def downloadUrllib2(source, destDir, options, cmscache=False):
         dest = "/".join([destDir.rstrip("/"), basename(source)])
         req = Request(source, headers={"Cache-Control": "no-cache"})
         s = urlopen(req)
-        f = open(dest + ".tmp", "wb")
+        tmpfile = "%s.%f.tmp" % (dest, time())
+        f = open(tmpfile, "wb")
         # Read in blocks to avoid using too much memory.
         block_sz = 8192 * 16
         while True:
@@ -246,7 +247,10 @@ def downloadUrllib2(source, destDir, options, cmscache=False):
                 break
             f.write(buffer)
         f.close()
-        os.rename(dest + ".tmp", dest)
+        if not exists(dest):
+            os.rename(tmpfile, dest)
+        else:
+            unlink(tmpfile)
     except URLError as e:
         if cmscache:
             log("Internal cached file not available %s: %s" % (source, e), DEBUG)
