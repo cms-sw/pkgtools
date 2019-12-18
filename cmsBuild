@@ -16,7 +16,7 @@ else:
   from urllib.request import urlopen, Request
   from urllib.error import URLError
   def cmp(a, b): return (a > b) - (a < b)
-from time import strftime, time
+from time import strftime, time, sleep
 import copy
 import re, os
 import traceback
@@ -29,10 +29,8 @@ import pickle
 from hashlib import sha256
 from cmsBuild_consts import *
 from cmsdist_config import USE_COMPILER_VERSION
-import subprocess
-import psutil
-from threading import Thread
-from json import dump as jsn_dmp
+try: from monitor_build import run_monitor_on_command
+except: run_monitor_on_command=None
 
 logLevel = 10
 NORMAL = 10
@@ -2828,7 +2826,7 @@ def parseOptions():
                                     help="CSV of package(s) which should not be taken from reference repostiroy.")
     advancedBuildOptions.add_option("--new-scheduler", dest="newScheduler", action="store_true",
                                     default=False, help="Use the new scheduler to install / build packages")
-    advancedBuildOptions.add_option("--with-rpmbuild-monitor", dest="enableMonitor", action="store_true",
+    advancedBuildOptions.add_option("--monitor", dest="enableMonitor", action="store_true",
                                     default=False, help="Enable rpmbuild jobs stats monitoring")
     # FIXME: change option to --no-deprecate and do the deprecation
     #        automatically by default.
@@ -2899,6 +2897,9 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
+    if opts.enableMonitor and not run_monitor_on_command:
+        opts.enableMonitor = False
+        log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
 
     if opts.weekly:
         n = int(((time()/86400)+4)/7)%2
@@ -3278,7 +3279,7 @@ def buildPackage(pkg, scheduler):
                       "TMPDIR=%(xtmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
-
+    monitor_job = opts.enableMonitor
     if pkg.pkgExtraRepo:
         rep = pkg.pkgExtraRepo
         exrpm=format("%(tmpdir)s/repo/%(rep)s/%(arch)s/var/cmspkg/rpms/%(rpmname)s",
@@ -3309,13 +3310,14 @@ def buildPackage(pkg, scheduler):
                 depOK = False
                 break
         if depOK:
+            monitor_job = False
             rpmbuildCommand ="mv %s %s" % (exrpm, uniqueRpmFilename)
 
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
 
-    if opts.enableMonitor:
-        error, output = run_monitor_on_command(rpmbuildCommand, pkg.name, opts.architecture)
+    if monitor_job:
+        error, output = run_monitor_on_command(rpmbuildCommand, "%s/%s.json" % (pkg.builddir, pkg.name))
     else:
         error, output = getstatusoutput(rpmbuildCommand)
 
@@ -3327,10 +3329,10 @@ def buildPackage(pkg, scheduler):
             pkg.name, logfile, "".join(logLines[-20:]))
     if opts.deleteBuildDirectory:
       optionsDict["pkgname"] = pkg.name
-      optionsDict["logs"] = "log %s" % pkg.buildLogsToKeep
+      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json" % pkg.name if monitor_job else "")
       cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
             "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
-            "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ ; done ; " \
+            "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ || true; done ; " \
             "rm -rf %(builddir)s && " \
             "mv %(tmpdir)s/%(pkgname)s-logs %(builddir)s" % optionsDict
       scheduler.log("Build logs cleanup %s" % pkg.name)
@@ -3397,9 +3399,6 @@ def installPackage(pkg, scheduler):
     f.close()
     if pkg_error: raise RpmBuildFailed(pkg)
     scheduler.reschedule()
-
-
-from time import sleep
 
 
 class ActionFactory(object):
@@ -4118,67 +4117,6 @@ def checkOptionsLocalSource(opts):
         elif source is "Source0":
             sourceOptionDict[pkg]["Source"] = source_path
         opts.localSources = sourceOptionDict
-
-# bring the monitor script from cms-bot as functions
-# TODO make it work without shell=True as the monitor script is currently working
-
-def update_monitor_stats(proc):
-    stats = {"rss": 0, "vms": 0, "shared": 0, "data": 0, "uss": 0, "pss": 0, "num_fds": 0, "num_threads": 0, "processes": 0, "cpu": 0}
-    children = proc.children(recursive=True)
-    clds = len(children)
-    if clds==0: return stats
-    stats['processes'] = clds
-    for cld in children:
-        try:
-            mem   = cld.memory_full_info()
-            fds   = cld.num_fds()
-            thrds = cld.num_threads()
-            cld.cpu_percent(interval=None)
-            sleep(0.1)
-            cpu   = int(cld.cpu_percent(interval=None))
-            stats['num_fds'] += fds
-            stats['num_threads'] += thrds
-            stats['cpu'] += cpu
-            for a in ["rss", "vms", "shared", "data", "uss", "pss"]: stats[a]+=getattr(mem,a)
-        except:pass
-    return stats
-
-def monitor_stats(stop, p_id, st_file_name = None):
-
-    stime = int(time())
-    p = psutil.Process(p_id)
-    stats_f_name = st_file_name
-    if not st_file_name:
-        stats_f_name = stime
-    data = []
-    while not stop():
-        try:
-            stats = update_monitor_stats(p)
-            if stats['processes']==0: break
-            stats['time'] = int(time()-stime)
-            data.append(stats)
-        except: pass
-        sleep_time = 1.0 - stats['processes']*0.1
-        if sleep_time > 0.1: sleep(sleep_time)
-    with open("wf_stats-%s.json" % stats_f_name, "w") as sf:
-        jsn_dmp(data, sf)
-    return
-
-def run_monitor_on_command(command_to_monitor=None, package_name='', architecture=''):
-
-    stats_file_name = package_name+"_"+architecture
-    if stats_file_name is '_': stats_file_name = None
-    stop_monitoring = False
-
-    p = subprocess.Popen(command_to_monitor, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, close_fds= True)
-    sleep(1)
-    mon_thd = Thread(target=monitor_stats, args=(lambda: stop_monitoring, p.pid, stats_file_name,))
-    mon_thd.start()
-    stout, sterr = p.communicate() # this blocks until the process is finished
-    stop_monitoring = True
-    mon_thd.join()
-
-    return sterr, stout
 
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
