@@ -32,6 +32,7 @@ from cmsdist_config import USE_COMPILER_VERSION
 import subprocess
 import psutil
 from threading import Thread
+from json import dump as jsn_dmp
 
 logLevel = 10
 NORMAL = 10
@@ -4159,11 +4160,8 @@ def monitor_stats(stop, p_id, st_file_name = None):
         except: pass
         sleep_time = 1.0 - stats['processes']*0.1
         if sleep_time > 0.1: sleep(sleep_time)
-    from json import dump
-
-    stat_file =open("wf_stats-%s.json" % stats_f_name,"w")
-    dump(data, stat_file)
-    stat_file.close()
+    with open("wf_stats-%s.json" % stats_f_name, "w") as sf:
+        jsn_dmp(data, sf)
     return
 
 def run_monitor_on_command(command_to_monitor=None, package_name='', architecture=''):
