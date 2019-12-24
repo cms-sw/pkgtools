@@ -25,7 +25,7 @@ case $CMSSW_X_Y_Z in
 esac
 
 case $ARCH in
-  osx*|slc*|fc*) ;;
+  osx*|slc*|fc*|cc*) ;;
   *) echo "Malformed architecture name." ; exit 1 ;;
 esac
 
