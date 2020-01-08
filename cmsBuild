@@ -2705,7 +2705,8 @@ def parseOptions():
                       dest="compilingProcesses",
                       metavar="N",
                       help="The number of processes to be used to compile a given package.",
-                      default=1)
+                      default=1,
+                      type="int")
     parser.add_option("--repository",
                       dest="repository",
                       metavar="NAME",
