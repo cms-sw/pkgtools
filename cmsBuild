@@ -3319,7 +3319,9 @@ def buildPackage(pkg, scheduler):
 
     if monitor_job:
         from json import dump as jdump
-        build_opts = {"builders": opts.workersPoolSize, "build_jobs": opts.compilingProcesses}
+        err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
+        build_opts = {"builders": opts.workersPoolSize, "build_jobs": opts.compilingProcesses,
+                      "arch": opts.architecture, "dist_branch": cmsdist_branch}
         with open(pkg.builddir + "/opts.json", "w") as bopts_file:
             jdump(build_opts, bopts_file)
 
