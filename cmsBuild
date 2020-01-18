@@ -3313,8 +3313,8 @@ def buildPackage(pkg, scheduler):
         if err: cmsdist_branch = ""
         err, hname = getstatusoutput("hostname")
         build_opts = {"builders": opts.workersPoolSize, "build_jobs": opts.compilingProcesses,
-                      "arch": opts.architecture, "dist_branch": cmsdist_branch, "package_name": pkg.name,
-                      "package_real_version": pkg.realVersion, "package_version": pkg.version, "checksum": pkg.checksum,
+                      "architecture": opts.architecture, "cmsdist": cmsdist_branch, "name": pkg.name,
+                      "realversion": pkg.realVersion, "version": pkg.version, "checksum": pkg.checksum,
                       "hostname": hname}
         with open(pkg.builddir + "/opts.json", "w") as bopts_file:
             jdump(build_opts, bopts_file)
