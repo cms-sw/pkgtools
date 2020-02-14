@@ -205,7 +205,7 @@ def install_reference(pkg):
     args = {"cmsroot": pkg.options.workDir, "refroot": pkg.options.reference, "cmsplatf": pkg.options.architecture}
     args['pkgdir'] = join(pkg.options.architecture, *pkg_parts)
     tmp_path = join(pkg.options.tempdir, "reference", pkg.pkgName())
-    makedirs(tmp_path)
+    makedirs(join(tmp_path,"BUILDROOT"))
     tmp_spec = join(tmp_path, "package.spec")
     spec = open(tmp_spec, "w")
     infoReg = re.compile("^(Name|Version|Release|Group|License|Packager|Vendor|Summary)\s*:.*")
@@ -219,7 +219,7 @@ def install_reference(pkg):
     spec.write("Prefix: %s\n" % pkg.options.installDir)
     spec.write(REFERENCE_PACKAGE_POST % args)
     spec.close()
-    command = "%s; rpmbuild -bb --define '_topdir %s' %s" % (rpmEnvironmentScript, tmp_path, tmp_spec)
+    command = "%s; rpmbuild -bb --buildroot %s/BUILDROOT --define '_topdir %s' %s" % (rpmEnvironmentScript, tmp_path, tmp_path, tmp_spec)
     error, output = getstatusoutput(command)
     if error:
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
