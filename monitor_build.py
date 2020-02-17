@@ -5,8 +5,10 @@ from json import dump as json_dump
 from time import time, sleep
 
 def update_monitor_stats(proc):
+    children = []
+    try: children = proc.children(recursive=True)
+    except: return {}
     stats = {"rss": 0, "vms": 0, "shared": 0, "data": 0, "uss": 0, "pss": 0, "num_fds": 0, "num_threads": 0, "processes": 0, "cpu": 0}
-    children = proc.children(recursive=True)
     clds = len(children)
     if clds==0: return stats
     stats['processes'] = clds
@@ -33,6 +35,7 @@ def monitor_stats(p_id, stats_file_name):
     data = []
     while p.is_running():
         stats = update_monitor_stats(p)
+        if not stats: continue
         stats['time'] = int(time()-stime)
         data.append(stats)
         sleep(1.0)
