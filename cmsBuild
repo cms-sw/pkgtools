@@ -3266,7 +3266,7 @@ def buildPackage(pkg, scheduler):
     if err:
         return "ERROR: unable to find working rpmbuild"
 
-    rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git ; %(rpmenv)s ; " \
+    rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git ; export _CMSBUILD_BUILD_ENV_=1;  %(rpmenv)s ; " \
                       " TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
@@ -4128,7 +4128,6 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
     environ["LC_ALL"] = "C"
-    environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
 
