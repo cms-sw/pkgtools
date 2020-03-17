@@ -3276,6 +3276,7 @@ def buildPackage(pkg, scheduler):
         return "ERROR: unable to find working rpmbuild"
 
     rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; "\
+                      "export _CMSBUILD_BUILD_ENV_=1; " \
                       "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
                       "TMPDIR=%(xtmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
@@ -4139,7 +4140,6 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
     environ["LC_ALL"] = "C"
-    environ["_CMSBUILD_BUILD_ENV_"] = "1"
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
 
