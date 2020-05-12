@@ -3373,10 +3373,30 @@ def installPackage(pkg, scheduler):
         rpm_env = rpmEnvironmentScript
         command = "%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
         error, output = getstatusoutput(command)
-        if error: raise RpmBuildFailed(pkg)
+        if error:
+            scheduler.log(output)
+            raise RpmBuildFailed(pkg)
         localPaths = [l for l in output.split("\n") if l.startswith(pkg.options.workDir)]
         if localPaths:
-            scheduler.log("Error: Local path dependency found for %s\n  %s" % (pkg.pkgName(), "\n  ".join(localPaths)))
+            scheduler.log("Error: Local path dependency found for %s." % pkg.pkgName())
+            tmpDir = join(pkg.workDir, pkg.tempDirPrefix, "unpack", pkg.name)
+            rpmLoc = pkg.rpmLocation()
+            command = "rm -rf %(tmpDir)s; mkdir -p %(tmpDir)s"
+            if sys.platform == 'darwin':
+                command += "; cd %(tmpDir)s; rpm2cpio %(rpmLoc)s | cpio --insecure -idmv"
+            else:
+                command += "; cd %(tmpDir)s; rpm2cpio %(rpmLoc)s | cpio  -idmv"
+            error, output = getstatusoutput(command % locals())
+            if error:
+                scheduler.log(output)
+                raise RpmBuildFailed(pkg)
+            msg = ""
+            for lpath in localPaths:
+                msg +="--> %s\n" % lpath
+                error, output = getstatusoutput("cd %s; grep -rlI '%s' ." % (tmpDir, lpath))
+                msg += output+"\n"
+            scheduler.log(msg)
+            error, output = getstatusoutput("rm -rf %s" % tmpDir)
             pkg_error = True
         if pkg.options.checkPackageDeps:
             pkg_deps = ["system-base-import", pkg.rpmLocation()] + [p.pkgName() for p in pkg.dependencies]
