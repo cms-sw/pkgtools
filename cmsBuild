@@ -907,6 +907,11 @@ def parseSpecFlag(specLines, flag, args=''):
             return line
     return ''
 
+
+def parseNoVersionSuffix(specLines):
+    return parseSpecFlag(specLines, "NO_VERSION_SUFFIX")!=''
+
+
 def parseNoCompilerLine(specLines):
     return parseSpecFlag(specLines, "NOCOMPILER")!=''
 
@@ -1044,7 +1049,7 @@ class TagCacheAptImpl(object):
                 return n
         return None
 
-    def requestTag(self, pkgInfo, tag):
+    def requestTag(self, pkgInfo, tag, allowSuffix):
         """ requestTag returns a unique tag (i.e. the mnemonic suffix at the
             end of the package name) based on what is found in the online
             database and in the local build area.
@@ -1072,7 +1077,7 @@ class TagCacheAptImpl(object):
             tags[tempTag] = checksum
         # Use --force-tag to always append the tag (e.g. "-cms") to the package name,
         # even if it is the first version being built.
-        for i in itertools.count(1 if self.options.forcetag else 0):
+        for i in itertools.count(1 if (self.options.forcetag and allowSuffix) else 0):
             finalTag = idToTag(i, tag)
             if finalTag not in tags:
                 break
@@ -1208,7 +1213,7 @@ def calculateHumanReadableVersion(pkg):
         log("%s is aliased to \'%s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
     elif pkg.options.tag:
         pkgInfo = PkgInfo(pkg)
-        tag = tags_cache.requestTag(pkgInfo, pkg.options.tag)
+        tag = tags_cache.requestTag(pkgInfo, pkg.options.tag, pkg.versionSuffix)
         log("Attempt to assign %s to \'%s\'" % (pkg.checksum, tag), DEBUG)
     else:
         tag = pkg.checksum
@@ -2057,6 +2062,7 @@ class Package(object):
         self.override_version = ""
         self.pkgExtraRepo = None
         self.buildLogsToKeep = ""
+        self.versionSuffix = True
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2121,6 +2127,7 @@ class Package(object):
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
+        self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
