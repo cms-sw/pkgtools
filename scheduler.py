@@ -48,6 +48,7 @@ class Scheduler(object):
     self.jobs = {}
     self.pendingJobs = []
     self.runningJobs = []
+    self.runningJobsCache = []
     self.doneJobs = []
     self.brokenJobs = []
     self.parallelThreads = parallelThreads
@@ -140,9 +141,15 @@ class Scheduler(object):
 
     # Otherwise do another round of scheduling of all the tasks. In this
     # case we only queue parallel jobs to the parallel queue.
+    dumpMsg = (self.runningJobsCache != self.runningJobs)
+    if dumpMsg:
+      self.runningJobsCache = self.runningJobs[:]
+      self.log("Running tasks: %s" % self.runningJobs,30)
     for taskId in parallelJobs:
       pendingDeps = [dep for dep in self.jobs[taskId]["deps"] if not dep in self.doneJobs]
       if pendingDeps:
+        if dumpMsg:
+          self.log("%s: Pending tasks: %s" % (taskId, pendingDeps),30)
         continue
       # No broken dependencies and no pending ones. we can continue.
       transition(taskId, self.pendingJobs, self.runningJobs)
@@ -211,8 +218,8 @@ class Scheduler(object):
     self.notifyMaster(self.__rescheduleParallel)
   
   # Helper method to do logging:
-  def log(self, s):
-    self.notifyMaster(self.logDelegate, s)
+  def log(self, s, level=0):
+    self.notifyMaster(self.logDelegate, s, level)
 
   # Task which forces a worker to quit.
   def quit(self):
@@ -220,7 +227,7 @@ class Scheduler(object):
     return _SchedulerQuitCommand()
 
   # Helper for printouts.
-  def __doLog(self, s):
+  def __doLog(self, s, level=0):
     print (s)
 
   def reschedule(self):
