@@ -508,10 +508,17 @@ def downloadGit(source, dest, options):
         return False
     return packCheckout(args["tempdir"], args["dest"], args["export"])
 
+def getPipSourceDependency(sources, default_pip_pkg):
+    pip_sources = [s for s in sources if s.startswith("pip://")]
+    if pip_sources:
+        deps = userCommandDependencies(pip_sources)
+        if (not deps) and default_pip_pkg: deps = [default_pip_pkg]
+        return deps
+    return []
+
 def userCommandDependencies(sources):
     extra_build_deps = {}
-    for s in sources:
-        if not "package_dependency=" in s: continue
+    for s in [x for x in sources if "package_dependency=" in x]:
         for d in s.split("package_dependency=",1)[-1].replace(' ','').split("&")[0].split(","):
             extra_build_deps[d]=1
     return extra_build_deps.keys()
@@ -578,7 +585,7 @@ def downloadPip(source, dest, options):
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
     comm = pip + ' download ' + pip_opts + ' --disable-pip-version-check  -d . ' + pack + '; /bin/ls | grep -v files.list > files.list'
-    return downloadCmd(source, dest, options, comm, [options.pipPackage])
+    return downloadCmd(source, dest, options, comm, getPipSourceDependency([source], options.pipPackage))
 
 
 downloadHandlers = {'cvs': downloadCvs,
@@ -2653,14 +2660,9 @@ class Package(object):
                 return siteDep
             return d
 
-        if self.options.pipPackage:
-            if [s for s in sources if s.startswith("pip://")]:
-                pip_pkgs = [s.split('pip_package=',1)[-1].split('&',1)[0] for s in sources if 'pip_package=' in s]
-                if not pip_pkgs:
-                    pip_pkgs = [self.options.pipPackage]
-                for pip_pkg in pip_pkgs:
-                    if not pip_pkg in deps + buildDeps:
-                        buildDeps.append(pip_pkg)
+        for pip_pkg in getPipSourceDependency(sources, self.options.pipPackage):
+            if not pip_pkg in deps + buildDeps:
+                buildDeps.append(pip_pkg)
 
         for d in userCommandDependencies(sources):
             if not d in deps + buildDeps: buildDeps.append(d)
@@ -3562,13 +3564,17 @@ def checkPackageInCache(pkg, scheduler):
         baseToolVersion = [d.version for d in getPackages(pkg.dependencies) if d.name == baseTool]
         if len(baseToolVersion) > 0:
             baseToolVersion = "cms+%s+%s" % (baseTool, baseToolVersion[0])
-            if not rpm_db_cache.has_key(baseToolVersion): fetchDependencies = ["install-%s" % baseToolVersion]
-    if pkg.options.pipPackage and [s for s in pkg.sources if s[:6] == "pip://"]:
-        pip = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == pkg.options.pipPackage][0]
-        if not rpm_db_cache.has_key(pip): fetchDependencies += ["install-" + pip]
+            if not baseToolVersion in rpm_db_cache: fetchDependencies = ["install-%s" % baseToolVersion]
+    pip_pkgs = getPipSourceDependency(pkg.sources, pkg.options.pipPackage)
+    if pip_pkgs:
+        full_deps = getPackages(pkg.fullDependencies)
+        for pip_pkg in pip_pkgs:
+            pip = [p.pkgName() for p in full_deps if p.name == pip_pkg][0]
+            if (not pip in rpm_db_cache) and (not "install-"+pip in fetchDependencies):
+                fetchDependencies += ["install-" + pip]
     for d in userCommandDependencies(pkg.sources):
         dep_pkg = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == d][0]
-        if (not rpm_db_cache.has_key(dep_pkg)) and (not "install-"+dep_pkg in fetchDependencies):
+        if (not dep_pkg in rpm_db_cache) and (not "install-"+dep_pkg in fetchDependencies):
             fetchDependencies += ["install-" + dep_pkg]
     pkgSources = pkg.sources + pkg.patches
     if pkgSources:
@@ -3594,7 +3600,7 @@ def checkPackageInCache(pkg, scheduler):
 # New version using the new scheduler.
 def buildSpecs(topLevelPackages):
     from scheduler import Scheduler
-    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize)
+    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
             scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, pkg, scheduler)
