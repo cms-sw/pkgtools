@@ -2829,10 +2829,8 @@ def parseOptions():
     advancedBuildOptions.add_option("--monitor", dest="enableMonitor", action="store_true",
                                     default=False, help="Enable rpmbuild jobs stats monitoring")
     advancedBuildOptions.add_option("--ldps", "--log-deps",
-                                    dest="depsLog",
-                                    default=getcwd(),
-                                    metavar="PATH",
-                                    help="path to json formatted log of dependencies")
+                                    dest="depsLog", action="store_true",
+                                    default=False, help="store json formatted log of dependencies in workDir/DEPS")
     # FIXME: change option to --no-deprecate and do the deprecation
     #        automatically by default.
     # parser.add_option ("--deprecate-local",
@@ -2981,7 +2979,7 @@ def parseOptions():
 
 def createDirs(architecture, dest="./"):
     dirs = ["SPECS", join("RPMS", architecture),
-            "SRPMS", join("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB"]
+            "SRPMS", join("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB", "DEPS"]
     for d in dirs:
         try:
             makedirs(join(abspath(dest), d))
@@ -3182,7 +3180,7 @@ def scheduleInstallPackage(pkg, scheduler):
         return checkCanInstallRpm(pkg)
 
     if not bootstrapped: return False
-
+    
     scheduler.log("Checking if %s is cached." % pkg.name)
     actionName = "install-%s" % pkg.pkgName()
     if checkCanInstallRpm(pkg):
@@ -3624,10 +3622,10 @@ def build(opts, args, factory):
     rpmCacheUpdate(opts)
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
     if opts.depsLog:
-        from json import dump as jdump
         from json import dumps as jdumps 
         err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
-        cmsdist_gh_url = "https://github.com/cms-sw/cmsdist/blob" 
+        cmsdist_gh_url = "https://github.com/cms-sw/cmsdist/blob"
+        
     for pkg in packages:
         logMessage = "Package %s requested." % pkg.pkgName()
         if not isDefaultRevision(pkg.pkgRevision):
@@ -3642,19 +3640,14 @@ def build(opts, args, factory):
             #get the deps for all packages to be built
             if opts.depsLog:
                 deplist = getPackages(deps)
-                deps_string=''
-                final_object = []
+                deps_object = []
                 for pkgdep in deplist:
-                    dlist = [ pkgdep.name, pkgdep.realVersion, pkgdep.version, pkgdep.checksum ]
-                    dlist.extend(pkgdep.sources)
                     ptchs = [os.path.join(cmsdist_gh_url ,cmsdist_branch ,os.path.basename(p)) for p in pkgdep.patches]
-                    dlist.extend(ptchs)
-                    deps_string = deps_string + ', '.join(dlist) + '\n'
-                    final_object.append({"pkgname":pkgdep.name, "version_short":pkgdep.realVersion, "version_long":pkgdep.version, "checksum": pkgdep.checksum, "patches":ptchs, "sources":pkgdep.sources })
-                
-                with open(os.path.join(opts.depsLog, pkg.name+'_dependencies.json'), 'w') as depfile:
-                    depfile.write(jdumps(final_object, indent=2, sort_keys=True, separators=(',', ': ')))
+                    docs = os.path.join(cmsdist_gh_url, cmsdist_branch, pkgdep.name,"docs.txt")
+                    deps_object.append({"pkgname":pkgdep.name, "version_short":pkgdep.realVersion, "version_long":pkgdep.version, "checksum": pkgdep.checksum, "patches":ptchs, "sources":pkgdep.sources, "docs":docs })
 
+                with open(os.path.join(opts.workDir, "DEPS", pkg.name+'_dependencies.json'), 'w') as depfile:
+                    depfile.write(jdumps(deps_object, indent=2, sort_keys=True, separators=(',', ': ')))
 
     if opts.specsOnly:
         log("SPECS files written")
