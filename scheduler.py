@@ -144,7 +144,7 @@ class Scheduler(object):
       pendingDeps = [dep for dep in self.jobs[taskId]["deps"] if not dep in self.doneJobs]
       if pendingDeps:
         if dumpMsg:
-          self.log("%s: Pending tasks: %s" % (taskId, pendingDeps),30)
+          self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
       # No broken dependencies and no pending ones. we can continue.
       transition(taskId, self.pendingJobs, self.runningJobs)
