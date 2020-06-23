@@ -3618,11 +3618,12 @@ def getPackageDependencies(pkg):
     pkg_list = getPackages(pkg.fullDependencies + [pkg.name])
     self_description = {}
     for p in pkg_list:
-        self_description.update({p.name : {"pkgname": p.name, "realversion": p.realVersion,
+        self_description.update({p.name : {"name": p.name, "realversion": p.realVersion,
                                            "version": p.version,
                                            "checksum": p.checksum, 
                                            "patches": [os.path.basename(patch_path) for patch_path in p.patches],
-                                           "dependencies": [d for d in sorted(p.fullDependencies)],
+                                           "dependencies": [d for d in sorted(p.origDependencies)],
+                                           "build_dependencies": [d for d in sorted(p.origBuildDependencies)],
                                            "sources": p.sources, "doc": p.name+'/doc.txt'}})
     return self_description
 
