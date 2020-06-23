@@ -3623,6 +3623,7 @@ def getPackageDependencies(pkg):
                                            "checksum": p.checksum, 
                                            "patches": [os.path.basename(patch_path) for patch_path in p.patches],
                                            "dependencies": [d for d in sorted(p.origDependencies)],
+                                           "revision" : p.pkgRevision,
                                            "build_dependencies": [d for d in sorted(p.origBuildDependencies)],
                                            "sources": p.sources, "doc": p.name+'/doc.txt'}})
     return self_description
