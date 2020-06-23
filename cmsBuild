@@ -3614,6 +3614,17 @@ def buildSpecs(topLevelPackages):
     if scheduler.brokenJobs:
         sys.exit(1)
 
+def getPackageDependencies(pkg):
+    pkg_list = getPackages(pkg.fullDependencies + [pkg.name])
+    self_description = {}
+    for p in pkg_list:
+        self_description.update({p.name : {"pkgname": p.name, "realversion": p.realVersion,
+                                           "version": p.version,
+                                           "checksum": p.checksum, 
+                                           "patches": [os.path.basename(patch_path) for patch_path in p.patches],
+                                           "dependencies": [d for d in sorted(p.fullDependencies)],
+                                           "sources": p.sources, "doc": p.name+'/doc.txt'}})
+    return self_description
 
 def build(opts, args, factory):
     err, out = getstatusoutput("%s ; rpm --version" % rpmEnvironmentScript)
@@ -3621,11 +3632,14 @@ def build(opts, args, factory):
         fatal("unable to find a working rpm.")
     rpmCacheUpdate(opts)
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
+
     if opts.depsLog:
-        from json import dumps as jdumps 
-        err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
-        cmsdist_gh_url = "https://github.com/cms-sw/cmsdist/blob"
-        
+        from json import dumps as jdumps
+        for pkg in packages:
+            deps_object = getPackageDependencies(pkg)
+            with open(os.path.join(opts.workDir, "DEPS", pkg.name + '.json'), 'w') as depfile:
+                depfile.write(jdumps(deps_object, indent=2, sort_keys=True, separators=(',', ': ')))
+
     for pkg in packages:
         logMessage = "Package %s requested." % pkg.pkgName()
         if not isDefaultRevision(pkg.pkgRevision):
@@ -3637,17 +3651,6 @@ def build(opts, args, factory):
             finalString = "\n".join(["%s (%s)" % (dep.pkgName(), dep.checksum)
                                      for dep in getPackages(deps)])
             log(finalString)
-            #get the deps for all packages to be built
-            if opts.depsLog:
-                deplist = getPackages(deps)
-                deps_object = []
-                for pkgdep in deplist:
-                    ptchs = [os.path.join(cmsdist_gh_url ,cmsdist_branch ,os.path.basename(p)) for p in pkgdep.patches]
-                    docs = os.path.join(cmsdist_gh_url, cmsdist_branch, pkgdep.name,"docs.txt")
-                    deps_object.append({"pkgname":pkgdep.name, "version_short":pkgdep.realVersion, "version_long":pkgdep.version, "checksum": pkgdep.checksum, "patches":ptchs, "sources":pkgdep.sources, "docs":docs })
-
-                with open(os.path.join(opts.workDir, "DEPS", pkg.name+'_dependencies.json'), 'w') as depfile:
-                    depfile.write(jdumps(deps_object, indent=2, sort_keys=True, separators=(',', ': ')))
 
     if opts.specsOnly:
         log("SPECS files written")
