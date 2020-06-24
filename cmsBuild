@@ -3628,6 +3628,8 @@ def getPackageDependencies(pkg):
     pkg_list = getPackages(pkg.fullDependencies + [pkg.name])
     self_description = {}
     for p in pkg_list:
+        doc_file = ""
+        if os.path.exists(os.path.join(p.options.cmsdist, p.name, 'doc.txt')): doc_file = p.name+'/doc.txt'
         self_description.update({p.name : {"name": p.name, "realversion": p.realVersion,
                                            "version": p.version,
                                            "checksum": p.checksum, 
@@ -3635,7 +3637,7 @@ def getPackageDependencies(pkg):
                                            "dependencies": [d for d in sorted(p.origDependencies)],
                                            "revision" : p.pkgRevision,
                                            "build_dependencies": [d for d in sorted(p.origBuildDependencies)],
-                                           "sources": p.sources, "doc": p.name+'/doc.txt'}})
+                                           "sources": p.sources, "doc": doc_file}})
     return self_description
 
 def build(opts, args, factory):
