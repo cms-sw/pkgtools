@@ -2842,6 +2842,9 @@ def parseOptions():
                                     default=False, help="Use the new scheduler to install / build packages")
     advancedBuildOptions.add_option("--monitor", dest="enableMonitor", action="store_true",
                                     default=False, help="Enable rpmbuild jobs stats monitoring")
+    advancedBuildOptions.add_option("--ldps", "--log-deps",
+                                    dest="depsLog", action="store_true",
+                                    default=False, help="store json formatted log of dependencies in workDir/DEPS")
     # FIXME: change option to --no-deprecate and do the deprecation
     #        automatically by default.
     # parser.add_option ("--deprecate-local",
@@ -2990,7 +2993,7 @@ def parseOptions():
 
 def createDirs(architecture, dest="./"):
     dirs = ["SPECS", join("RPMS", architecture),
-            "SRPMS", join("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB"]
+            "SRPMS", join("BUILD", architecture), "SOURCES", "BUILDROOT", "WEB", "DEPS"]
     for d in dirs:
         try:
             makedirs(join(abspath(dest), d))
@@ -3633,6 +3636,21 @@ def buildSpecs(topLevelPackages):
     if scheduler.brokenJobs:
         sys.exit(1)
 
+def getPackageDependencies(pkg, opts):
+    pkg_list = getPackages(pkg.fullDependencies + [pkg.name])
+    self_description = {}
+    for p in pkg_list:
+      doc_file = ""
+      if os.path.exists(os.path.join(opts.cmsdist, p.name, 'doc.txt')): doc_file = p.name+'/doc.txt'
+      self_description.update({p.name : {"name": p.name, "realversion": p.realVersion,
+                                         "version": p.version,
+                                         "checksum": p.checksum, 
+                                         "patches": [os.path.basename(patch_path) for patch_path in p.patches],
+                                         "dependencies": [d for d in sorted(p.origDependencies)],
+                                         "revision" : p.pkgRevision,
+                                         "build_dependencies": [d for d in sorted(p.origBuildDependencies)],
+                                         "sources": p.sources, "doc": doc_file}})
+    return self_description
 
 def build(opts, args, factory):
     err, out = getstatusoutput("%s ; rpm --version" % rpmEnvironmentScript)
@@ -3640,6 +3658,14 @@ def build(opts, args, factory):
         fatal("unable to find a working rpm.")
     rpmCacheUpdate(opts)
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
+    
+    if opts.depsLog:
+      from json import dumps as jdumps
+      for pkg in packages:
+        deps_object = getPackageDependencies(pkg, opts)
+        with open(os.path.join(opts.workDir, "DEPS", pkg.name + '.json'), 'w') as depfile:
+          depfile.write(jdumps(deps_object, indent=2, sort_keys=True, separators=(',', ': ')))
+
     for pkg in packages:
         logMessage = "Package %s requested." % pkg.pkgName()
         if not isDefaultRevision(pkg.pkgRevision):
