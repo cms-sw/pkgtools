@@ -3626,12 +3626,12 @@ def buildSpecs(topLevelPackages):
     if scheduler.brokenJobs:
         sys.exit(1)
 
-def getPackageDependencies(pkg, opts):
+def getPackageDependencies(pkg):
     pkg_list = getPackages(pkg.fullDependencies + [pkg.name])
     self_description = {}
     for p in pkg_list:
       doc_file = ""
-      if os.path.exists(os.path.join(opts.cmsdist, p.name, 'doc.txt')): doc_file = p.name+'/doc.txt'
+      if os.path.exists(os.path.join(p.options.cmsdist, p.name, 'doc.txt')): doc_file = p.name+'/doc.txt'
       self_description.update({p.name : {"name": p.name, "realversion": p.realVersion,
                                          "version": p.version,
                                          "checksum": p.checksum, 
@@ -3652,7 +3652,7 @@ def build(opts, args, factory):
     if opts.depsLog:
       from json import dumps as jdumps
       for pkg in packages:
-        deps_object = getPackageDependencies(pkg, opts)
+        deps_object = getPackageDependencies(pkg)
         with open(os.path.join(opts.workDir, "DEPS", pkg.name + '.json'), 'w') as depfile:
           depfile.write(jdumps(deps_object, indent=2, sort_keys=True, separators=(',', ': ')))
 
