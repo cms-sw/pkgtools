@@ -3070,8 +3070,8 @@ def checkIfOnServer(pkg):
     log("Checking if package %s can be downloaded from apt servers" % pkgName, DEBUG)
     if pkgName in tags_cache.cache:
         if isDefaultRevision(pkg.pkgRevision): return True
-        pkgRevision = tags_cache.revision_cache[pkgName]
-        if pkg.pkgRevision <= pkgRevision:
+        pkgRevision = int(tags_cache.revision_cache[pkgName])
+        if int(pkg.pkgRevision) <= pkgRevision:
             log(
                 "RPM %s found in apt repository with a revision greater than the current one. Accepting package." % pkgName,
                 DEBUG)
