@@ -785,7 +785,9 @@ def download(source, dest, options, pkg=None):
         log("Trying to fetch cached file: %s" % cachedFile, DEBUG)
         getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
         success = downloadHandlers["http"](cachedFile, downloadDir, downloadOptions, True)
-        if success: break
+        if success:
+            noCmssdtCache = True
+            break
     if not success:
         log("Trying to fetch source file: %s" % source, DEBUG)
         success = downloadHandler(source, downloadDir, downloadOptions)
