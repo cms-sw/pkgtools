@@ -3283,7 +3283,7 @@ def executeScript(opts, dumpedScript, local=True):
   if local:
     executionCmd="sh -e %(debug)s %(filename)s"
   else:
-    executionCmd="ssh < %(filename)s -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+    executionCmd="ssh < %(filename)s -o StrictHostKeyChecking=no -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
   # Run (or print-out) the script
   if not opts.pretend:
     fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
@@ -3531,7 +3531,7 @@ def upload(opts, args, factory):
 
   repoInfo = {"uploadDir": uploadDir,
               "repository": opts.repository,
-              "rsync": format("rsync -e 'ssh -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
+              "rsync": format("rsync -e 'ssh -o StrictHostKeyChecking=no -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",port=opts.uploadPort),
               "server": opts.uploadServer,
               "user": opts.uploadUser}
 
