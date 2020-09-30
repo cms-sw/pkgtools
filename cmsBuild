@@ -939,6 +939,10 @@ def parseBuildRequireToolfileLine(specLines):
 def parseUseCompilerVersionLine(specLines):
     return parseSpecFlag(specLines, "USE_COMPILER_VERSION")!=''
 
+def parseInstallDependencies(specLines):
+    line = parseSpecFlag(specLines, "INSTALL_DEPENDENCIES",'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
+    if not line: return []
+    return [x for x in line.split(" INSTALL_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
 
 def parseNoDeleteBuildLogs(specLines):
     line = parseSpecFlag(specLines, "NO_DELETE_BUILD_LOGS",'(\s+[a-zA-Z0-9_.-]+)+')
@@ -2144,6 +2148,7 @@ class Package(object):
                 self.origDependencies.append(compilerName)
         self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
+        self.installDependencies = parseInstallDependencies(self.spec)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
@@ -3663,7 +3668,13 @@ def build(opts, args, factory):
         fatal("unable to find a working rpm.")
     rpmCacheUpdate(opts)
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
-    
+
+    for p in packages:
+      for pkg in [p]+getPackages(p.fullDependencies):
+        for ipkg in pkg.installDependencies:
+          if not PKGFactory.has_key(ipkg):
+            packages.append(factory.createWithSpec(ipkg))
+
     if opts.depsLog:
       from json import dumps as jdumps
       for pkg in packages:
@@ -3845,7 +3856,7 @@ def allPackagesToUpload(args, factory):
     def allDeps(pkg, factory, dep_cache={}):
         if pkg in dep_cache: return dep_cache[pkg]
         deps = [pkg]
-        for dep in getPackages(pkg.fullDependencies):
+        for dep in getPackages(pkg.fullDependencies+pkg.installDependencies):
             for subdep in allDeps(dep, factory, dep_cache):
                 if not subdep in deps: deps.append(subdep)
         dep_cache[pkg] = deps
@@ -3963,6 +3974,10 @@ def upload(opts, args, factory):
     fullPackageList = uploadablePackages
     if not fullPackageList:
         return statusAndLog(True, "Nothing needs to be uploaded")
+    for pkg in [p  for p in fullPackageList if p.installDependencies]:
+      xdep_file = join(opts.workDir, opts.tempDirPrefix, basename(pkg.rpmfilename[:-3])+"dep")
+      with open(xdep_file, "w") as ref:
+        ref.write("\n".join([p.pkgName() for p in getPackages(pkg.installDependencies)]))
     fullUploadRepo = opts.repository if opts.syncBack else "%s.%s" % (opts.repository, opts.uploadTmpRepository)
     log("Ready to upload to %s." % fullUploadRepo)
 
@@ -3996,7 +4011,10 @@ def upload(opts, args, factory):
         "  hi=$(echo $h | sed 's|^\(..\).*|\\1|')\n"
         "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
         "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
-        "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/$(echo $r | sed 's|.*/||')\n"
+        "    rn=$(echo $r | sed 's|.*/||;s|.rpm$||')\n"
+        "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/${rn}.rpm\n"
+        "    dep=%(workdir)s/%(tempDirPrefix)s/${rn}.dep\n"
+        "    if [ -e $dep ] ; then cp -f $dep %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/; fi\n"
         "    echo $(basename $r)\" \"$(%(md5sum)s) >> $MD5CACHE\n"
         "  done\n"
         "done\n"
@@ -4007,6 +4025,7 @@ def upload(opts, args, factory):
         "fi\n",
         rsync="rsync --chmod=a+rX",
         workdir=opts.workDir,
+        tempDirPrefix=opts.tempDirPrefix,
         tmpdir=tmpdir,
         includes=" ".join(pkgChecksums),
         architecture=opts.architecture,
