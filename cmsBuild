@@ -1373,7 +1373,10 @@ class PackageFactory(object):
         for vp in glob(join(cmsdist,'*','cmsdist_packages.py')):
             sys.path.insert(0,dirname(vp))
             pkg = __import__('cmsdist_packages')
-            pkg.packages(pkgs)
+            try:
+              pkg.packages(pkgs, self.options)
+            except TypeError as e:
+              pkg.packages(pkgs)
             sys.modules.pop('cmsdist_packages')
             x=sys.path.pop(0)
         return pkgs
