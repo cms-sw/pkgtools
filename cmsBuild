@@ -1949,6 +1949,7 @@ class SubPackage(object):
         self.buildDependencies = [parent.name] + parent.buildDependencies
         self.origBuildDependencies = [parent.name] + parent.origBuildDependencies
         self.fullDependencies = [parent.name] + parent.fullDependencies
+        self.installDependencies = []
         self.dependentCounter = 0
         self.patches = parent.patches
         self.rpmdir = parent.rpmdir
@@ -2068,6 +2069,7 @@ class Package(object):
         self.buildDependencies = []
         self.origBuildDependencies = []
         self.fullDependencies = []
+        self.installDependencies = []
         self.origSpec = []
         self.spec = []
         self.checksum = "%{nil}"
