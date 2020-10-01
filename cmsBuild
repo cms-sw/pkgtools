@@ -3846,6 +3846,8 @@ def allPackagesToUpload(args, factory):
     def allDeps(pkg, factory, dep_cache={}):
         if pkg in dep_cache: return dep_cache[pkg]
         deps = [pkg]
+        for ipkg in [p for p in pkg.installDependencies if not PKGFactory.has_key(p)]:
+            factory.createWithSpec(ipkg)
         for dep in getPackages(pkg.fullDependencies+pkg.installDependencies):
             for subdep in allDeps(dep, factory, dep_cache):
                 if not subdep in deps: deps.append(subdep)
