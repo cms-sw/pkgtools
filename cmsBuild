@@ -3607,7 +3607,7 @@ def checkPackageInCache(pkg, scheduler):
     if pkgSources:
         scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
     buildActionDependencies = []
-    for p in getPackages(list(set(pkg.origDependencies + pkg.origBuildDependencies))):
+    for p in getPackages(list(set(pkg.origDependencies + pkg.origBuildDependencies+pkg.installDependencies))):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
