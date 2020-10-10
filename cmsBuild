@@ -3167,7 +3167,7 @@ def installApt(pkg, scheduler, cache=[]):
     if pkg.options.reference:
         if pkg.name in cache: return
         cache.append(pkg.name)
-        for dep in getPackages(pkg.dependencies): installApt(dep, scheduler, cache)
+        for dep in getPackages(pkg.dependencies+pkg.installDependencies): installApt(dep, scheduler, cache)
         if should_install_from_reference(pkg):
             if not is_package_installed(pkg, rpm_db_cache): install_reference(pkg)
             scheduler.forceDone("check-%s" % pkg)
@@ -3180,7 +3180,7 @@ def installApt(pkg, scheduler, cache=[]):
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
     log("Done installing via cmspkg.", DEBUG)
-    for dep in pkg.dependencies:
+    for dep in pkg.dependencies+pkg.installDependencies:
         scheduler.forceDone("check-%s" % dep)
         scheduler.forceDone("install-%s" % dep)
 
