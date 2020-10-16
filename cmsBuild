@@ -1381,7 +1381,7 @@ class PackageFactory(object):
             sys.path.insert(0,dirname(vp))
             pkg = __import__('cmsdist_packages')
             try:
-              pkg.packages(pkgs, self.options)
+              pkg.packages(pkgs, self)
             except TypeError as e:
               pkg.packages(pkgs)
             sys.modules.pop('cmsdist_packages')
@@ -2836,6 +2836,10 @@ def parseOptions():
                                     action="store_true",
                                     help="""Added rpath to the executables. This is done at post install time.""",
                                     default=None)
+    advancedBuildOptions.add_option("--vectorization",
+                                    dest="vectorization",
+                                    help="""CSV of vectorization instruction set flags e.g sse4.2,avx2,nehalem,haswell,skylake-avx512""",
+                                    default="")
     advancedBuildOptions.add_option("--reference",
                                     dest="reference",
                                     default=None,
@@ -2930,6 +2934,11 @@ def parseOptions():
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
 
+    if opts.vectorization:
+        opts.vectorization = opts.vectorization.strip().split(",")
+    else:
+        opts.vectorization = []
+
     if opts.weekly:
         n = int(((time()/86400)+4)/7)%2
         # "4" - added to set the beginning of new week from sunday since January 1, 1970 was a Thursday
@@ -3021,9 +3030,10 @@ def prepareSaveSpec(p):
 
 def saveSpec(p):
     f = open(p.finalSpecFilename(), 'w')
-    # Removes the "Requires:"
-    spec = re.sub("Requires:[^+\n]*\n", "\n", re.sub("BuildRequires:[^+\n]*\n", "\n", p.getFinalSpec()))
-    f.write(spec)
+    # Removes the Requires: and BuildRequires:
+    for l in p.getFinalSpec().split("\n"):
+        if ("+" not in l) and (("Requires: " in l) or ("BuildRequires: " in l)): continue
+        f.write(l+"\n")
     # Fix for RPM 4.4.: We need to add something at the end of the spec file otherwise
     # any multiline macro in the %post section does not expant properly if it is not followed
     # by any other command/comment.
@@ -4332,6 +4342,10 @@ if __name__ == "__main__":
             opts.compilerVersion.replace(".",""),
             arch_data[2],
             "_".join(arch_data[0:2]))
+        if opts.vectorization:
+            opts.rpmQueryDefines += ' --define "package_vectorization %s"' % " ".join(opts.vectorization)
+        else:
+            opts.rpmQueryDefines += ' --define "package_vectorization %{nil}"'
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
 
