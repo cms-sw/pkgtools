@@ -4326,7 +4326,8 @@ if __name__ == "__main__":
 
         arch_data = opts.architecture.split("_", 2)
         arch_data[2] = re.sub('^[a-z]+', '', arch_data[2])
-        opts.rpmQueryDefines = '--define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
+        opts.rpmQueryDefines  = '--define "cmsdist_directory %s"' % opts.cmsdist
+        opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
             "_".join(arch_data[0:2]))
