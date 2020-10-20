@@ -2775,6 +2775,11 @@ def parseOptions():
                                     help="Overwrite given package's source location to local directory "
                                          "(package:source=directory, can be repeated multiple times).",
                                     default=None)
+    advancedBuildOptions.add_option("--force-upload",
+                                    dest="forceUpload",
+                                    action="store_true",
+                                    help="Force upload, specially if local sources are used.",
+                                    default=False)
     advancedBuildOptions.add_option("--use-system-compiler",
                                     dest="systemCompiler",
                                     action="store_true",
@@ -3006,7 +3011,7 @@ def parseOptions():
         fatal(
             "Tmp upload repository name '%s' contains invalid characters. Allowed characters are: a-zA-Z0-9_" % opts.uploadTmpRepository)
 
-    if opts.localSources and 'upload' in args:
+    if opts.localSources and (not opts.forceUpload) and ('upload' in args):
         fatal("'upload' option can not be used together with '--source' flag.")
 
     return opts, args
