@@ -2434,6 +2434,10 @@ class Package(object):
             self.updateDependencies(require, self.origBuildDependencies, self.buildDependencies, True)
         for dep in self.dependencies:
             if dep in self.buildDependencies:     self.buildDependencies.remove(dep)
+        for pkg in getPackages(self.origDependencies):
+          for idep in pkg.installDependencies:
+            self.installDependencies.append(idep)
+        self.installDependencies = list(set(self.installDependencies))
         self.fullDependencies = self.dependencies + self.buildDependencies
         self.updateDependentCount()
         self.dependencies = self.sortPkgs(self.dependencies)
@@ -3182,7 +3186,7 @@ def installApt(pkg, scheduler, cache=[]):
     if pkg.options.reference:
         if pkg.name in cache: return
         cache.append(pkg.name)
-        for dep in getPackages(pkg.dependencies+pkg.installDependencies): installApt(dep, scheduler, cache)
+        for dep in getPackages(pkg.dependencies): installApt(dep, scheduler, cache)
         if should_install_from_reference(pkg):
             if not is_package_installed(pkg, rpm_db_cache): install_reference(pkg)
             scheduler.forceDone("check-%s" % pkg)
@@ -3195,7 +3199,7 @@ def installApt(pkg, scheduler, cache=[]):
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
     log("Done installing via cmspkg.", DEBUG)
-    for dep in pkg.dependencies+pkg.installDependencies:
+    for dep in pkg.dependencies:
         scheduler.forceDone("check-%s" % dep)
         scheduler.forceDone("install-%s" % dep)
 
@@ -3678,7 +3682,7 @@ def build(opts, args, factory):
       for pkg in [p]+getPackages(p.fullDependencies):
         for ipkg in pkg.installDependencies:
           if not PKGFactory.has_key(ipkg):
-            packages.append(factory.createWithSpec(ipkg))
+            packages.insert(0, factory.createWithSpec(ipkg))
 
     if opts.depsLog:
         from json import dumps as jdumps
