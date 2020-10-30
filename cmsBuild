@@ -2882,6 +2882,12 @@ def parseOptions():
                            dest="uploadTmpRepository",
                            help="Name of temporary repository to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
                            default=getuser())
+    uploadGroup.add_option("--link-parent-repository",
+                          dest="linkParentRepository",
+                          action="store_true",
+                          help="When upload without sync-back then do not copy parents repository packages but just create a link. tag=hash will be used if this is set.",
+                          default=False)
+
 
     uploadGroup.add_option("--server-apt-env",
                            dest="serverAptEnv",
@@ -2922,6 +2928,9 @@ def parseOptions():
     if opts.enableMonitor and not run_monitor_on_command:
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
+
+    if opts.linkParentRepository and opts.tag!="hash":
+      fatal("Can not use --link-parent-repository without setting --tag=hash")
 
     if opts.vectorization:
         opts.vectorization = opts.vectorization.strip().split(",")
@@ -4067,12 +4076,13 @@ def upload(opts, args, factory):
     if err: logAndDieOnError(err, "Error while uploading to remote repository.")
 
     upload = format(
-        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s'\n",
+        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s'\n",
         tmpdir=tmpdir,
         tmpUploadDir=basename(uploadDir),
         architecture=opts.architecture,
         cmspkg_upload_repo=cmspkg_upload_repo,
         useDev=useDev,
+        inc="true" if opts.linkParentRepository else "false",
         **repoInfo)
     (err, msg) = executeScript(opts, upload, False)
     if err:
