@@ -3340,7 +3340,7 @@ def buildPackage(pkg, scheduler):
             pkg.name, logfile, "".join(logLines[-20:]))
     if opts.deleteBuildDirectory:
       optionsDict["pkgname"] = pkg.name
-      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json opts.json" % pkg.name if monitor_job else "")
+      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json opts.json" % pkg.name if opts.enableMonitor else "")
       cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
             "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
             "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ || true; done ; " \
