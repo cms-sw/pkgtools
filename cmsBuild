@@ -1219,11 +1219,10 @@ def calculateHumanReadableVersion(pkg):
     if tag != None:
         log("%s is aliased to \'%s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
     elif pkg.options.tag:
-        if pkg.options.tag == "hash":
-          tag = pkg.checksum
-        else:
-          pkgInfo = PkgInfo(pkg)
-          tag = tags_cache.requestTag(pkgInfo, pkg.options.tag, pkg.versionSuffix)
+        pkgInfo = PkgInfo(pkg)
+        tag = tags_cache.requestTag(pkgInfo, pkg.options.tag, pkg.versionSuffix)
+        if tag and pkg.options.tag == "hash":
+            tag = pkg.checksum
         log("Attempt to assign %s to \'%s\'" % (pkg.checksum, tag), DEBUG)
     else:
         tag = pkg.checksum
