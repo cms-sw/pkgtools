@@ -1151,9 +1151,8 @@ class TagCacheAptImpl(object):
         assert (False and "Not implemented for the time being.")
 
 
-global tags_cache, extra_tags_cache
+global tags_cache
 tags_cache = None
-extra_tags_cache = {}
 
 
 class CacheProxy(object):
@@ -1214,19 +1213,14 @@ def calculateHumanReadableVersion(pkg):
         return pkg.realVersion
     log("%s has checksum %s" % (pkg.name, pkg.checksum), DEBUG)
     tag = tags_cache.getTag(pkg)
-    if (tag is None) and extra_tags_cache:
-        for r in extra_tags_cache:
-            expkg = extra_tags_cache[r].findPkg(pkg)
-            if expkg:
-                if expkg in tags_cache.cache: continue
-                tag = package2tag(expkg , pkg.realVersion)
-                pkg.pkgExtraRepo = r
-                break
     if tag != None:
         log("%s is aliased to \'%s\', using \'%s\'" % (pkg.checksum, tag, tag), DEBUG)
     elif pkg.options.tag:
-        pkgInfo = PkgInfo(pkg)
-        tag = tags_cache.requestTag(pkgInfo, pkg.options.tag, pkg.versionSuffix)
+        if pkg.options.tag == "hash":
+          tag = pkg.checksum
+        else:
+          pkgInfo = PkgInfo(pkg)
+          tag = tags_cache.requestTag(pkgInfo, pkg.options.tag, pkg.versionSuffix)
         log("Attempt to assign %s to \'%s\'" % (pkg.checksum, tag), DEBUG)
     else:
         tag = pkg.checksum
@@ -2078,7 +2072,6 @@ class Package(object):
         self.buildRequireToolfile = False
         self.noAutoDependency = False
         self.override_version = ""
-        self.pkgExtraRepo = None
         self.buildLogsToKeep = ""
         self.versionSuffix = True
 
@@ -2846,11 +2839,6 @@ def parseOptions():
                                     default=None,
                                     metavar="PATH",
                                     help="Path to an existing installation which can be used to install already available packages.")
-    advancedBuildOptions.add_option("--extra-repositories",
-                                    dest="extraRepositories",
-                                    metavar="NAME",
-                                    help="Comma separated list of extra repositories to look for pre-build packages e.g. cms.week0,cms.week1",
-                                    default=None)
     advancedBuildOptions.add_option("--black-list",
                                     dest="blackList",
                                     default="",
@@ -2894,6 +2882,12 @@ def parseOptions():
                            dest="uploadTmpRepository",
                            help="Name of temporary repository to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
                            default=getuser())
+    uploadGroup.add_option("--link-parent-repository",
+                          dest="linkParentRepository",
+                          action="store_true",
+                          help="When upload without sync-back then do not copy parents repository packages but just create a link. tag=hash will be used if this is set.",
+                          default=False)
+
 
     uploadGroup.add_option("--server-apt-env",
                            dest="serverAptEnv",
@@ -2934,6 +2928,9 @@ def parseOptions():
     if opts.enableMonitor and not run_monitor_on_command:
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
+
+    if opts.linkParentRepository and opts.tag!="hash":
+      fatal("Can not use --link-parent-repository without setting --tag=hash")
 
     if opts.vectorization:
         opts.vectorization = opts.vectorization.strip().split(",")
@@ -3317,44 +3314,10 @@ def buildPackage(pkg, scheduler):
                       " TMPDIR=%(tmpdir)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
-    monitor_job = opts.enableMonitor
-    if pkg.pkgExtraRepo:
-        rep = pkg.pkgExtraRepo
-        exrpm=format("%(tmpdir)s/repo/%(rep)s/%(arch)s/var/cmspkg/rpms/%(rpmname)s",
-                        tmpdir=optionsDict["tmpdir"],
-                        rep=rep,
-                        arch=opts.architecture,
-                        rpmname = basename(pkg.rpmfilename))
-        rpmbuildCommandX = format("(echo %(cmspkg)s download %(pkgName)s; %(cmspkg)s download %(pkgName)s; %(cmspkg)s env -- rpm  --requires -qp %(exrpm)s) >%(logfile)s 2>&1",
-                                 cmspkg = extra_tags_cache[rep].cmspkg_command,
-                                 pkgName = pkg.pkgName(),
-                                 logfile=logfile,
-                                 exrpm = exrpm)
-        error, output = getstatusoutput(rpmbuildCommandX)
-        if error:
-            if not exists(logfile):
-                return "Error happened before any log output.\n%s" % output
-            logLines = open(logfile).readlines()
-            return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
-                pkg.name, logfile, "".join(logLines[-20:]))
-        allDepsPkgs = ["%s+%s+%s" % (p.group, p.name, p.version)
-                          for p in getPackages(pkg.fullDependencies)
-                          if p.name != "system-compiler"]
-        depOK = True
-        for dep in [l.strip() for l in open(logfile).readlines()]:
-            ditems = dep.split('+',2)
-            if (len(ditems) != 3) or (ditems[1] not in pkg.fullDependencies): continue
-            if dep not in allDepsPkgs:
-                depOK = False
-                break
-        if depOK:
-            monitor_job = False
-            rpmbuildCommand ="mv %s %s" % (exrpm, uniqueRpmFilename)
-
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
 
-    if monitor_job:
+    if opts.enableMonitor:
         from json import dump as jdump
         err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
         if err: cmsdist_branch = ""
@@ -3377,7 +3340,7 @@ def buildPackage(pkg, scheduler):
             pkg.name, logfile, "".join(logLines[-20:]))
     if opts.deleteBuildDirectory:
       optionsDict["pkgname"] = pkg.name
-      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json opts.json" % pkg.name if monitor_job else "")
+      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json opts.json" % pkg.name if opts.enableMonitor else "")
       cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
             "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
             "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ || true; done ; " \
@@ -4113,12 +4076,13 @@ def upload(opts, args, factory):
     if err: logAndDieOnError(err, "Error while uploading to remote repository.")
 
     upload = format(
-        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s'\n",
+        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s'\n",
         tmpdir=tmpdir,
         tmpUploadDir=basename(uploadDir),
         architecture=opts.architecture,
         cmspkg_upload_repo=cmspkg_upload_repo,
         useDev=useDev,
+        inc="true" if opts.linkParentRepository else "false",
         **repoInfo)
     (err, msg) = executeScript(opts, upload, False)
     if err:
@@ -4369,15 +4333,6 @@ if __name__ == "__main__":
                         symlink(envSh.replace(opts.workDir + "/" + opts.architecture, "."), rpmEnvironmentScript)
                     rpmEnvironmentScript = "source " + rpmEnvironmentScript
                     tags_cache.update()
-                    if opts.extraRepositories:
-                        for r in opts.extraRepositories.split(","):
-                            if r != opts.repository:
-                                cmscmd = format('%(cmspkg)s -r %(repo)s --path %(tmpdir)s/repo/%(repo)s',
-                                                 cmspkg=CMSPKG_CMD,
-                                                 repo=r,
-                                                 tmpdir=opts.tempdir)
-                                extra_tags_cache[r] = TagCacheAptImpl(opts, cmscmd)
-                                extra_tags_cache[r].update()
                     if opts.reference: check_reference(opts)
                 elif command == "deprecate-local":
                     doDeprecateLocal(opts, args[1:], PKGFactory)
