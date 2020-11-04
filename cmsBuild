@@ -936,6 +936,11 @@ def parseBuildRequireToolfileLine(specLines):
 def parseUseCompilerVersionLine(specLines):
     return parseSpecFlag(specLines, "USE_COMPILER_VERSION")!=''
 
+def parseUploadDependencies(specLines):
+    line = parseSpecFlag(specLines, "UPLOAD_DEPENDENCIES",'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
+    if not line: return []
+    return [x for x in line.split(" UPLOAD_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
+
 def parseInstallDependencies(specLines):
     line = parseSpecFlag(specLines, "INSTALL_DEPENDENCIES",'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
     if not line: return []
@@ -1943,6 +1948,7 @@ class SubPackage(object):
         self.origBuildDependencies = [parent.name] + parent.origBuildDependencies
         self.fullDependencies = [parent.name] + parent.fullDependencies
         self.installDependencies = []
+        self.uploadDependencies = []
         self.dependentCounter = 0
         self.patches = parent.patches
         self.rpmdir = parent.rpmdir
@@ -2063,6 +2069,7 @@ class Package(object):
         self.origBuildDependencies = []
         self.fullDependencies = []
         self.installDependencies = []
+        self.uploadDependencies = []
         self.origSpec = []
         self.spec = []
         self.checksum = "%{nil}"
@@ -2140,6 +2147,7 @@ class Package(object):
         self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
         self.installDependencies = parseInstallDependencies(self.spec)
+        self.uploadDependencies = parseUploadDependencies(self.spec)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
@@ -2427,9 +2435,12 @@ class Package(object):
         for dep in self.dependencies:
             if dep in self.buildDependencies:     self.buildDependencies.remove(dep)
         for pkg in getPackages(self.origDependencies):
+          for idep in pkg.uploadDependencies:
+            self.uploadDependencies.append(idep)
           for idep in pkg.installDependencies:
             self.installDependencies.append(idep)
         self.installDependencies = list(set(self.installDependencies))
+        self.uploadDependencies = list(set(self.uploadDependencies))
         self.fullDependencies = self.dependencies + self.buildDependencies
         self.updateDependentCount()
         self.dependencies = self.sortPkgs(self.dependencies)
@@ -3576,7 +3587,7 @@ def checkPackageInCache(pkg, scheduler):
     if pkgSources:
         scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
     buildActionDependencies = []
-    for p in getPackages(list(set(pkg.origDependencies + pkg.origBuildDependencies+pkg.installDependencies))):
+    for p in getPackages(list(set(pkg.origDependencies+pkg.origBuildDependencies+pkg.installDependencies+pkg.uploadDependencies))):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
@@ -3642,7 +3653,7 @@ def build(opts, args, factory):
 
     for p in packages:
       for pkg in [p]+getPackages(p.fullDependencies):
-        for ipkg in pkg.installDependencies:
+        for ipkg in pkg.installDependencies+pkg.uploadDependencies:
           if not PKGFactory.has_key(ipkg):
             packages.insert(0, factory.createWithSpec(ipkg))
 
@@ -3827,9 +3838,9 @@ def allPackagesToUpload(args, factory):
     def allDeps(pkg, factory, dep_cache={}):
         if pkg in dep_cache: return dep_cache[pkg]
         deps = [pkg]
-        for ipkg in [p for p in pkg.installDependencies if not PKGFactory.has_key(p)]:
+        for ipkg in [p for p in pkg.installDependencies+pkg.uploadDependencies if not PKGFactory.has_key(p)]:
             factory.createWithSpec(ipkg)
-        for dep in getPackages(pkg.fullDependencies+pkg.installDependencies):
+        for dep in getPackages(pkg.fullDependencies+pkg.installDependencies+pkg.uploadDependencies):
             for subdep in allDeps(dep, factory, dep_cache):
                 if not subdep in deps: deps.append(subdep)
         dep_cache[pkg] = deps
