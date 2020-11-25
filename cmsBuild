@@ -3797,7 +3797,6 @@ def bootstrap(opts):
     # If we are not in a cfg file write where to find the correct init.sh
     log("Done. Setup log can be found in %s." % bootstrapLog)
     log("rpm env file can be found in %s" % initSh, DEBUG)
-    createDirs(architecture=opts.architecture, dest=opts.workDir)
     return initSh
 
 
@@ -4378,6 +4377,7 @@ if __name__ == "__main__":
                     if not exists(rpmEnvironmentScript):
                         envSh = bootstrap(opts)
                         symlink(envSh.replace(opts.workDir + "/" + opts.architecture, "."), rpmEnvironmentScript)
+                    createDirs(architecture=opts.architecture, dest=opts.workDir)
                     rpmEnvironmentScript = "source " + rpmEnvironmentScript
                     tags_cache.update()
                     if opts.reference: check_reference(opts)
