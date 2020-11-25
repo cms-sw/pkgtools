@@ -29,6 +29,7 @@ from cmsdist_config import USE_COMPILER_VERSION
 try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
 
+urlRe = re.compile(".*:.*/.*")
 logLevel = 10
 NORMAL = 10
 DEBUG = 20
@@ -44,7 +45,9 @@ PKGFactory = None
 SystemCompilerVersion = {}
 BlackListReferencePkgs = []
 reference_rpm_db_cache = {}
-
+rpm_db_cache = {}
+cmspkg_upload_cache = {"": []}
+rpm_upload_cache = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 
@@ -117,8 +120,34 @@ def detectCompilerVersion(compilerName):
     return SystemCompilerVersion[compilerName]
 
 
-rpm_db_cache = {}
-
+def cmspkg_showpkgs(packages):
+    pkgs = ""
+    pkgs1 = ""
+    for pkg in packages:
+        pname = pkg.pkgName()
+        cmspkg_upload_cache[pname] = []
+        rpm_upload_cache[pname] = []
+        pkgs = pkgs+" "+pname
+        pkgs1 = pkgs1+" "+pname+"-1-"+pkg.pkgRevision
+    err, output = getstatusoutput("%s showpkg %s" % (CMSPKG_CMD, pkgs))
+    if err: return (err, output)
+    data = output.split("\n")
+    pkg = ""
+    for l in data:
+        if " - CMS Experiment package" in l:
+            pkg = l.split(" ")[0]
+        cmspkg_upload_cache[pkg].append(l)
+    err, output = getstatusoutput("%s ; rpm -q %s" % (rpmEnvironmentScript, pkgs1))
+    if err: return (err, output)
+    for l in output.split("\n"):
+        if '-1-' in l:
+            cmspkg_upload_cache[l.split('-1-')[0]].append(l)
+    err, output = getstatusoutput("%s ; rpm -q %s" % (rpmEnvironmentScript, pkgs))
+    if err: return (err, output)
+    for l in output.split("\n"):
+        if '-1-' in l:
+            rpm_upload_cache[l.split('-1-')[0]].append(l)
+    return (err, "")
 
 #################################################################
 # Utilities functions for installing packages from ref repository#
@@ -772,7 +801,7 @@ def download(source, dest, options, pkg=None):
         getLocalSources(pkg, source_name, downloadDir, filename)
 
     if exists(realFile):
-        if not exists(join(dest, filename)):
+        if dest and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
         return True
     srepos = [options.repository]
@@ -798,7 +827,7 @@ def download(source, dest, options, pkg=None):
         f = open(join(downloadDir, "url"), 'w')
         f.write("%s\n" % source)
         f.close()
-        if exists(realFile) and not exists(join(dest, filename)):
+        if dest and exists(realFile) and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
     return success
 
@@ -1533,7 +1562,7 @@ class BuilderAction(object):
         """ Returns True if the action should been executed, False if not.
         """
         # If we already have checked this, do not run the check again.
-        if self.__cachedRun:
+        if self.__cachedRun is not None:
             return self.__cachedRun
         self.__safeRecursion += 1
         if self.__safeRecursion > 100:
@@ -1674,12 +1703,8 @@ class InstallFromLocalArea(BuilderAction):
         if not self.dryRun():
             return False
         pkgName = self.pkg.pkgName()
-        error, output = getstatusoutput("%s ; rpm -q %s" % (rpmEnvironmentScript, pkgName))
-        # Not all the rpm commands set the error correctly.
-        if error or "error:" in output:
-            return False
+        lines = rpm_upload_cache[pkgName]
         filesExists = exists(self.cachedRpmName) and exists(self.officialRpmName)
-        lines = output.strip("\n").split("\n")
         tooManyLines = len(lines) != 1
         if tooManyLines and filesExists:
             return False
@@ -1716,17 +1741,10 @@ class InstallFromServer(BuilderAction):
         pkgName = self.pkg.pkgName()
         pkgInfo = PkgInfo(self.pkg)
         pkgRealName = pkgInfo.id()
-        pkgsWithSameHash = [p for (p, h) in tags_cache.cache.iteritems() if
-                            (h == pkgInfo.checksum) and p.startswith(pkgRealName) and (pkgName != p)]
-
-        # If a file exists on server we return True
-        cmsPkgCmd = CMSPKG_CMD
-        rpmenv = rpmEnvironmentScript
         pkgRev = self.pkg.pkgRevision
-        searchCommand = """%(cmsPkgCmd)s showpkg %(pkgName)s; %(rpmenv)s ; rpm -q %(pkgName)s-1-%(pkgRev)s""" % locals()
-        error, output = getstatusoutput(searchCommand)
-        self.output = output.split("\n")
-        if error: return False
+        pkgsWithSameHash = [p for (p, h) in tags_cache.cache.items() if
+                            (h == pkgInfo.checksum) and p.startswith(pkgRealName) and (pkgName != p)]
+        self.output = cmspkg_upload_cache[pkgName]
 
         def evalExistsOnServer():
             for line in self.output[2:]:
@@ -3067,18 +3085,17 @@ def fetchLocal(pkg, sourceFilename):
         return (sourceFilename, False)
 
 
-def fetchSources(pkg, scheduler):
-    scheduler.log("Fetching sources for %s" % pkg.name)
+def fetchSources(pkg, scheduler, url=None):
     sourcedir = pkg.sourcedir
-    downloadables = pkg.sources + pkg.patches
-    if not downloadables:
-        scheduler.log("No sources to be downloaded found for packages %s." % pkg.name)
-        return
-    urlRe = re.compile(".*:.*/.*")
-
-    # No need to create the download directory
-    # not to dump the cmsos, because it was already
-    # done.
+    downloadables = []
+    if url:
+      downloadables = [url]
+      sourcedir = None
+    else:
+      downloadables = pkg.sources + pkg.patches
+      scheduler.log("Fetching sources for %s" % pkg.name)
+      if not downloadables:
+          return
     for url in downloadables:
         if urlRe.match(url):
             try:
@@ -3089,7 +3106,9 @@ def fetchSources(pkg, scheduler):
             output, success = fetchLocal(pkg, url)
         if not success:
             return "Unable to download %s" % url
-        scheduler.log("Done fetching %s" % url)
+        if sourcedir:
+            scheduler.log("Done fetching %s" % url)
+    return
 
 
 def checkIfOnServer(pkg):
@@ -3540,7 +3559,7 @@ class BuildChecker(object):
             if action.dryRun() and action.producesStuffToUpload():
                 log("Action '%s' for package '%s' produces something to be uploaded." % (action.actionName,
                                                                                          action.pkg.pkgName()), DEBUG)
-                result = result or True
+                result = True
         return result
 
 
@@ -3583,15 +3602,22 @@ def checkPackageInCache(pkg, scheduler):
         dep_pkg = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == d][0]
         if (not dep_pkg in rpm_db_cache) and (not "install-"+dep_pkg in fetchDependencies):
             fetchDependencies += ["install-" + dep_pkg]
+    buildActionDependencies = []
     pkgSources = pkg.sources + pkg.patches
     if pkgSources:
-        scheduler.parallel("fetch-%s" % pkgName, fetchDependencies, fetchSources, pkg, scheduler)
-    buildActionDependencies = []
+        urls = [url for url in pkgSources if urlRe.match(url)]
+        srcDeps = fetchDependencies
+        if urls:
+            srcDeps = []
+            for url in urls:
+                srcDeps.append("download-%s" % getUrlChecksum(url))
+                scheduler.parallel(srcDeps[-1], fetchDependencies, fetchSources, pkg, scheduler, url)
+        scheduler.parallel("fetch-%s" % pkgName, srcDeps, fetchSources, pkg, scheduler)
+        buildActionDependencies.append("fetch-%s" % pkgName)
     for p in getPackages(list(set(pkg.origDependencies+pkg.origBuildDependencies+pkg.installDependencies+pkg.uploadDependencies))):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
-    if pkgSources: buildActionDependencies.append("fetch-%s" % pkgName)
     installActionDependencies = ["build-%s" % pkgName]
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
     scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
@@ -3944,17 +3970,28 @@ def upload(opts, args, factory):
         return statusAndLog(True, "Nothing needs to be uploaded")
     cmsplatf = fullPackageList[0].cmsplatf
     uploadablePackages = []
+    err, out = cmspkg_showpkgs(fullPackageList)
+    logAndDieOnError(err, "Error running local rpm query commands.\n"+out)
+    deprecatePkgs = []
     for pkg in fullPackageList:
         checker = BuildChecker(pkg)
         if not checker.checkConsistency():
-            statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
-            executeScript(opts, deprecateLocalCommand(opts, fullPackageList))
-            return False
+            deprecatePkgs.append(pkg)
+            continue
         if not checker.checkIfUploadable():
             statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
                          name=pkg.pkgName())
             continue
         uploadablePackages.append(pkg)
+    if deprecatePkgs:
+        pkg2deprecate = [p.name for p in deprecatePkgs]
+        for pkg in deprecatePkgs:
+            for d in [p.name for p in fullPackageList if pkg.name in p.fullDependencies]:
+                if d not in pkg2deprecate:
+                    pkg2deprecate.append(d)
+        statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
+        executeScript(opts, deprecateLocalCommand(opts, getPackages(pkg2deprecate)))
+        return False
     fullPackageList = uploadablePackages
     if not fullPackageList:
         return statusAndLog(True, "Nothing needs to be uploaded")

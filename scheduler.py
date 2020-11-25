@@ -40,6 +40,8 @@ class Scheduler(object):
   def __init__(self, parallelThreads, logDelegate=None):
     self.workersQueue = Queue()
     self.resultsQueue = Queue()
+    self.notifyQueue = Queue()
+    self.rescheduleParallel = False
     self.jobs = {}
     self.pendingJobs = []
     self.runningJobs = []
@@ -64,13 +66,13 @@ class Scheduler(object):
       t = Thread(target=self.__createWorker())
       t.daemon = True
       t.start()
-    
-    self.notifyMaster(self.__rescheduleParallel)
+
+    self.__doRescheduleParallel()
     # Wait until all the workers are done.
     while self.parallelThreads:
       try:
+        self.__doNotifications()
         who, item = self.resultsQueue.get()
-        #print who, item
         item[0](*item[1:])
         sleep(0.1)
       except KeyboardInterrupt:
@@ -78,11 +80,13 @@ class Scheduler(object):
         while self.workersQueue.full():
           self.workersQueue.get(False)
         self.shout(self.quit)
-    
+
     # Prune the queue.
+    self.__doNotifications ()
     while self.resultsQueue.full():
       item = self.resultsQueue.get() 
       item[0](*item[1:])
+    self.__doNotifications ()
     return
 
   # Create a worker.
@@ -98,14 +102,21 @@ class Scheduler(object):
           result = s.getvalue()
           
         if type(result) == _SchedulerQuitCommand:
-          self.notifyMaster(self.__releaseWorker)
+          self.notifyTaskMaster(self.__releaseWorker)
           return
         self.log(str(item) + " done")
         self.notifyMaster(self.__updateJobStatus, taskId, result)
         self.notifyMaster(self.__rescheduleParallel)
-        # Only in 2.5: self.workersQueue.task_done()
     return worker
-  
+
+  def __doNotifications(self):
+    self.rescheduleParallel = False
+    while self.notifyQueue.qsize():
+      who, item = self.notifyQueue.get()
+      item[0](*item[1:])
+    if self.rescheduleParallel:
+       self.__doRescheduleParallel()
+
   def __releaseWorker(self):
     self.parallelThreads -= 1
 
@@ -117,6 +128,9 @@ class Scheduler(object):
 
   # Does the rescheduling of tasks. Derived class should call it.
   def __rescheduleParallel(self):
+    self.rescheduleParallel = True
+
+  def __doRescheduleParallel(self):
     parallelJobs = [j for j in self.pendingJobs if self.jobs[j]["scheduler"] == "parallel"]
     # First of all clean up the pending parallel jobs from all those
     # which have broken dependencies.
@@ -131,7 +145,7 @@ class Scheduler(object):
     # since they might queue more parallel payloads.
     if not self.pendingJobs:
       self.shout(self.quit)
-      self.notifyMaster(self.quit)
+      self.notifyTaskMaster(self.quit)
       return
 
     # Otherwise do another round of scheduling of all the tasks. In this
@@ -168,8 +182,11 @@ class Scheduler(object):
       self.__scheduleParallel("quit-" + str(x), commandSpec)
 
   # Helper to enqueu replies to the master thread.
-  def notifyMaster(self, *commandSpec):
+  def notifyTaskMaster(self, *commandSpec):
     self.resultsQueue.put((threading.currentThread(), commandSpec))
+
+  def notifyMaster(self, *commandSpec):
+    self.notifyQueue.put((threading.currentThread(), commandSpec))
 
   def forceDone(self, taskId):
     if taskId in self.doneJobs: return
