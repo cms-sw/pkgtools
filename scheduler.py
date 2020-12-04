@@ -10,6 +10,7 @@ from threading import Thread
 from time import sleep
 import threading
 import traceback
+from rmanager import ResourceManager
 
 # Helper class to avoid conflict between result
 # codes and quit state transition.
@@ -42,7 +43,7 @@ class Scheduler(object):
   # There is one, special, "final-job" which depends on all the scheduled jobs
   # either parallel or serial. This job is guaranteed to be executed last and
   # avoids having deadlocks due to all the queues having been disposed.
-  def __init__(self, parallelThreads, logDelegate=None):
+  def __init__(self, parallelThreads, logDelegate=None, buildStats=None):
     self.workersQueue = Queue()
     self.resultsQueue = Queue()
     self.notifyQueue = Queue()
@@ -55,9 +56,12 @@ class Scheduler(object):
     self.brokenJobs = []
     self.parallelThreads = parallelThreads
     self.logDelegate = logDelegate
+    self.resourceManager = None
     self.errors = {}
     if not logDelegate:
       self.logDelegate = self.__doLog 
+    if buildStats:
+      self.resourceManager = ResourceManager(buildStats, 100, 100, parallelThreads)
     # Add a final job, which will depend on any spawned task so that we do not
     # terminate until we are completely done.
     self.finalJobDeps = []
@@ -111,6 +115,10 @@ class Scheduler(object):
           return
         self.log(str(item) + " done")
         self.notifyMaster(self.__updateJobStatus, taskId, result)
+        if self.resourceManager and taskId.startswith('build-') and 'toolfile' not in taskId:
+          print('releasing resources for: ', taskId, " available" ,self.resourceManager.machineResources["available"])
+          self.notifyMaster(self.resourceManager.releaseResourcesForExternal, taskId)
+          print('after release: ', self.resourceManager.machineResources["available"])
         self.notifyMaster(self.__rescheduleParallel)
     return worker
 
@@ -159,6 +167,10 @@ class Scheduler(object):
     if dumpMsg:
       self.runningJobsCache = self.runningJobs[:]
       self.log("Running tasks: %s" % self.runningJobs,30)
+
+    nonBuildJobs = []
+    buildJobs =[]
+
     for taskId in parallelJobs:
       pendingDeps = [dep for dep in self.jobs[taskId]["deps"] if not dep in self.doneJobs]
       if pendingDeps:
@@ -166,6 +178,17 @@ class Scheduler(object):
           self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
       # No broken dependencies and no pending ones. we can continue.
+      # Only build jobs without toolfiles 
+      if (taskId.startswith('build-') and 'toolfile' not in taskId):
+        buildJobs.append(taskId)
+      else:
+        nonBuildJobs.append(taskId)
+    if self.resourceManager:
+      print('available resources: ', self.resourceManager.machineResources["available"])
+      buildJobs = self.resourceManager.allocResourcesForExternals(buildJobs)
+      print('allocating resources for ', buildJobs, ' available:  ', self.resourceManager.machineResources["available"])
+    # put the build jobs on the queue first
+    for taskId in buildJobs + nonBuildJobs:
       transition(taskId, self.pendingJobs, self.runningJobs)
       self.__scheduleParallel(taskId, self.jobs[taskId]["spec"])
 
