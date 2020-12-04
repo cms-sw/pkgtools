@@ -2891,6 +2891,13 @@ def parseOptions():
     advancedBuildOptions.add_option("--ldps", "--log-deps",
                                     dest="depsLog", action="store_true",
                                     default=False, help="store json formatted log of dependencies in workDir/WEB/arch")
+    # give the stats to the script instad of making it running a script from here to do it
+    advancedBuildOptions.add_option("--estats", "--externals-stats",
+                                    dest="externalsStatsFile",
+                                    default=None,
+                                    metavar="FILENAME",
+                                    help="JSON file with externals compilation metrics, from elastic search or default from github")
+
     # FIXME: change option to --no-deprecate and do the deprecation
     #        automatically by default.
     # parser.add_option ("--deprecate-local",
@@ -3648,9 +3655,9 @@ def checkPackageInCache(pkg, scheduler):
 
 
 # New version using the new scheduler.
-def buildSpecs(topLevelPackages):
+def buildSpecs(topLevelPackages, buildStats=None):
     from scheduler import Scheduler
-    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log)
+    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log, buildStats)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
             scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, pkg, scheduler)
@@ -3732,8 +3739,13 @@ def build(opts, args, factory):
     if opts.pretend:
         log("Option --pretend specified. Not building.")
         return
-    buildSpecs(packages)
-
+    build_stats = None
+    if opts.externalsStatsFile and os.path.exists(opts.externalsStatsFile):
+        # read the stats from a json file, also the machine specifics are there
+        from json import load
+        with open(opts.externalsStatsFile) as f:
+            build_stats = load(f)
+    buildSpecs(packages, build_stats)
 
 def isPackageInstalled(pkg):
     if pkg.options.bootstrap:
