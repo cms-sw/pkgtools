@@ -4014,12 +4014,9 @@ def upload(opts, args, factory):
     log("Ready to upload to %s." % fullUploadRepo)
 
     BootstrapPackage = ""
-    CMSCommonPackage = ""
     BootstrapPackages = [pkg.pkgName() for pkg in fullPackageList if
                          pkg.pkgName().startswith("external+bootstrap-driver+")]
-    CMSCommonPackages = [pkg.pkgName() for pkg in fullPackageList if pkg.pkgName().startswith("cms+cms-common+")]
     if BootstrapPackages: BootstrapPackage = "/".join(BootstrapPackages[0].split("+", 2))
-    if CMSCommonPackages: CMSCommonPackage = "/".join(CMSCommonPackages[0].split("+", 2))
 
     packageNames = [pkg.pkgName() for pkg in fullPackageList]
     pkgChecksums = list(set([p.checksum for p in fullPackageList]))
@@ -4075,18 +4072,13 @@ def upload(opts, args, factory):
                             "if [ 'X%(BootstrapPackage)s' != 'X' ] ; then\n"
                             "  mkdir -p %(tmpdir)s/%(uploadSum)s/drivers \n"
                             "  [ -f %(BootstrapPackage)s/%(architecture)s-%(driverExt)s ] && cp %(BootstrapPackage)s/%(architecture)s-%(driverExt)s %(tmpdir)s/%(uploadSum)s/drivers/%(architecture)s-driver.txt\n"
-                            "fi\n"
-                            "echo Looking for local cms common build\n"
-                            "if [ 'X%(CMSCommonPackage)s' != 'X' ] ; then\n"
-                            "  [ -f %(CMSCommonPackage)s/.package-checksum ] && cp ../common/cmsos %(tmpdir)s/%(uploadSum)s\n"
                             "fi\n",
                             workdir=opts.workDir,
                             tmpdir=tmpdir,
                             architecture=opts.architecture,
                             uploadSum=uploadSum,
                             driverExt=driverExt,
-                            BootstrapPackage=BootstrapPackage,
-                            CMSCommonPackage=CMSCommonPackage)
+                            BootstrapPackage=BootstrapPackage)
     remoteSourceRE = re.compile(".*:.*/.*")
     sources = ""
     for pkg in [pkg for pkg in fullPackageList if exists(pkg.rpmLocation())]:
