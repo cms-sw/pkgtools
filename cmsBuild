@@ -530,6 +530,17 @@ def downloadGit(source, dest, options):
                      "find . ! -path '%(filter)s' -delete &&"
                      "rm -rf .git .gitattributes .gitignore", **args)
     error, output = getstatusoutput(command % args)
+    if "Couldn't find remote ref refs/heads/master" in output:
+        # default branch is main not master, retry
+        args["branch"] = "main"
+        log("checking out tag from master failed, changing the branch master->main and retrying ...")
+    command = format("cd %(exportpath)s &&"
+                     "git init &&"
+                     "git pull --tags %(protocol)s%(gitroot)s refs/heads/%(branch)s &&"
+                     "git reset --hard %(tag)s && %(submodules)s"
+                     "find . ! -path '%(filter)s' -delete &&"
+                     "rm -rf .git .gitattributes .gitignore", **args)
+    error, output = getstatusoutput(command % args)
     if error:
         log("Error while downloading sources from %s using git.\n\n"
             "%s\n\n"
