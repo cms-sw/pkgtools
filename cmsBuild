@@ -597,7 +597,12 @@ def downloadPip(source, dest, options):
     if len(url_parts) > 1: opts = url_parts[1].split("&")
     pkg = url_parts[0].split("/")
     pack = pkg[0].strip()
-    if len(pkg) > 1: pack = pack + '==' + pkg[1].strip()
+    pypi_file = '%s-%s.tar.gz' % (pack, pkg[1].strip())
+    pypi_url = 'https://pypi.io/packages/source/%s/%s/%s' % (pack[0], pack, pypi_file)
+    if downloadUrllib2(pypi_url, dest, options):
+      comm = "mv %s/%s src.tar.gz; echo src.tar.gz > files.list" % (dest, pypi_file)
+      return downloadCmd(source, dest, options, comm, [])
+    pack = pack + '==' + pkg[1].strip()
     pip_opts = "--no-deps --no-binary=:all:"
     pip="pip"
 
