@@ -8,7 +8,7 @@ class ResourceManager(object):
         self.allocated = {}
         self.highestPriortyOnly = highestPriortyOnly
         self.priorityList = ["time"] # can be any list from the stat keys
-    
+
     def allocResourcesForExternals(self, externalsList, count=1000): # return ordered list for externals that can be started
         externals_to_run = []
         if count<=0: return externals_to_run
