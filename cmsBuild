@@ -53,7 +53,7 @@ cmspkg_upload_cache = {"": []}
 rpm_upload_cache = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
-
+build_stats = None
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -1501,6 +1501,13 @@ class PackageFactory(object):
                 pkg.specCache = False
                 log("Read from cache: %s" % pkg.pkgName())
             break
+        for dep in pkg.fullDependencies:
+          self[dep].requiredBy += 1
+        if build_stats:
+          pkg_time = 300 if pkg.name not in build_stats["packages"] else build_stats["packages"][pkg.name]["time"]
+          for dep in pkg.fullDependencies:
+            if dep in build_stats["packages"]:
+              build_stats["packages"][dep]["time"] += pkg_time
         self[pkgName] = pkg
         if pkg.name != pkgName:
             log("FATAL: Package name '%s' and spec name '%s' does not match" % (pkg.name, pkgName))
@@ -2106,6 +2113,7 @@ class Package(object):
         self.override_version = ""
         self.buildLogsToKeep = ""
         self.versionSuffix = True
+        self.requiredBy = 1
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2891,6 +2899,13 @@ def parseOptions():
     advancedBuildOptions.add_option("--ldps", "--log-deps",
                                     dest="depsLog", action="store_true",
                                     default=False, help="store json formatted log of dependencies in workDir/WEB/arch")
+    # give the stats to the script instad of making it running a script from here to do it
+    advancedBuildOptions.add_option("--estats", "--externals-stats",
+                                    dest="externalsStatsFile",
+                                    default=None,
+                                    metavar="FILENAME",
+                                    help="JSON file with externals compilation metrics, from elastic search or default from github")
+
     # FIXME: change option to --no-deprecate and do the deprecation
     #        automatically by default.
     # parser.add_option ("--deprecate-local",
@@ -3635,6 +3650,9 @@ def checkPackageInCache(pkg, scheduler):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
+    for p in getPackages(pkg.fullDependencies):
+        if not isPackageInstalled(p):
+            scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
     installActionDependencies = ["build-%s" % pkgName]
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
     scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
@@ -3650,7 +3668,7 @@ def checkPackageInCache(pkg, scheduler):
 # New version using the new scheduler.
 def buildSpecs(topLevelPackages):
     from scheduler import Scheduler
-    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log)
+    scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log, build_stats)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
             scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, pkg, scheduler)
@@ -3733,7 +3751,6 @@ def build(opts, args, factory):
         log("Option --pretend specified. Not building.")
         return
     buildSpecs(packages)
-
 
 def isPackageInstalled(pkg):
     if pkg.options.bootstrap:
@@ -4259,6 +4276,11 @@ if __name__ == "__main__":
     environ["LC_ALL"] = "C"
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
+    if opts.externalsStatsFile and os.path.exists(opts.externalsStatsFile):
+        # read the stats from a json file, also the machine specifics are there
+        from json import load
+        with open(opts.externalsStatsFile) as f:
+            build_stats = load(f)
 
     packages = {}
     # tags_cache = TagCacheAptImpl (opts)

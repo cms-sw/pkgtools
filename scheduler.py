@@ -1,15 +1,16 @@
 from __future__ import print_function
 import sys
 if sys.version_info[0] == 2:
-  from Queue import Queue
+  from Queue import Queue, PriorityQueue
   from StringIO import StringIO
 else:
-  from queue import Queue
+  from queue import Queue, PriorityQueue
   from io import StringIO
 from threading import Thread
 from time import sleep
 import threading
 import traceback
+from rmanager import ResourceManager
 
 # Helper class to avoid conflict between result
 # codes and quit state transition.
@@ -42,8 +43,8 @@ class Scheduler(object):
   # There is one, special, "final-job" which depends on all the scheduled jobs
   # either parallel or serial. This job is guaranteed to be executed last and
   # avoids having deadlocks due to all the queues having been disposed.
-  def __init__(self, parallelThreads, logDelegate=None):
-    self.workersQueue = Queue()
+  def __init__(self, parallelThreads, logDelegate=None, buildStats=None, parallelDownloads=2):
+    self.workersQueue = PriorityQueue()
     self.resultsQueue = Queue()
     self.notifyQueue = Queue()
     self.rescheduleParallel = False
@@ -53,11 +54,15 @@ class Scheduler(object):
     self.runningJobsCache = []
     self.doneJobs = []
     self.brokenJobs = []
-    self.parallelThreads = parallelThreads
+    self.parallelThreads = parallelThreads+parallelDownloads
     self.logDelegate = logDelegate
+    self.resourceManager = None
+    self.runningJobsCount = {"build": 0, "fetch": 0, "download": 0, "max_build": parallelThreads, "max_download": parallelDownloads}
     self.errors = {}
     if not logDelegate:
       self.logDelegate = self.__doLog 
+    if buildStats:
+      self.resourceManager = ResourceManager(buildStats, self)
     # Add a final job, which will depend on any spawned task so that we do not
     # terminate until we are completely done.
     self.finalJobDeps = []
@@ -98,7 +103,7 @@ class Scheduler(object):
   def __createWorker(self):
     def worker():
       while True:
-        taskId, item = self.workersQueue.get()
+        pri, taskId, item = self.workersQueue.get()
         try:
           result = item[0](*item[1:])
         except Exception as e:
@@ -111,6 +116,8 @@ class Scheduler(object):
           return
         self.log(str(item) + " done")
         self.notifyMaster(self.__updateJobStatus, taskId, result)
+        if self.resourceManager and taskId.startswith('build-'):
+          self.notifyMaster(self.resourceManager.releaseResourcesForExternal, taskId)
         self.notifyMaster(self.__rescheduleParallel)
     return worker
 
@@ -127,7 +134,9 @@ class Scheduler(object):
 
   def parallel(self, taskId, deps, *spec):
     if taskId in self.jobs: return
-    self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec}
+    self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec, "priorty": 1}
+    if taskId.split("-")[0] in ["build", "download", "fetch"]:
+      self.jobs[taskId]["priorty"] = 100000-spec[1].requiredBy
     self.pendingJobs.append(taskId)
     self.finalJobDeps.append(taskId)
 
@@ -159,18 +168,50 @@ class Scheduler(object):
     if dumpMsg:
       self.runningJobsCache = self.runningJobs[:]
       self.log("Running tasks: %s" % self.runningJobs,30)
+
+    allJobs =[]
     for taskId in parallelJobs:
       pendingDeps = [dep for dep in self.jobs[taskId]["deps"] if not dep in self.doneJobs]
       if pendingDeps:
         if dumpMsg:
           self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
-      # No broken dependencies and no pending ones. we can continue.
+      allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
+    buildJobs =[]
+    downloadJobs = []
+    forceJobs = []
+    bldCount = self.runningJobsCount["max_build"]-self.runningJobsCount["build"]
+    dwnCount = self.runningJobsCount["max_download"]-self.runningJobsCount["download"]
+    for task in sorted(allJobs, key=lambda k: k['priorty']):
+      taskId = task["id"]
+      taskType = taskId.split("-")[0]
+      if taskType == "download":
+        if dwnCount>0:
+          downloadJobs.append(taskId)
+          dwnCount -= 1
+      elif taskType == "build":
+        if bldCount>0: #include all build jobs so that we can match those which can be run
+          buildJobs.append(taskId)
+      else:
+        forceJobs.append(taskId)
+    if bldCount>0 and buildJobs:
+      if self.resourceManager:
+        buildJobs = self.resourceManager.allocResourcesForExternals(buildJobs, count=bldCount)
+      else:
+        buildJobs = buildJobs[:bldCount]
+    for taskId in forceJobs + downloadJobs + buildJobs:
+      taskType = taskId.split("-")[0]
+      self.runningJobsCount[taskType] += 1
+      self.log("%s" % self.runningJobsCount)
       transition(taskId, self.pendingJobs, self.runningJobs)
-      self.__scheduleParallel(taskId, self.jobs[taskId]["spec"])
+      self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
 
   # Update the job with the result of running.
   def __updateJobStatus(self, taskId, error):
+    taskType = taskId.split("-")[0]
+    if taskType in self.runningJobsCount:
+      self.runningJobsCount[taskType] -= 1
+      self.log("%s" % self.runningJobsCount)
     if not error:
       transition(taskId, self.runningJobs, self.doneJobs)
       return
@@ -178,8 +219,8 @@ class Scheduler(object):
     self.errors[taskId] = error
   
   # One task at the time.
-  def __scheduleParallel(self, taskId, commandSpec):
-    self.workersQueue.put((taskId, commandSpec))
+  def __scheduleParallel(self, taskId, commandSpec, priorty=1):
+    self.workersQueue.put((priorty, taskId, commandSpec))
 
   # Helper to enqueue commands for all the threads.
   def shout(self, *commandSpec):
