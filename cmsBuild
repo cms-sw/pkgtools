@@ -28,6 +28,7 @@ from cmsBuild_consts import *
 from cmsdist_config import USE_COMPILER_VERSION
 try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
+import json
 
 urlRe = re.compile(".*:.*/.*")
 logLevel = 10
@@ -597,6 +598,7 @@ def downloadPip(source, dest, options):
     if len(pkg) > 1: pack = pack + '==' + pkg[1].strip()
     pip_opts = "--no-deps --no-binary=:all:"
     pip="pip"
+    isSourceDownload=True
 
     for opt in opts:
         if opt.startswith("pip="): pip=opt.split('=',1)[-1]
@@ -611,6 +613,31 @@ def downloadPip(source, dest, options):
                     i = i + 1
                 else:
                     pip_opts = pip_opts + ' ' + spSrc[i]
+                    if "no-binary" in spSrc[i] and "all" not in spSrc[i]:
+                        isSourceDownload=False #not totally robust - but basically use pip if source is overridden
+
+    if isSourceDownload:
+        log("Looking for sources at https://pypi.org/pypi/"+pack.split('=')[0]+"/json")
+        fj=urlopen("https://pypi.org/pypi/"+pack.split('=')[0]+"/json")
+        data=json.load(fj)
+        url=None
+        if "releases" in data and pack.split('=')[2] in data["releases"]:
+            for file in data["releases"][pack.split('=')[2]]:
+                if file["packagetype"] == "sdist":
+                    url=file["url"]
+        if url is not None:
+            log("Found source on pypi - downloading")
+            tempdir = createTempDir(options.workDir, options.tempDirPrefix)
+            precmd = "cd %s; " % tempdir
+            downloadUrllib2(url, tempdir, options)
+            cmd="/bin/ls "+tempdir+" | grep -v files.list > "+os.path.join(tempdir,"files.list")
+            getstatusoutput(cmd)
+            o,e=getstatusoutput(precmd+"cat files.list")
+            cmd=precmd+"tar cfz "+os.path.join(dest,"source.tar.gz")+" `cat files.list` files.list"
+            o,e=getstatusoutput(cmd)
+            getstatusoutput("rm -rf %s" % tempdir)    
+            return True
+
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
     comm = pip + ' download ' + pip_opts + ' --disable-pip-version-check  -d . ' + pack + '; /bin/ls | grep -v files.list > files.list'
@@ -817,6 +844,7 @@ def download(source, dest, options, pkg=None):
         if success:
             noCmssdtCache = True
             break
+
     if not success:
         log("Trying to fetch source file: %s" % source, DEBUG)
         success = downloadHandler(source, downloadDir, downloadOptions)
