@@ -850,7 +850,7 @@ def download(source, dest, options, pkg=None):
         getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
         success = downloadHandlers["http"](cachedFile, downloadDir, downloadOptions, True)
         if success:
-            noCmssdtCache = (repo == options.repository)
+            noCmssdtCache = options.repository.startswith(repo)
             break
 
     if not success:
