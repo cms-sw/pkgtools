@@ -4031,8 +4031,9 @@ def upload(opts, args, factory):
         return statusAndLog(True, "Nothing needs to be uploaded")
     cmsplatf = fullPackageList[0].cmsplatf
     uploadablePackages = []
-    err, out = cmspkg_showpkgs(fullPackageList)
-    logAndDieOnError(err, "Error running local rpm query commands.\n"+out)
+    if opts.bootstrap:
+      err, out = cmspkg_showpkgs(fullPackageList)
+      logAndDieOnError(err, "Error running local rpm query commands.\n"+out)
     deprecatePkgs = []
     for pkg in fullPackageList:
         checker = BuildChecker(pkg)
