@@ -4046,8 +4046,8 @@ def upload(opts, args, factory):
             continue
         uploadablePackages.append(pkg)
     if deprecatePkgs:
-        pkg2deprecate = [p.name for p in deprecatePkgs]
-        for pkg in deprecatePkgs:
+        pkg2deprecate = [p.name for p in deprecatePkgs if not pkg.parent]
+        for pkg in [ p for p in deprecatePkgs if not p.parent]:
             for d in [p.name for p in fullPackageList if pkg.name in p.fullDependencies]:
                 if d not in pkg2deprecate:
                     pkg2deprecate.append(d)
