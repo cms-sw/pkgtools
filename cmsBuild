@@ -2710,9 +2710,7 @@ class Package(object):
         if PKGFactory.getRequiresCache().has_key(self.name):
             return PKGFactory.getRequiresCache()[self.name]
         spec = open(self.tmpspec, "w")
-        text = ""
-        if oldSourcesNumbers:
-            text += getSourcesChecksum(self, oldSourcesNumbers)
+        text = "" if (not oldSourcesNumbers) else getSourcesChecksum(self, oldSourcesNumbers)
         text += "\n".join([self.specPreHeader,
                           SPEC_HEADER % self.__dict__,
                           PKGFactory.postProcessSpec(PKGFactory.preamble),
