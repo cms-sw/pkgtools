@@ -1272,8 +1272,7 @@ def getSourcesChecksum(pkg, sourcesNumbers):
     for s in sourcesNumbers:
         if 'cmdist-generated=1' in s:
             has_cmsdist_generated = True
-            chksum = getUrlChecksum(fixUrl(s))
-            text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), chksum)
+            text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), getUrlChecksum(fixUrl(s)))
     if has_cmsdist_generated:
         for s in sourcesNumbers:
             filename = join(pkg.options.cmsdist, s+".file")
@@ -1281,8 +1280,7 @@ def getSourcesChecksum(pkg, sourcesNumbers):
                 f = open(filename, 'rb')
                 m = md5adder(f.read())
                 f.close()
-                chksum = m.hexdigest()
-                text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), chksum)
+                text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), m.hexdigest())
     return text
 
 def calculateHumanReadableVersion(pkg):
