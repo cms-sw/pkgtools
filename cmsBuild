@@ -1431,6 +1431,17 @@ class PackageFactory(object):
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
+        self.vpackages = []
+        for pkg in self.virtual_packages:
+            if ' vectorized_package ' in self.virtual_packages[pkg]:
+                for v in options.vectorization:
+                    xstr = '_%s' % v
+                    if pkg.endswith(xstr):
+                        pkg = pkg[:-len(v)-1]
+                        if pkg not in self.vpackages:
+                            self.vpackages .append(pkg)
+                        break
+        return
 
     def __getPreamble(self, options):
         try:
@@ -2546,6 +2557,10 @@ class Package(object):
             xtext = getSourcesChecksum(self, self.sourcesNumbers)
             if xtext:
                 self.spec += "\n"+xtext
+            if PKGFactory.vpackages:
+                self.spec += "%%define vectorized_packages %s\n" % (" ".join(PKGFactory.vpackages))
+            else:
+                self.spec += "%define vectorized_packages %{nil}\n"
         for section in self.sections.keys():
             for subsection in self.sections[section].keys():
                 sectionContents = self.sections[section][subsection].strip("\n ")
