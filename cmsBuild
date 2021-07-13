@@ -4078,10 +4078,14 @@ def upload(opts, args, factory):
       err, out = cmspkg_showpkgs(fullPackageList)
       logAndDieOnError(err, "Error running local rpm query commands.\n"+out)
     deprecatePkgs = []
+    deprecatePkgsClds = []
     for pkg in fullPackageList:
         checker = BuildChecker(pkg)
         if not checker.checkConsistency():
-            deprecatePkgs.append(pkg)
+            if not pkg.parent:
+              deprecatePkgs.append(pkg)
+            else:
+              deprecatePkgsClds.append(pkg)
             continue
         if not checker.checkIfUploadable():
             statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
@@ -4089,13 +4093,13 @@ def upload(opts, args, factory):
             continue
         uploadablePackages.append(pkg)
     if deprecatePkgs:
-        pkg2deprecate = [p.name for p in deprecatePkgs if not p.parent]
-        for pkg in [ p for p in deprecatePkgs if not p.parent]:
+        pkg2deprecate = [p.name for p in deprecatePkgs]
+        for pkg in [ p for p in deprecatePkgs]:
             for d in [p.name for p in fullPackageList if pkg.name in p.fullDependencies]:
-                if d not in pkg2deprecate:
+                if (d not in pkg2deprecate) and (not [c for c in deprecatePkgsClds if d==c.name]):
                     pkg2deprecate.append(d)
         statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
-        executeScript(opts, deprecateLocalCommand(opts, getPackages(pkg2deprecate)))
+        executeScript(opts, deprecateLocalCommand(opts, getPackages(pkg2deprecate)+deprecatePkgsClds))
         return False
     fullPackageList = uploadablePackages
     if not fullPackageList:
