@@ -2415,8 +2415,12 @@ class Package(object):
                 continue
             filename = join(abspath(self.options.cmsdist), source)
             if exists(filename):
-                checksumCalculator.addFile(filename)
-
+                if os.path.isfile(filename):
+                    checksumCalculator.addFile(filename)
+                else:
+                     for root, dirs, files in os.walk(filename):
+                         for fname in files:
+                              checksumCalculator.addFile(os.path.join(root,fname))
         if self.options.localSources and self.name in self.options.localSources:
             # recalculate hash based on file system if --source flag for pkg
             for source_k in sorted(self.options.localSources[self.name].keys()):
@@ -3174,12 +3178,13 @@ def fetchLocal(pkg, sourceFilename):
         destFilename = join(pkg.sourcedir,
                             basename(sourceFilename.rsplit(".", 1)[0]))
         log("Copying %s to %s" % (sourceFilename, destFilename), DEBUG)
-        source = open(sourceFilename)
-        dest = open(destFilename, 'w')
-        dest.write(source.read())
-        dest.close()
-        source.close()
-        return (sourceFilename, True)
+        cmd = "cp -f %s %s" % (sourceFilename, destFilename)
+        if os.path.isdir(sourceFilename):
+            cmd = "rm -rf %s; cp -rf %s %s" % (destFilename, sourceFilename, destFilename)
+        error, output = getstatusoutput(cmd)
+        if not error: return (sourceFilename, True)
+        log("%s" % output)
+        return (sourceFilename, False)
     except Exception as e:
         return (sourceFilename, False)
 
