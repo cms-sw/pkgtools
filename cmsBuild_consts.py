@@ -114,6 +114,17 @@ INITENV_PREAMBLE = [
 ("+PATH", "PATH", "%i/bin"),
 ("+PATH", "%%{dynamic_path_var}", "%i/lib")]
 
+RUNPATH_ENV = {
+  "START_SH":  '',
+  "START_CSH": 'if (! $?_CMSBUILD_BUILD_ENV_) setenv _CMSBUILD_BUILD_ENV_ ""\n',
+  "END_SH":    '',
+  "END_CSH":   '',
+  "PRE_SH":    'if [ "${_CMSBUILD_BUILD_ENV_}" != "" ] ; then\n',
+  "POST_SH":   'fi\n',
+  "PRE_CSH":   'if ( ${%_CMSBUILD_BUILD_ENV_} != 0 ) then\n',
+  "POST_CSH":  'endif\n'
+}
+
 DEFAULT_PREAMBLE = """
 """
 if platform == 'darwin' : DEFAULT_PREAMBLE = """
@@ -163,7 +174,8 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 DEFAULT_FILES_PREAMBLE = """
 %%defattr(-, root, root)
 """
-DEFAULT_RPATH_PREAMBLE = "\n%{?post_initenv:%post_initenv}\n%{?add_rpath:%add_rpath}\n"
+DEFAULT_RPATH_PREAMBLE_INSTALL = "\n%{?runpath_install:%runpath_install}\n"
+DEFAULT_RPATH_PREAMBLE_POST = "\n%{?runpath_post:%runpath_post}\n"
 
 COMMANDS_SH = {"SETV":      """%(var)s="%(value)s"\n""",
                "SET":       """export %(var)s="%(value)s";\n""",
