@@ -120,7 +120,7 @@ def detectCompilerVersion(compilerName):
     if compilerName in SystemCompilerVersion: return SystemCompilerVersion[compilerName]
     (error, version) = getstatusoutput(COMPILER_DETECTION[compilerName])
     if error: raise UnknownCompiler()
-    SystemCompilerVersion[compilerName] = version.strip("\n")
+    SystemCompilerVersion[compilerName] = version.split("\n")[0]
     return SystemCompilerVersion[compilerName]
 
 
@@ -1426,6 +1426,7 @@ class PackageFactory(object):
                                              DEFAULT_RPATH_PREAMBLE_POST,
                                              options.buildWithRunPath,
                                              options.useRpath,
+                                             options.architecture,
                                              INITENV_PREAMBLE,
                                              COMPILER_DETECTION,
                                              DEFAULT_SECTIONS, ]).encode()).hexdigest()
@@ -2219,6 +2220,9 @@ class Package(object):
     def initWithSpec(self, specLines):
         """ This parses the spec files and creates a structure with its contents.
         """
+        if parseNoAutoRunPath(self.spec):
+            self.buildWithRunPath = False
+            specLines = [line for line in specLines if not line.startswith('## ') or ('NO_AUTO_RUNPATH' not in line)]
         self.origSpec = specLines
         self.group, self.name, self.realVersion = parseRPMLine(self.origSpec, self.options)
         if '%' in self.realVersion: self.updateVersion()
@@ -2245,13 +2249,13 @@ class Package(object):
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
+        if parseNoCompilerLine(self.spec): self.buildWithRunPath = False
         self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
         self.installDependencies = parseInstallDependencies(self.spec)
         self.uploadDependencies = parseUploadDependencies(self.spec)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
-        if parseNoAutoRunPath(self.spec): self.buildWithRunPath = False
         self.fullDependencies += self.dependencies
         self.setInitEnv()
         self.generateInitEnv()
@@ -2957,10 +2961,13 @@ def parseOptions():
                                     metavar="COMMAND",
                                     help="String to prepend to any rpmbuild command")
     advancedBuildOptions.add_option("--delete-build-directory",
+                                    help="Obsolete option, by default now build area is deleted after successful build. Use --no-delete-build-directory to disable it.",
+                                    action="store_false")
+    advancedBuildOptions.add_option("--no-delete-build-directory",
                                     dest="deleteBuildDirectory",
-                                    action="store_true",
-                                    help="Delete the build directory after successfully building a package.",
-                                    default=False)
+                                    action="store_false",
+                                    help="Do not delete the build area after successful build.",
+                                    default=True)
     advancedBuildOptions.add_option("--pretend",
                                     dest="pretend",
                                     action="store_true",
