@@ -2899,8 +2899,8 @@ def parseOptions():
     parser.add_option("--tag",
                       dest="tag",
                       metavar="NAME",
-                      help="Name of the tag. Default is to use package hash",
-                      default="hash")
+                      help="Name of the tag. Default is constructed from the --repository <repo>.",
+                      default="")
     parser.add_option("--force-tag",
                       dest="forcetag",
                       action="store_true",
@@ -2961,13 +2961,10 @@ def parseOptions():
                                     metavar="COMMAND",
                                     help="String to prepend to any rpmbuild command")
     advancedBuildOptions.add_option("--delete-build-directory",
-                                    help="Obsolete option, by default now build area is deleted after successful build. Use --no-delete-build-directory to disable it.",
-                                    action="store_false")
-    advancedBuildOptions.add_option("--no-delete-build-directory",
                                     dest="deleteBuildDirectory",
-                                    action="store_false",
-                                    help="Do not delete the build area after successful build.",
-                                    default=True)
+                                    action="store_true",
+                                    help="Delete the build directory after successfully building a package.",
+                                    default=False)
     advancedBuildOptions.add_option("--pretend",
                                     dest="pretend",
                                     action="store_true",
@@ -2998,11 +2995,11 @@ def parseOptions():
                                     action="store_true",
                                     help="""Use rpath instead of runpath..""",
                                     default=False)
-    advancedBuildOptions.add_option("--without-runpath",
+    advancedBuildOptions.add_option("--build-with-rpath",
                                     dest="buildWithRunPath",
-                                    action="store_false",
-                                    help="""Added runpath to the executables/libraries. This is done at post install time.""",
-                                    default=True)
+                                    action="store_true",
+                                    help="""Added rpath to the executables. This is done at post install time.""",
+                                    default=False)
     advancedBuildOptions.add_option("--vectorization",
                                     dest="vectorization",
                                     help="""CSV of vectorization instruction set flags e.g sse4.2,avx2,nehalem,haswell,skylake-avx512""",
