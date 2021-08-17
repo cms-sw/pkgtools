@@ -3112,9 +3112,6 @@ def parseOptions():
     if not opts.bootstrap:
         opts.buildWithRunPath = False
 
-    if opts.tag == "hash":
-        opts.forcetag = True
-
     if opts.vectorization:
         opts.vectorization = opts.vectorization.strip().split(",")
     else:
