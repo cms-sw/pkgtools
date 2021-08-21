@@ -3530,7 +3530,7 @@ def buildPackage(pkg, scheduler):
       cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
             "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
             "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ || true; done ; " \
-            "rm -rf %(builddir)s && " \
+            "chmod -R u+w %(builddir)s && rm -rf %(builddir)s && " \
             "mv %(tmpdir)s/%(pkgname)s-logs %(builddir)s" % optionsDict
       scheduler.log("Build logs cleanup %s" % pkg.name)
       e, o = getstatusoutput(cmd)
