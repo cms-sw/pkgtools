@@ -28,7 +28,7 @@ import itertools
 import pickle
 from hashlib import sha256
 from cmsBuild_consts import *
-from cmsdist_config import USE_COMPILER_VERSION
+from cmsdist_config import USE_COMPILER_VERSION, NO_VERSION_SUFFIX, NO_AUTO_RUNPATH
 try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
 import json
@@ -2225,6 +2225,8 @@ class Package(object):
             specLines = [line for line in specLines if not line.startswith('## ') or ('NO_AUTO_RUNPATH' not in line)]
         self.origSpec = specLines
         self.group, self.name, self.realVersion = parseRPMLine(self.origSpec, self.options)
+        if self.buildWithRunPath and (self.name in NO_AUTO_RUNPATH):
+            self.buildWithRunPath = False
         if '%' in self.realVersion: self.updateVersion()
         self.version = self.realVersion
         self.parseRevision()
@@ -2250,7 +2252,10 @@ class Package(object):
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
         if parseNoCompilerLine(self.spec): self.buildWithRunPath = False
-        self.versionSuffix = not parseNoVersionSuffix(self.spec)
+        if self.name in NO_VERSION_SUFFIX:
+            self.versionSuffix = False
+        else:
+            self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
         self.installDependencies = parseInstallDependencies(self.spec)
         self.uploadDependencies = parseUploadDependencies(self.spec)
@@ -3111,6 +3116,9 @@ def parseOptions():
 
     if not opts.bootstrap:
         opts.buildWithRunPath = False
+
+    if opts.tag == "hash":
+        opts.forcetag = True
 
     if opts.vectorization:
         opts.vectorization = opts.vectorization.strip().split(",")
