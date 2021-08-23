@@ -3128,7 +3128,7 @@ def parseOptions():
     if opts.weekly:
         n = int(((time()/86400)+4)/7)%2
         # "4" - added to set the beginning of new week from sunday since January 1, 1970 was a Thursday
-        opts.repository = opts.repository + '.week{}'.format(n)
+        opts.repository = opts.repository + '.week{0}'.format(n)
 
     # if cmsdist is not set then look for cmsdist/CMSDISTin local directory
     if not opts.cmsdist:
