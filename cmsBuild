@@ -2449,7 +2449,7 @@ class Package(object):
                      all_files = []
                      for root, dirs, files in os.walk(filename):
                          for fname in files:
-                              if fname.endswith(".pyc"): continue
+                              if fname.endswith(".pyc") or fname[0]==".": continue
                               all_files.append(os.path.join(root,fname))
                      for fname in sorted(all_files):
                           checksumCalculator.addFile(fname)
