@@ -2448,6 +2448,7 @@ class Package(object):
                 else:
                      for root, dirs, files in os.walk(filename):
                          for fname in files:
+                              if fname.endswith(".pyc"): continue
                               checksumCalculator.addFile(os.path.join(root,fname))
         if self.options.localSources and self.name in self.options.localSources:
             # recalculate hash based on file system if --source flag for pkg
