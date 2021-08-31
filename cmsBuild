@@ -4412,6 +4412,8 @@ if __name__ == "__main__":
     # python from cms external area
     if 'SCRAMRT_SET' in  environ:
         fatal("You have SCRAM runtime environment set. Please run it from a fresh shell.")
+    if ('HOME' in environ) and exists(join(environ["HOME"],".rpmmacros")):
+        fatal("~/.rpmmacros exists which can override some of the cmsdist default macros. Please rename it and re-try.")
     # Avoid locale related issues with gcc output.
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
