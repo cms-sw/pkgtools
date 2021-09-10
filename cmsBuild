@@ -55,6 +55,7 @@ rpm_upload_cache = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 build_stats = None
+cmsdist_files = {}
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -64,6 +65,18 @@ def fatal(message):
 def die(message):
     fatal(message)
 
+def cmsdist_file(name, ext, options, pkgname):
+    fname = 'spec' if ext == '.spec' else name + ext
+    s = join(pkgname, fname)
+    if not exists(join(options.cmsdist, s)):
+        s = name + ext
+    filename = join (options.cmsdist, s)
+    if exists (filename):
+        if not s in cmsdist_files:
+            cmsdist_files[s] = []
+        if not pkgname in cmsdist_files[s]:
+            cmsdist_files[s].append(pkgname)
+    return filename
 
 # Minimal string sanitization.
 def sanitize(s):
@@ -1278,7 +1291,7 @@ def getSourcesChecksum(pkg, sourcesNumbers):
             text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), getUrlChecksum(fixUrl(s)))
     if has_cmsdist_generated:
         for s in sourcesNumbers:
-            filename = join(pkg.options.cmsdist, s+".file")
+            filename = cmsdist_file(s, '.file', pkg.options, pkg.name)
             if exists(filename):
                 f = open(filename, 'rb')
                 m = md5adder(f.read())
@@ -1322,7 +1335,7 @@ def calculateHumanReadableVersion(pkg):
 
 
 def specFilename(opts, pkgName):
-    return join(abspath(opts.cmsdist), "%s.spec" % pkgName)
+    return cmsdist_file(pkgName, '.spec', opts, pkgName)
 
 
 def redefineMacro(name, value, maxLength=8000, initCount=0):
@@ -1452,7 +1465,7 @@ class PackageFactory(object):
 
     def __getPreamble(self, options):
         try:
-            filename = join(options.cmsdist, "rpm-preamble.file")
+            filename = cmsdist_file('rpm-preamble', '.file', options, 'all')
             return open(filename).read()
         except:
             raise FileNotFound(filename)
@@ -1485,15 +1498,15 @@ class PackageFactory(object):
             x=sys.path.pop(0)
         return pkgs
 
-    def processIncludes(self, specLines):
+    def processIncludes(self, specLines, pkgName):
         newOrigSpec = []
         for line in specLines:
             incmatch = self.syntax.INCLUDE.match(line)
             if not incmatch:
                 newOrigSpec.append(line)
             else:
-                incFilename = join(self.options.cmsdist, incmatch.group(1).strip(" \n")+".file")
-                newOrigSpec.extend (self.processIncludes(open(incFilename).readlines()))
+                incFilename = cmsdist_file(incmatch.group(1).strip(" \n"), '.file', self.options, pkgName)
+                newOrigSpec.extend (self.processIncludes(open(incFilename).readlines(), pkgName))
         return newOrigSpec
 
     def readSpec(self, pkgName):
@@ -1512,7 +1525,7 @@ class PackageFactory(object):
                 raise FileNotFound(filename)
         except IOError as e:
             raise FileNotFound(filename)
-        return self.processIncludes(specLines)
+        return self.processIncludes(specLines, pkgName)
 
     def createWithSpec(self, pkgName):
         if self.has_key(pkgName): return self[pkgName]
@@ -2057,8 +2070,7 @@ class SubPackage(object):
         self.parent = parent
 
     def dumpSpecFragment(self, computeSpecChecksum=True):
-        importName = 'subpackage-%s.file' % self.subname
-        importFilename = join(self.options.cmsdist, importName)
+        importFilename = cmsdist_file('subpackage-%s' % self.subname, '.file', self.options, self.name)
         spec = open(importFilename, 'r').read()
         if computeSpecChecksum:
             spec = re.compile(r'^(Summary:.*?)( SpecChecksum:.*|)$', re.M).sub(r'\g<1> SpecChecksum:%s' % self.checksum,
@@ -2318,14 +2330,14 @@ class Package(object):
             imatch = PKGFactory.syntax.IMPORT.match(line)
             smatch = PKGFactory.syntax.SUBPACKAGE.match(line)
             if imatch:
-                imports.append(imatch.group(1).strip(" \n") + ".file")
+                imports.append(imatch.group(1).strip(" \n"))
             elif smatch:
                 subpackages[smatch.group(1)] = smatch.group(3)
             else:
                 self.spec.append(line)
         try:
             for importName in imports:
-                importFilename = join(self.options.cmsdist, importName)
+                importFilename = cmsdist_file(importName, '.file', self.options, self.name)
                 self.spec.extend(open(importFilename).readlines())
                 self.imports.append(importFilename)
         except IOError as e:
@@ -2851,9 +2863,9 @@ class Package(object):
             if not d in deps + buildDeps: buildDeps.append(d)
 
         deps = [siteSpecific(d) for d in deps]
-        sources.extend([join(cmsdistPath, source + ".file")
+        sources.extend([cmsdist_file(source, '.file', self.options, self.name)
                         for source in localSources])
-        patches.extend([join(cmsdistPath, patch + ".patch")
+        patches.extend([cmsdist_file(patch, '.patch', self.options, self.name)
                         for patch in localPatches])
         PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps, sourcesNumbers)
         return (deps, sources, patches, buildDeps, sourcesNumbers)
@@ -3885,6 +3897,7 @@ def build(opts, args, factory):
                 log("%s:%s=%s %s" % (pkg.name, src, pkg_dir, url))
         return
     if opts.pretend:
+        json.dump(cmsdist_files, open("cmsdist_files.json", "w"))
         log("Option --pretend specified. Not building.")
         return
     buildSpecs(packages)
@@ -4507,7 +4520,7 @@ if __name__ == "__main__":
         if opts.systemCompiler:
             opts.compilerVersion = detectCompilerVersion(opts.compilerName)
         else:
-            pathname = join(opts.cmsdist, "%s.spec" % opts.compilerName)
+            pathname = cmsdist_file(opts.compilerName, '.spec', opts, 'all')
             try:
                 lines = open(pathname).readlines()
             except IOError as e:
