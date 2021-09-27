@@ -1988,7 +1988,7 @@ class ChecksumCalculator(object):
         self.__adder.update(string.encode())
 
     def addStrings(self, stringList):
-        self.__adder.update("".join(stringList).encode())
+        self.__adder.update("".join([s.decode("ascii", "ignore") for s in stringList]).encode())
 
     def addFile(self, filename):
         assert (filename[0] == "/")
