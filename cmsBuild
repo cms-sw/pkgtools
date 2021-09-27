@@ -2428,10 +2428,10 @@ class Package(object):
         checksumCalculator.addStrings(list(PKGFactory.sectionPostambles.values()) + [self.installPostambles])
 
         if self.buildWithRunPath:
-            checksumCalculator.addStrings(DEFAULT_RPATH_PREAMBLE_INSTALL)
-            checksumCalculator.addStrings(DEFAULT_RPATH_PREAMBLE_POST)
-            checksumCalculator.addStrings("buildWithRunPath=%s" % self.buildWithRunPath)
-            checksumCalculator.addStrings("useRPath=%s" % self.options.useRpath)
+            checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_INSTALL)
+            checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_POST)
+            checksumCalculator.addString("buildWithRunPath=%s" % self.buildWithRunPath)
+            checksumCalculator.addString("useRPath=%s" % self.options.useRpath)
 
         for filename in self.imports:
             checksumCalculator.addFile(abspath(filename))
