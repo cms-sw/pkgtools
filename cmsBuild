@@ -8,6 +8,7 @@ from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
 from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
+import base64
 if sys.version_info[0] == 2:
   from commands import getstatusoutput
   from urllib2 import urlopen, URLError, Request
@@ -34,6 +35,7 @@ except: run_monitor_on_command=None
 import json
 
 urlRe = re.compile(".*:.*/.*")
+urlAuthRe = re.compile('^(http(s|)://)([^:]+:[^@]+)@(.+)$')
 logLevel = 10
 NORMAL = 10
 DEBUG = 20
@@ -280,7 +282,12 @@ def install_reference(pkg):
 def downloadUrllib2(source, destDir, options, cmscache=False):
     try:
         dest = "/".join([destDir.rstrip("/"), basename(source)])
-        req = Request(source, headers={"Cache-Control": "no-cache"})
+        headers={"Cache-Control": "no-cache"}
+        m = urlAuthRe.match(source)
+        if m:
+            source = m.group(1)+m.group(4)
+            headers['Authorization'] = "Basic %s" % base64.b64encode(m.group(3))
+        req = Request(source, headers=headers)
         s = urlopen(req)
         tmpfile = "%s.%f.tmp" % (dest, time())
         f = open(tmpfile, "wb")
