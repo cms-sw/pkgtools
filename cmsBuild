@@ -806,7 +806,6 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
 
 
 def download(source, dest, options, pkg=None):
-    # FIXME `options` are the same as `pkg.options`
     source_name = pkg.sourcesNumbers[source] if pkg else None
     noCmssdtCache = True if 'no-cmssdt-cache=1' in source else False
     isCmsdistGenerated = True if 'cmdist-generated=1' in source else False
@@ -2014,11 +2013,6 @@ class ChecksumCalculator(object):
     def addDir(self, directory):
         cmd = "tar cf - %s 2>&1 | md5sum" % directory
         error, result = getstatusoutput(cmd)
-        # FIXME we ignore the error since cmd always return true due to '|'
-        # if error:
-        #     fatal("Error while running command: \n\t %s" % cmd)
-        #     log(cmd)
-
         self.addString(result.split()[0])
 
     def addPkg(self, pkg):
@@ -2289,7 +2283,6 @@ class Package(object):
         self.origRequires, self.sources, self.patches, self.origBuildRequires, self.sourcesNumbers = self.getRequiresAndSources()
         self.parseRequires()
         self.dumpSpec()
-        # FIXME: saveSpec should really be done once.
         createDirs(architecture=self.cmsplatf)
         self.calculateChecksum()
         self.rewriteRequires()
@@ -3834,8 +3827,6 @@ def buildSpecs(topLevelPackages):
     # We create before hand since we know they are going to be needed. This
     # is to avoid having parallel threads creating them at the same time with
     # one of the two failing because the directory is already there.
-    # FIXME: clean up the other places where these are created but only
-    #        after we move to the new scheduler.
     for path in ["SOURCES/cache", "RPMS", "SRPMS", "BUILD", "SPECS", "BUILDROOT"]:
         d = join(pkg.options.workDir, path)
         if not exists(d):
