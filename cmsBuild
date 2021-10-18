@@ -974,7 +974,7 @@ def fixVersionLine(specLines, version):
     for line in specLines:
         match = findRpmRe.match(line)
         if not match: nLines.append(line)
-        else: nLines.append(match.group(1)+" "+version)
+        else: nLines.append(match.group(1)+" "+version+"\n")
     return nLines
 
 def parseRPMLine(specLines, opts):
