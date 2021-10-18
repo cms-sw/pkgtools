@@ -2342,6 +2342,8 @@ class Package(object):
                 subpackages[smatch.group(1)] = smatch.group(3)
             else:
                 self.spec.append(line)
+                if not line.endswith('\n'):
+                    self.spec.append('\n')
         try:
             for importName in imports:
                 importFilename = cmsdist_file(importName, '.file', self.options, self.name)
