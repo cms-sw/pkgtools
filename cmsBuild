@@ -974,7 +974,7 @@ def fixVersionLine(specLines, version):
     for line in specLines:
         match = findRpmRe.match(line)
         if not match: nLines.append(line)
-        else: nLines.append(match.group(1)+" "+version+"\n")
+        else: nLines.append(match.group(1)+" "+version)
     return nLines
 
 def parseRPMLine(specLines, opts):
@@ -2342,6 +2342,8 @@ class Package(object):
                 subpackages[smatch.group(1)] = smatch.group(3)
             else:
                 self.spec.append(line)
+                if not line.endswith('\n'):
+                    self.spec.append('\n')
         try:
             for importName in imports:
                 importFilename = cmsdist_file(importName, '.file', self.options, self.name)
