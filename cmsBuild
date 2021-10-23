@@ -1994,7 +1994,10 @@ class ChecksumCalculator(object):
         self.__adder.update(string.encode())
 
     def addStrings(self, stringList):
-        self.__adder.update("".join([s.decode("ascii", "ignore") for s in stringList]).encode())
+        if sys.version_info[0] == 2:
+            self.__adder.update("".join([s.decode("ascii", "ignore") for s in stringList]).encode())
+        else:
+            self.__adder.update("".join(stringList).encode())
 
     def addFile(self, filename):
         assert (filename[0] == "/")
@@ -2922,8 +2925,8 @@ def parseOptions():
     parser.add_option("--tag",
                       dest="tag",
                       metavar="NAME",
-                      help="Name of the tag. Default is constructed from the --repository <repo>.",
-                      default="")
+                      help="Name of the tag. Default is to use package hash",
+                      default="hash")
     parser.add_option("--force-tag",
                       dest="forcetag",
                       action="store_true",
@@ -2984,10 +2987,13 @@ def parseOptions():
                                     metavar="COMMAND",
                                     help="String to prepend to any rpmbuild command")
     advancedBuildOptions.add_option("--delete-build-directory",
+                                    help="Obsolete option, by default now build area is deleted after successful build. Use --no-delete-build-directory to disable it.",
+                                    action="store_false")
+    advancedBuildOptions.add_option("--no-delete-build-directory",
                                     dest="deleteBuildDirectory",
-                                    action="store_true",
-                                    help="Delete the build directory after successfully building a package.",
-                                    default=False)
+                                    action="store_false",
+                                    help="Do not delete the build area after successful build.",
+                                    default=True)
     advancedBuildOptions.add_option("--pretend",
                                     dest="pretend",
                                     action="store_true",
@@ -3018,10 +3024,10 @@ def parseOptions():
                                     action="store_true",
                                     help="""Use rpath instead of runpath..""",
                                     default=False)
-    advancedBuildOptions.add_option("--build-with-rpath",
+    advancedBuildOptions.add_option("--build-with-runpath",
                                     dest="buildWithRunPath",
                                     action="store_true",
-                                    help="""Added rpath to the executables. This is done at post install time.""",
+                                    help="""Added runpath to the executables/libraries. This is done at post install time.""",
                                     default=False)
     advancedBuildOptions.add_option("--vectorization",
                                     dest="vectorization",
@@ -3131,9 +3137,6 @@ def parseOptions():
 
     if opts.linkParentRepository and opts.tag!="hash":
       fatal("Can not use --link-parent-repository without setting --tag=hash")
-
-    if not opts.bootstrap:
-        opts.buildWithRunPath = False
 
     if opts.tag == "hash":
         opts.forcetag = True
