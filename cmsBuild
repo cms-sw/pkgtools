@@ -1,4 +1,4 @@
-#!/usr/bin/python -u
+#!/usr/bin/python3 -u
 from __future__ import print_function
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
@@ -9,14 +9,10 @@ from os import chdir, getcwd, environ, walk, sep, kill
 from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
 import base64
-if sys.version_info[0] == 2:
-  from commands import getstatusoutput
-  from urllib2 import urlopen, URLError, Request
-else:
-  from subprocess import getstatusoutput
-  from urllib.request import urlopen, Request
-  from urllib.error import URLError
-  def cmp(a, b): return (a > b) - (a < b)
+from subprocess import getstatusoutput
+from urllib.request import urlopen, Request
+from urllib.error import URLError
+def cmp(a, b): return (a > b) - (a < b)
 from time import strftime, time, sleep
 import copy
 import re, os
@@ -1994,10 +1990,7 @@ class ChecksumCalculator(object):
         self.__adder.update(string.encode())
 
     def addStrings(self, stringList):
-        if sys.version_info[0] == 2:
-            self.__adder.update("".join([s.decode("ascii", "ignore") for s in stringList]).encode())
-        else:
-            self.__adder.update("".join(stringList).encode())
+        self.__adder.update("".join(stringList).encode())
 
     def addFile(self, filename):
         assert (filename[0] == "/")
