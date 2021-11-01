@@ -3949,7 +3949,7 @@ def bootstrap(opts):
                "-path", opts.workDir,
                "-repository", opts.repository,
                "-assume-yes", "-only-once", useDev, "setup"]
-    if '-seed-type' in bootstrapContents:
+    if '-seed-type' in bootstrapContents.decode("ascii", "ignore"):
         options += ['-seed-type', "build"]
 
     if logLevel is DEBUG:
