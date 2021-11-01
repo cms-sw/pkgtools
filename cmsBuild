@@ -3956,6 +3956,9 @@ def bootstrap(opts):
                "-path", opts.workDir,
                "-repository", opts.repository,
                "-assume-yes", "-only-once", useDev, "setup"]
+    if '-seed-type' in bootstrapContents:
+        options += ['-seed-type', "build"]
+
     if logLevel is DEBUG:
         options.append("-debug")
     cmpkg = "%s/common/cmspkg -a %s" % (opts.workDir, opts.architecture)
