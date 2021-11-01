@@ -1,5 +1,4 @@
 #!/usr/bin/python3 -u
-from __future__ import print_function
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
 import sys
