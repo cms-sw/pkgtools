@@ -2080,6 +2080,9 @@ class SubPackage(object):
         assert (self.parent)
         return join(self.rpmdir, self.rpmfilename)
 
+    def __hash__(self):
+        return hash(repr(self))
+
     def __repr__(self):
         return "<SubPackage name=%(name)s>" % self.__dict__
 
