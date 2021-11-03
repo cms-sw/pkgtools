@@ -2093,6 +2093,9 @@ class SubPackage(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __lt__(self, other):
+        return self.__cmp__(other)==-1
+
     # FIXME write a single implementation for both Package and SubPackage
     def __cmp__(self, other):
         """ Subpackage A is greater than package B if A is a subpackage of B.
