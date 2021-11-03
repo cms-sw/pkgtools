@@ -2939,6 +2939,11 @@ def parseOptions():
                       help="When uploading, copy the temporary directory to the production one.",
                       default=False)
     advancedBuildOptions = OptionGroup(parser, "Advanced build options")
+    advancedBuildOptions.add_option("--define",
+                                    dest="rpmMacros",
+                                    action="append",
+                                    help="Define extra macros to pass to build process.",
+                                    default=None)
     advancedBuildOptions.add_option("--sources",
                                     dest="sources",
                                     action="store_true",
@@ -4543,6 +4548,13 @@ if __name__ == "__main__":
             opts.rpmQueryDefines += ' --define "package_vectorization %s"' % " ".join(opts.vectorization)
         else:
             opts.rpmQueryDefines += ' --define "package_vectorization %{nil}"'
+        if opts.rpmMacros:
+            for macro in opts.rpmMacros:
+                if '=' in macro:
+                    macro = macro.replace('=', ' ')
+                else:
+                    macro += " 1"
+                opts.rpmQueryDefines += ' --define "%s"' % macro
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
 
