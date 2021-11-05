@@ -3359,7 +3359,7 @@ def getScriptlets(pkg, relocation, original):
     return scripts
 
 
-def installRpm(pkg, bootstrap):
+def installRpm(pkg, bootstrap, scheduler):
     """ Installs an rpm
     """
     error = 1
@@ -3390,9 +3390,10 @@ def installRpm(pkg, bootstrap):
     if error:
         if not pkg.options.ignoreCompileErrors:
             getstatusoutput("rm -rf %s %s/%s" % (pkg.rpmdir, abspath("RPMS"), pkg.rpmfilename))
+        scheduler.log("Failed to install RPM for %s" % pkg.name)
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
-    log("Done installing via rpm.", DEBUG)
+    scheduler.log("Done installation via rpm for %s" % pkg.name)
 
 
 def installApt(pkg, scheduler, cache=[]):
@@ -3435,7 +3436,7 @@ def scheduleInstallPackage(pkg, scheduler):
     actionName = "install-%s" % pkg.pkgName()
     if checkCanInstallRpm(pkg):
         scheduler.log("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName())
-        scheduler.serial(actionName, [], installRpm, pkg, bootstrapped)
+        scheduler.serial(actionName, [], installRpm, pkg, bootstrapped, scheduler)
         return True
     if checkIfOnServer(pkg):
         scheduler.log("%s is available from remote repository \"%s\". Not building. Downloading and installing..." % (
@@ -3643,7 +3644,7 @@ def installPackage(pkg, scheduler):
                     pkg.pkgName(), ",".join(sorted(miss_deps.keys()))))
                 pkg_error = True
         if pkg_error and not pkg.options.ignoreCompileErrors: raise RpmBuildFailed(pkg)
-    installRpm(pkg, pkg.options.bootstrap)
+    installRpm(pkg, pkg.options.bootstrap, scheduler)
     scheduler.log("Done %s" % pkg.pkgName())
     f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
     f.write(pkg.checksum)
