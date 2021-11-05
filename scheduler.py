@@ -202,7 +202,6 @@ class Scheduler(object):
     for taskId in forceJobs + downloadJobs + buildJobs:
       taskType = taskId.split("-")[0]
       self.runningJobsCount[taskType] += 1
-      self.log("%s" % self.runningJobsCount)
       transition(taskId, self.pendingJobs, self.runningJobs)
       self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
 
@@ -211,7 +210,6 @@ class Scheduler(object):
     taskType = taskId.split("-")[0]
     if taskType in self.runningJobsCount:
       self.runningJobsCount[taskType] -= 1
-      self.log("%s" % self.runningJobsCount)
     if not error:
       transition(taskId, self.runningJobs, self.doneJobs)
       return
