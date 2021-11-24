@@ -80,6 +80,11 @@ def cmsdist_file(name, ext, options, pkgname):
             cmsdist_files[s].append(pkgname)
     return filename
 
+def isNoVersionSuffix(name):
+  for reg in NO_VERSION_SUFFIX:
+    if reg.match(name): return True
+  return False
+
 # Minimal string sanitization.
 def sanitize(s):
     return re.sub("[^a-zA-Z_0-9*./-]", "", s)
@@ -2268,7 +2273,7 @@ class Package(object):
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
         if parseNoCompilerLine(self.spec): self.buildWithRunPath = False
-        if self.name in NO_VERSION_SUFFIX:
+        if isNoVersionSuffix(self.name):
             self.versionSuffix = False
         else:
             self.versionSuffix = not parseNoVersionSuffix(self.spec)
