@@ -533,6 +533,7 @@ def downloadGit(source, dest, options):
     tempdir = createTempDir(options.workDir, options.tempDirPrefix)
 
     exportpath = join(tempdir, args["export"])
+    if protocol=="git": protocol="https"
     if protocol:
         protocol += "://"
     if not protocol and not gitroot.endswith(".git"):
