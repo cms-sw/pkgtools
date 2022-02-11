@@ -1,6 +1,7 @@
 #regexp to match the name of package which should not be picked up from refernece repository
 #Format: CSV of packages to match on each line
 bootstrap-.+,.+-bundle
+gcc
 rpm
 SCRAMV1
 cms-common
