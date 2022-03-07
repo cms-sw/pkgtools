@@ -4430,9 +4430,9 @@ def checkOptionsLocalSource(opts):
             sourceOptionDict[pkg][source] = source_path
 
         # to solve inconsistent Source and Source0 naming in recipes
-        if source is "Source":
+        if source == "Source":
             sourceOptionDict[pkg]["Source0"] = source_path
-        elif source is "Source0":
+        elif source == "Source0":
             sourceOptionDict[pkg]["Source"] = source_path
         opts.localSources = sourceOptionDict
 
