@@ -4572,7 +4572,8 @@ if __name__ == "__main__":
         tags_cache = TagCacheAptImpl(opts)
         successfulTransaction = False
         successfulBootstrapEnv = False
-        while not successfulTransaction:
+        uploadTries = 5
+        while not successfulTransaction and (uploadTries>0):
             successfulTransaction = True
             checksums_cache = {}
             PKGFactory = PackageFactory(opts)
@@ -4604,6 +4605,10 @@ if __name__ == "__main__":
                     cleanup_server_upload(opts)
                     if not successfulTransaction:
                         log("Looks like repository changed while we were building. Trying again.")
+                        uploadTries-=1
+                        if uploadTries==0:
+                          log("Unable to upload, something went wrong, aborting the upload process.")
+                          sys.exit(1)
     except KeyboardInterrupt:
         log("User requested to abort. Exiting.")
         sys.exit(1)
