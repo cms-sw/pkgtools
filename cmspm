@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """CMS Package Management script. Feedback and Help: mojedasa@cern.ch
 
 This script must be able to run in Python 2.4.
@@ -114,8 +114,8 @@ import fnmatch
 import optparse
 import subprocess
 import threading
-import Queue
-from commands import getstatusoutput
+from queue import Queue
+from subprocess import getstatusoutput
 from os import getenv
 
 try:
@@ -173,7 +173,7 @@ def recursive_glob(treeroot, pattern):
   return results
 
 def die(msg):
-  print msg
+  print(msg)
   sys.exit(1)
 
 def deleteCVSFolders(treeroot):
@@ -254,10 +254,10 @@ def popen(args, merge_stderr = True, shell = False):
   stderr = None
   if merge_stderr:
     stderr = subprocess.STDOUT
-  print args
+  print(args)
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, shell=shell)
   r = p.communicate()[0]
-  print r
+  print (r)
   if p.returncode != 0:
     raise CalledProcessError(p.returncode, ' '.join(args))
   return r
@@ -268,7 +268,7 @@ def queryCVS(args, cvsroot, tries=5):
     tries -= 1
     try:
       return popen(['cvs', '-Q', '-d', cvsroot] + args)
-    except Exception, ex:
+    except Exception as ex:
       if tries==0: raise ex
     time.sleep(5)
 
@@ -297,9 +297,9 @@ def checkoutTag(tid, tag, lock, export, dryrun, cvsroot, errors):
   try:
     lock.acquire()
     if len(errors) != 0:
-      print "[Thread %2i] Stopping because something else failed." % tid
+      print ("[Thread %2i] Stopping because something else failed." % tid)
       return True
-    print "[Thread %2i]" % tid, action + ":", formatTag(tag), ' '.join(packages)
+    print ("[Thread %2i]" % tid, action + ":", formatTag(tag), ' '.join(packages))
   finally:
     lock.release()
 
@@ -314,7 +314,7 @@ def checkoutTag(tid, tag, lock, export, dryrun, cvsroot, errors):
   except:        
     try:
       lock.acquire()
-      print "[Thread %2i]" % tid, action, "failed:", formatTag(tag), ' '.join(packages)
+      print ("[Thread %2i]" % tid, action, "failed:", formatTag(tag), ' '.join(packages))
       errors.append(True)
       return True
     finally:
@@ -365,9 +365,9 @@ def rtag(tid, tag, lock, release, dryrun, errors, cvsroot):
   try:
     lock.acquire()
     if len(errors) != 0:
-      print "[Thread %2i] Stopping because something else failed." % tid
+      print ("[Thread %2i] Stopping because something else failed." % tid)
       return True
-    print "[Thread %2i]" % tid, "Tagging:", formatTag(tag), release, ' '.join(packages)
+    print ("[Thread %2i]" % tid, "Tagging:", formatTag(tag), release, ' '.join(packages))
   finally:
     lock.release()
 
@@ -379,7 +379,7 @@ def rtag(tid, tag, lock, release, dryrun, errors, cvsroot):
   except:
     try:
       lock.acquire()
-      print "[Thread %2i]" % tid, "Tagging failed:", formatTag(tag), release, ' '.join(packages)
+      print ("[Thread %2i]" % tid, "Tagging failed:", formatTag(tag), release, ' '.join(packages))
       errors.append(True)
       return True
     finally:
@@ -400,7 +400,7 @@ def cmd_co(args):
   if not opts.dryrun:
     try:
       os.mkdir(folder)
-    except OSError, e:
+    except OSError as e:
       pass
     os.chdir(folder)
 
@@ -420,7 +420,7 @@ def cmd_co(args):
   for tag in removedTags:
     error, out = getstatusoutput("rm -rf %s" % tag)
     if error:
-      print out
+      print (out)
       exit(1)
   addedTag = [(k,v) for (k,v) in tags.items() if v != "-"]
   checkoutTags(addedTag, opts.nthreads, opts.export, opts.dryrun, opts.cvsroot)
@@ -445,7 +445,7 @@ def cmd_corel(args):
   if not opts.dryrun:
     try:
       os.mkdir(folder)
-    except OSError, e:
+    except OSError as e:
       pass
 
   # Open the file before doing anything else to catch errors earlier
@@ -487,35 +487,35 @@ def checkBigProducts(release):
   if not os.path.exists(os.path.join(releaseTop, ".SCRAM" , arch, "subpackage-debug")):
     return
 
-  print "Checking for Big products packages..."
+  print ("Checking for Big products packages...")
   getstatusoutput("scram build -r echo_CXX")
   doReadTree=False
   for bigprod in getSCRAMVariable("ALL_BIGPRODS").split(" "):
     if not bigprod: continue
-    print "Checking big product "+bigprod
+    print ("Checking big product "+bigprod)
     checkout_all=False
     pkgs = []
     for pkg in getSCRAMVariable(bigprod+"_PACKAGES").split(" "):
       if (not pkg) or (not "/" in pkg): continue
       if os.path.exists (os.path.join("src",pkg)):
         checkout_all=True
-        print "  Rebuild all packages of big product %s due to %s" % (bigprod, pkg)
+        print ("  Rebuild all packages of big product %s due to %s" % (bigprod, pkg))
       else:
         pkgs.append(pkg)
 
     if checkout_all:
       if not pkgs:
-        print "  All packages for %s are already checked out" % bigprod
+        print ("  All packages for %s are already checked out" % bigprod)
         continue
       doReadTree=True
       f=open ("src/.git/info/sparse-checkout", "a")
       for pkg in pkgs:
-        print pkg+"\n"
+        print (pkg+"\n")
         f.write(pkg+"\n")
       f.close()
   if doReadTree:
     popen('eval `scram run -sh` && cd src && git read-tree -mu %s' % (release), False, True)
-  print "Checking for Big products packages... DONE"
+  print ("Checking for Big products packages... DONE")
 
 def cmd_frombase(args):
   parser = optparse.OptionParser(usage="cmspm frombase <base-release> <release> <project>")
@@ -537,23 +537,23 @@ def cmd_frombase(args):
   if opts.dryrun:
     sys.exit(0)
     
-  print "Running scram project..."
+  print ("Running scram project...")
   popen(['scram', '-a', getenv("SCRAM_ARCH"), 'p', 'CMSSW', project])
   os.chdir(project)
-  print "Running scram project... DONE"
+  print ("Running scram project... DONE")
 
   e, o = getstatusoutput("which git-cms-addpkg")
   if e:
-    print o
+    print (o)
     sys.exit(1)
   if not os.path.exists(os.path.join(os.path.dirname(o),"git-cms-checkout-topic")):
-    print "Running cms-sparse-checkout..."
+    print ("Running cms-sparse-checkout...")
     popen('eval `scram run -sh` && git cms-addpkg --ssh -y FWCore/Version && cd src && git checkout %s && git cms-sparse-checkout --exclude-cvs-keywords %s %s && git read-tree -mu %s  && git cms-checkdeps -A -a' % (release, baserelease, release, release), False, True)
-    print "Running cms-sparse-checkout... DONE"
+    print ("Running cms-sparse-checkout... DONE")
   else:
-    print "Running cms-checkout-topic..."
+    print ("Running cms-checkout-topic...")
     popen('eval `scram run -sh` && git cms-checkout-topic --ssh %s && git cms-addpkg -y FWCore/Version && git cms-checkdeps -A -a' % (release), False, True)
-    print "Running cms-checkout-topic... DONE"
+    print ("Running cms-checkout-topic... DONE")
 
   checkBigProducts(release)
 
@@ -578,7 +578,7 @@ def cmd_query(args):
   tags = getReleasesTags([release], False)
 
   for tag in tags:
-    print tag[0], tag[1]
+    print (tag[0]+" "+tag[1])
 
 def cmd_tag(args):
   parser = optparse.OptionParser(usage="cmspm tag <release> [options]")
@@ -594,9 +594,9 @@ def cmd_tag(args):
 
   checkNThreads(opts.nthreads)
 
-  print "Getting tags from TagCollector...",
+  print ("Getting tags from TagCollector...",)
   tags = getReleasesTags([release], False)
-  print "DONE"
+  print ("DONE")
 
   lock = threading.Lock()
   errors = []
@@ -612,8 +612,8 @@ def main():
     args = sys.argv[1:]
     cmd = globals()['cmd_' + args[0]]
   except:
-    print __doc__
-    print "Exception: Expected <command>."
+    print (__doc__)
+    print ("Exception: Expected <command>.")
     sys.exit(-1)
   cmd(args[1:])
 
