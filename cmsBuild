@@ -4198,7 +4198,7 @@ def upload(opts, args, factory):
         statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
         depCmd = deprecateLocalCommand(opts, getPackages(pkg2deprecate)+deprecatePkgsClds)
         statusAndLog(False, depCmd)
-        executeScript(opts, deprecateLocalCommand(opts, getPackages(pkg2deprecate)+deprecatePkgsClds))
+        executeScript(opts, depCmd)
         return False
     fullPackageList = uploadablePackages
     if not fullPackageList:
