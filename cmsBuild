@@ -4087,7 +4087,7 @@ def deprecateLocalCommand(opts, fullPackageList):
     deprecatedSrc = " ".join(["SOURCES/" + p.pkgdir for p in fullPackageList])
     deprecatedDir = " ".join([p.pkgrel for p in fullPackageList])
     deprecatedSRPM = " ".join(["SRPMS/cache/*/" + p.pkgName() + "*" for p in fullPackageList])
-    deprecateLocal = format("%(rpmenv)s ; rpm -e %(deprecablePackages)s\n"
+    deprecateLocal = format("%(rpmenv)s ; rpm -e %(deprecablePackages)s || true\n"
                             'cd %(workDir)s\n'
                             'rm -rf %(deprecatedDir)s\n'
                             "for x in %(deprecableRPMS)s; do\n"
@@ -4098,9 +4098,11 @@ def deprecateLocalCommand(opts, fullPackageList):
                             "done\n"
                             "for x in %(deprecatedSrc)s; do\n"
                             '  [ -d $x ] || continue\n'
+                            '  echo Deleting $x\n'
                             "  for f in $x/*; do\n"
                             '    realfile=`readlink $f || true`\n'
                             '    [ "$realfile" ] || continue \n'
+                            '    echo Deleting $realfile\n'
                             '    rm -f $realfile\n'
                             "  done\n"
                             '  rm -rf $x\n'
@@ -4195,8 +4197,10 @@ def upload(opts, args, factory):
                     pkg2deprecate.append(d)
         statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
         depCmd = deprecateLocalCommand(opts, getPackages(pkg2deprecate)+deprecatePkgsClds)
+        err, out = executeScript(opts, depCmd)
         statusAndLog(False, depCmd)
-        executeScript(opts, depCmd)
+        statusAndLog(False, "Exit code:%s" % err)
+        statusAndLog(False, out)
         return False
     fullPackageList = uploadablePackages
     if not fullPackageList:
