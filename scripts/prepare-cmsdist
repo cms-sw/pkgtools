@@ -24,11 +24,6 @@ case $CMSSW_X_Y_Z in
   ;;
 esac
 
-case $ARCH in
-  osx*|slc*|fc*|cc*|cs*) ;;
-  *) echo "Malformed architecture name." ; exit 1 ;;
-esac
-
 INITIALS=`finger $USER | grep Name: | perl -p -i -e "s/.*Name: //;s/[a-z0-9 ]//g" | tr "[:upper:]" "[:lower:]"`
 
 perl -p -i -e "s/### RPM cms cmssw.*/### RPM cms cmssw $CMSSW_X_Y_Z/" CMSDIST/cmssw.spec
