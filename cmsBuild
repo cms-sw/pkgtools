@@ -674,7 +674,7 @@ def downloadPip(source, dest, options):
 
     if not '--no-deps' in pip_opts: pip_opts = '--no-deps ' + pip_opts
     if not '--no-cache-dir' in pip_opts: pip_opts = '--no-cache-dir ' + pip_opts
-    comm = pip + ' download ' + pip_opts + ' --disable-pip-version-check  -d . ' + pack + '; /bin/ls | grep -v files.list > files.list'
+    comm = pip + ' download ' + pip_opts + ' --disable-pip-version-check -q -d . ' + pack + '; /bin/ls | grep -v files.list > files.list'
     return downloadCmd(source, dest, options, comm, getPipSourceDependency([source], options.pipPackage))
 
 
