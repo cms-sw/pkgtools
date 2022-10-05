@@ -259,7 +259,11 @@ def popen(args, merge_stderr = True, shell = False):
   r = p.communicate()[0]
   print (r)
   if p.returncode != 0:
-    raise CalledProcessError(p.returncode, ' '.join(args))
+    if isinstance(args, str):
+      str_args = args
+    else:
+      str_args = ' '.join(args)
+    raise CalledProcessError(p.returncode, str_args)
   return r
 
 def queryCVS(args, cvsroot, tries=5):
