@@ -257,7 +257,7 @@ def popen(args, merge_stderr = True, shell = False):
   print(args)
   p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, shell=shell)
   r = p.communicate()[0]
-  print (r)
+  print (r.decode("utf-8", errors="replace"))
   if p.returncode != 0:
     if isinstance(args, str):
       str_args = args
