@@ -2429,7 +2429,8 @@ class Package(object):
             self.checksum = checksumCalculator.getChecksum()
             self.version = calculateHumanReadableVersion(self)
             return
-
+        if self.name == "gcc":
+          checksumCalculator.addStrings("ForceChangeHash")
         checksumCalculator.addStrings(self.origSpec)
         checksumCalculator.addStrings(DEFAULT_SECTIONS.values())
         checksumCalculator.addStrings(PKGFactory.sectionOptions.values())
