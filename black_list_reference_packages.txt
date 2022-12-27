@@ -4,6 +4,7 @@ bootstrap-.+,.+-bundle
 gcc
 rpm
 SCRAMV1
+SCRAMV2
 cms-common
 cms-git-tools
 .+-toolfile
