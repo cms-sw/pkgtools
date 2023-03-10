@@ -4560,11 +4560,13 @@ if __name__ == "__main__":
             opts.compilerVersion.replace(".",""),
             arch_data[2],
             "_".join(arch_data[0:2]))
-        if exists("/etc/rpm/macros.dist"):
-          with open("/etc/rpm/macros.dist") as ref:
+        for dist_macros in ["/etc/rpm/macros.dist", "/usr/lib/rpm/macros.d/macros.dist"]:
+          if not exists(dist_macros): continue
+          with open(dist_macros) as ref:
             for line in ref.readlines():
               if not line.startswith("%"): continue
               opts.rpmQueryDefines += ' --define "%s"' % line[1:].strip()
+          break
         if opts.vectorization:
             opts.rpmQueryDefines += ' --define "package_vectorization %s"' % " ".join(opts.vectorization)
         else:
