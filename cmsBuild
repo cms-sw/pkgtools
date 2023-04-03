@@ -53,6 +53,7 @@ removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 build_stats = None
 cmsdist_files = {}
+pgo_packages = []
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -1335,10 +1336,11 @@ def calculateHumanReadableVersion(pkg):
         log("Attempt to assign %s to \'%s\'" % (pkg.checksum, tag), DEBUG)
     else:
         tag = pkg.checksum
+    pgo_tag = "-pgo" if (pkg.name in pgo_packages) and (pkg.options.PGOGenerate) else ""
     if not tag:
-        return "%s" % pkg.realVersion
+        return "%s%s" % (pkg.realVersion, pgo_tag)
     else:
-        return "%s-%s" % (pkg.realVersion, tag)
+        return "%s%s-%s" % (pkg.realVersion, pgo_tag, tag)
 
 
 def specFilename(opts, pkgName):
@@ -1493,12 +1495,18 @@ class PackageFactory(object):
         return Package(self.options)
 
     def updateVirtualPackages(self, cmsdist):
+        global pgo_packages
         pkgs = {}
         for vp in glob(join(cmsdist,'*','cmsdist_packages.py')):
-            sys.path.insert(0,dirname(vp))
+            pkg_dir = dirname(vp)
+            if pkg_dir.endswith("/pgo") and (not self.options.PGOGenerate) and (not self.options.PGOUse):
+                continue
+            sys.path.insert(0,pkg_dir)
             pkg = __import__('cmsdist_packages')
             try:
               pkg.packages(pkgs, self)
+              if pkg_dir.endswith("/pgo"):
+                pgo_packages = pkg.pgo_packages[:]
             except TypeError as e:
               pkg.packages(pkgs)
             sys.modules.pop('cmsdist_packages')
@@ -1520,7 +1528,7 @@ class PackageFactory(object):
         specLines = []
         filename = specFilename(self.options, pkgName)
         try:
-            if exists(filename):
+            if exists(filename) and (not pkgName in pgo_packages):
                 specLines = open(filename).readlines()
             elif pkgName in self.virtual_packages:
                 cmd = self.virtual_packages[pkgName]
@@ -3042,6 +3050,16 @@ def parseOptions():
                                     dest="vectorization",
                                     help="""CSV of vectorization instruction set flags e.g sse4.2,avx2,nehalem,haswell,skylake-avx512""",
                                     default="")
+    advancedBuildOptions.add_option("--pgo-generate",
+                                    dest="PGOGenerate",
+                                    action="store_true",
+                                    help="""Enable PGO generation flags for selected packages""",
+                                    default=False)
+    advancedBuildOptions.add_option("--pgo-use",
+                                    dest="PGOUse",
+                                    action="store_true",
+                                    help="""Enable PGO use flags for selected packages""",
+                                    default=False)
     advancedBuildOptions.add_option("--reference",
                                     dest="reference",
                                     default=None,
