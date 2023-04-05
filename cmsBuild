@@ -1336,7 +1336,7 @@ def calculateHumanReadableVersion(pkg):
         log("Attempt to assign %s to \'%s\'" % (pkg.checksum, tag), DEBUG)
     else:
         tag = pkg.checksum
-    pgo_tag = "-pgo" if (pkg.name in pgo_packages) and (pkg.options.PGOGenerate) else ""
+    pgo_tag = "-pgo" if ((pkg.name in pgo_packages) and (pkg.options.PGOGenerate) and (tag!="pgo")) else ""
     if not tag:
         return "%s%s" % (pkg.realVersion, pgo_tag)
     else:
