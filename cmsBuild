@@ -585,7 +585,7 @@ def downloadCmd (source, dest, options, command, env_pkgs):
     for d in env_pkgs: cmd = cmd + ". %s; " % PKGFactory[d].getInitEnvScript()
     cmd = cmd + command
 
-    log("Download command: %s" % cmd)
+    log("Download command: %s" % cmd, DEBUG)
     error, output = getstatusoutput(cmd)
     if error:
         log("Error while downloading sources from %s.\n\n %s \n %s \n  %s \n " % (
@@ -620,7 +620,8 @@ def downloadPip(source, dest, options):
     if len(url_parts) > 1: opts = url_parts[1].split("&")
     pkg = url_parts[0].split("/")
     pack = pkg[0].strip()
-    for tar_name in set([pack.replace("-", "_"), pack]):
+    tar_names = [pack.replace("-", "_"), pack] if '-' in pack else [pack]
+    for tar_name in tar_names:
       pypi_file = '%s-%s.tar.gz' % (tar_name, pkg[1].strip())
       pypi_url = 'https://pypi.io/packages/source/%s/%s/%s' % (pack[0], pack, pypi_file)
       if downloadUrllib2(pypi_url, dest, options):
