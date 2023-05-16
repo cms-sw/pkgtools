@@ -936,6 +936,15 @@ class FileNotFound(Exception):
     def __repr__(self):
         log("Unable to find file %s" % self.filename)
 
+class IncludedFileNotFound(Exception):
+    def __init__(self, specname, filename):
+        log(specname)
+        log(filename)
+        self.specname = specname
+        self.filename = filename
+
+    def __repr__(self):
+        log("Unable to find file %s (required by spec %s)" % (self.filename, self.specname))
 
 class NotCorrectlyBootstrapped(Exception):
     def __init__(self, why):
@@ -1523,8 +1532,15 @@ class PackageFactory(object):
                 newOrigSpec.append(line)
             else:
                 incFilename = cmsdist_file(incmatch.group(1).strip(" \n"), '.file', self.options, pkgName)
-                newOrigSpec.extend (self.processIncludes(open(incFilename).readlines(), pkgName))
-        return newOrigSpec
+                try:
+                    ret, newSpec, incFile = self.processIncludes(open(incFilename).readlines(), pkgName)
+                    if ret:
+                        newOrigSpec.extend(newSpec)
+                    else:
+                        return False, None, incFile                    
+                except IOError as e: 
+                    return False, None, incFilename
+        return True, newOrigSpec, None
 
     def readSpec(self, pkgName):
         specLines = []
@@ -1542,7 +1558,12 @@ class PackageFactory(object):
                 raise FileNotFound(filename)
         except IOError as e:
             raise FileNotFound(filename)
-        return self.processIncludes(specLines, pkgName)
+        
+        ret, newSpec, incFile = self.processIncludes(specLines, pkgName)
+        if ret:
+            return newSpec
+        else:
+            raise IncludedFileNotFound(pkgName, incFile)
 
     def createWithSpec(self, pkgName):
         if self.has_key(pkgName): return self[pkgName]
@@ -4663,6 +4684,8 @@ if __name__ == "__main__":
     except FileNotFound as e:
         log("""ERROR! File not found: %(filename)s""" % e.__dict__)
         sys.exit(1)
+    except IncludedFileNotFound as e:
+         log("""ERROR: Included file %(filename)s not found, required for %(specname)s""" % e.__dict__)
     except PlatformDetectionError as e:
         log("""ERROR: Unable to detect the architecture:""")
         log("%s" % e)
