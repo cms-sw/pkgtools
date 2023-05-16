@@ -4684,6 +4684,8 @@ if __name__ == "__main__":
     except FileNotFound as e:
         log("""ERROR! File not found: %(filename)s""" % e.__dict__)
         sys.exit(1)
+    except IncludedFileNotFound as e:
+         log("""ERROR: Included file %(filename)s not found, required for %(specname)s""" % e.__dict__)
     except PlatformDetectionError as e:
         log("""ERROR: Unable to detect the architecture:""")
         log("%s" % e)
