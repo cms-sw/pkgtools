@@ -3636,8 +3636,6 @@ def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=Fals
             pkg2search = rpm_pkg
         rpm_env = "%s env -- " % rpm_cmd if rpm_cmd else "%s ; " % rpmEnvironmentScript
         cmd = "%(rpm_env)s rpm %(opt)s %(pkg2search)s > %(provides_cache)s" % locals()
-        if read:
-          print("SMA:%s" % cmd)
         getstatusoutput(cmd)
     if read:
       e, o = getstatusoutput("cat %s" % provides_cache)
