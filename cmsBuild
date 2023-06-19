@@ -241,7 +241,12 @@ def install_reference(pkg):
     if error:
         log("Command:\n %(command)s failed with the following message: %(info)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, info)
-    provides = savePackageProvides(pkg.pkgName(), pkg.options, rpm_cmd=REF_CMSPKG_CMD, read=True)
+    command = "%s env -- rpm -q --provides %s" % (REF_CMSPKG_CMD, pkg.pkgName())
+    error, provides = getstatusoutput(command)
+    if 'Error: You do not have write permission' in info: error = False
+    if error:
+        log("Command:\n %(command)s failed with the following message: %(provides)s" % locals(), DEBUG)
+        raise RpmInstallFailed(pkg, provides)
     pkg_parts = pkg.pkgName().split("+", 2)
     args = {"cmsroot": pkg.options.workDir, "refroot": pkg.options.reference, "cmsplatf": pkg.options.architecture}
     args['pkgdir'] = join(pkg.options.architecture, *pkg_parts)
@@ -253,7 +258,7 @@ def install_reference(pkg):
     for l in info.split("\n"):
         if infoReg.match(l):
             spec.write(l + "\n")
-    for l in provides:
+    for l in provides.split("\n"):
         if ref_permission_error in l: continue
         spec.write("Provides: " + l + "\n")
     spec.write("Obsoletes: %s\n" % pkg.pkgName())
@@ -3266,8 +3271,6 @@ def parseOptions():
 
 def createDirs(architecture, dest="./"):
     dirs = ["SPECS", join("RPMS", architecture),
-            join("DEPS", architecture, "provides"),
-            join("DEPS", architecture, "requires"),
             "SRPMS", join("BUILD", architecture), "SOURCES", "BUILDROOT", join("WEB", architecture)]
     for d in dirs:
         try:
@@ -3410,7 +3413,6 @@ def installRpm(pkg, bootstrap, scheduler):
     if bootstrap:
         command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
         error, output = getstatusoutput(command)
-        savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation())
     else:
         workDir = pkg.workDir
         tmpDir = join(workDir, pkg.tempDirPrefix, pkg.checksum)
@@ -3456,7 +3458,6 @@ def installApt(pkg, scheduler, cache=[]):
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
     log("Done installing via cmspkg.", DEBUG)
-    savePackageProvides(pkg.pkgName(), pkg.options)
     for dep in pkg.dependencies:
         scheduler.forceDone("check-%s" % dep)
         scheduler.forceDone("install-%s" % dep)
@@ -3626,23 +3627,6 @@ def buildPackage(pkg, scheduler):
         symlink(uniqueSubFilename, finalSubFilename)
 
 
-def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=False):
-    provides_cache = join(options.workDir, "DEPS", options.architecture, "provides", pkg_name)
-    if not exists(provides_cache):
-        opt = "-q --provides "
-        pkg2search = pkg_name
-        if rpm_pkg:
-            opt += " -p"
-            pkg2search = rpm_pkg
-        rpm_env = rpm_cmd if rpm_cmd else rpmEnvironmentScript
-        cmd = "%(rpm_env)s ; rpm %(opt)s %(pkg2search)s > %(provides_cache)s" % locals()
-        getstatusoutput(cmd)
-    if read:
-      e, o = getstatusoutput("cat %s" % provides_cache)
-      return o.split("\n")
-    return
-
-
 def installPackage(pkg, scheduler):
     if not checkCanInstallRpm(pkg):
         raise RpmBuildFailed(pkg)
@@ -3656,13 +3640,7 @@ def installPackage(pkg, scheduler):
         if error:
             scheduler.log(output)
             raise RpmBuildFailed(pkg)
-        requires_cache = join(pkg.options.workDir, "DEPS", pkg.options.architecture, "requires", pkg.pkgName()+".json")
-        req_data = {
-                    "package_deps": pkg.dependencies,
-                    "rpm_requires": [l for l in  output.split("\n") if not l.startswith('rpmlib(')]
-                   }
-        json.dump(req_data, open(join(requires_cache),"w"))
-        localPaths = [l for l in req_data["rpm_requires"] if l.startswith(pkg.options.workDir)]
+        localPaths = [l for l in output.split("\n") if l.startswith(pkg.options.workDir)]
         if localPaths:
             scheduler.log("Error: Local path dependency found for %s." % pkg.pkgName())
             tmpDir = join(pkg.workDir, pkg.tempDirPrefix, "unpack", pkg.name)
@@ -3684,6 +3662,33 @@ def installPackage(pkg, scheduler):
             scheduler.log(msg)
             error, output = getstatusoutput("rm -rf %s" % tmpDir)
             pkg_error = True
+        if pkg.options.checkPackageDeps:
+            pkg_deps = ["system-base-import", pkg.rpmLocation()] + [p.pkgName() for p in pkg.dependencies]
+            for p in rpm_db_cache:
+                if '+bootstrap-bundle+' in p:
+                    pkg_deps.append(p)
+                    break
+            all_provides = {}
+            for dep_pkg in pkg_deps:
+                provides_cachedir = join(pkg.options.workDir, pkg.options.tempDirPrefix, "cache")
+                opt = "-q --provides"
+                if dep_pkg == pkg.rpmLocation():
+                    opt += " -p"
+                    provides_cache = join(provides_cachedir, "provides-" + pkg.pkgName())
+                else:
+                    provides_cache = join(provides_cachedir, "provides-" + dep_pkg)
+                cmd = "if [ ! -f %(provides_cache)s ] ; then %(rpm_env)s ; rpm %(opt)s %(dep_pkg)s > %(provides_cache)s ; fi ; cat %(provides_cache)s | cut -d\  -f1" % locals()
+                e, o = getstatusoutput(cmd)
+                for p in o.split("\n"): all_provides[p] = 1
+            miss_deps = {}
+            for d in output.split("\n"):
+                if d.startswith("rpmlib(") or (d in pkg_deps): continue
+                if not d in all_provides: miss_deps[d] = 1
+            if miss_deps:
+                scheduler.log("Error: Package %s requires '%s' while there is no direct dependency in spec file" % (
+                    pkg.pkgName(), ",".join(sorted(miss_deps.keys()))))
+                pkg_error = True
+        if pkg_error and not pkg.options.ignoreCompileErrors: raise RpmBuildFailed(pkg)
     installRpm(pkg, pkg.options.bootstrap, scheduler)
     scheduler.log("Done %s" % pkg.pkgName())
     f = open(join(pkg.options.workDir, pkg.pkgrel, ".package-checksum"), 'w')
@@ -3908,9 +3913,6 @@ def build(opts, args, factory):
     if err:
         fatal("unable to find a working rpm.")
     rpmCacheUpdate(opts)
-    if opts.bootstrap:
-        for p in ["system-base-import"]+[x for x in rpm_db_cache if ('+' in  x) and (x.split('+')[1] in ['bootstrap-bundle', 'rpm', 'fakesystem'])]:
-          savePackageProvides(p, opts)
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
 
     for p in packages:
