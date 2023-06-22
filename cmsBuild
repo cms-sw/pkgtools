@@ -1519,7 +1519,7 @@ class PackageFactory(object):
             x=sys.path.pop(0)
         return pkgs
 
-    def processIncludes(self, specLines, pkgName):
+    def processIncludes(self, specLines, pkgName, includes):
         newOrigSpec = []
         for line in specLines:
             incmatch = self.syntax.INCLUDE.match(line)
@@ -1527,8 +1527,10 @@ class PackageFactory(object):
                 newOrigSpec.append(line)
             else:
                 incFilename = cmsdist_file(incmatch.group(1).strip(" \n"), '.file', self.options, pkgName)
+                if incFilename in includes: continue
+                includes.append(incFilename)
                 try:
-                    ret, newSpec, incFile = self.processIncludes(open(incFilename).readlines(), pkgName)
+                    ret, newSpec, incFile = self.processIncludes(open(incFilename).readlines(), pkgName, includes)
                     if ret:
                         newOrigSpec.extend(newSpec)
                     else:
@@ -1554,7 +1556,7 @@ class PackageFactory(object):
         except IOError as e:
             raise FileNotFound(filename)
         
-        ret, newSpec, incFile = self.processIncludes(specLines, pkgName)
+        ret, newSpec, incFile = self.processIncludes(specLines, pkgName, [])
         if ret:
             return newSpec
         else:
