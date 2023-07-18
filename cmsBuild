@@ -49,6 +49,7 @@ reference_rpm_db_cache = {}
 rpm_db_cache = {}
 cmspkg_upload_cache = {"": []}
 rpm_upload_cache = {}
+cms_debug_packages = []
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 build_stats = None
@@ -2464,6 +2465,9 @@ class Package(object):
         checksumCalculator.addStrings(PKGFactory.sectionPreambles.values())
         checksumCalculator.addStrings(list(PKGFactory.sectionPostambles.values()) + [self.installPostambles])
 
+        if self.name in cms_debug_packages:
+            checksumCalculator.addStrings("cms_debug_packages=true")
+
         if self.buildWithRunPath:
             checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_INSTALL)
             checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_POST)
@@ -4618,6 +4622,8 @@ if __name__ == "__main__":
                     macro = macro.replace('=', ' ')
                 else:
                     macro += " 1"
+                if macro.startswith("cms_debug_packages "):
+                    cms_debug_packages = macro.split(" ",1)[-1].strip().split(",")
                 opts.rpmQueryDefines += ' --define "%s"' % macro
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
