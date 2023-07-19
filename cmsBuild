@@ -49,7 +49,7 @@ reference_rpm_db_cache = {}
 rpm_db_cache = {}
 cmspkg_upload_cache = {"": []}
 rpm_upload_cache = {}
-cms_debug_packages = []
+cms_debug_packages = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 build_stats = None
@@ -2466,7 +2466,7 @@ class Package(object):
         checksumCalculator.addStrings(list(PKGFactory.sectionPostambles.values()) + [self.installPostambles])
 
         if self.name in cms_debug_packages:
-            checksumCalculator.addStrings("cms_debug_packages=true")
+            checksumCalculator.addString("cms_debug_packages=%s" % ",".join(sorted(cms_debug_packages[self.name])))
 
         if self.buildWithRunPath:
             checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_INSTALL)
@@ -4623,8 +4623,18 @@ if __name__ == "__main__":
                 else:
                     macro += " 1"
                 if macro.startswith("cms_debug_packages "):
-                    cms_debug_packages = macro.split(" ",1)[-1].strip().split(",")
-                opts.rpmQueryDefines += ' --define "%s"' % macro
+                    for dbg in macro.split(" ",1)[-1].strip().split(","):
+                        pkg = dbg.split("/")[0]
+                        if not pkg in cms_debug_packages: cms_debug_packages[pkg] = set([])
+                        cms_debug_packages[pkg].add(dbg)
+                else:
+                    opts.rpmQueryDefines += ' --define "%s"' % macro
+        #concatenate all cms_debug_packages in one place
+        dbg_pkgs = []
+        for pkg in cms_debug_packages:
+            dbg_pkgs+=cms_debug_packages[pkg]
+        if dbg_pkgs:
+            opts.rpmQueryDefines += ' --define "cms_debug_packages %s"' % ",".join(dbg_pkgs)
         environ["SCRAM_ARCH"] = opts.architecture
         environ["VO_CMS_SW_DIR"] = opts.workDir
 
