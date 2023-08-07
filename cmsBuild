@@ -4216,7 +4216,7 @@ def upload(opts, args, factory):
     if BootstrapPackages: BootstrapPackage = "/".join(BootstrapPackages[0].split("+", 2))
 
     packageNames = [pkg.pkgName() for pkg in fullPackageList]
-    pkgChecksums = list(set([p.checksum for p in fullPackageList]))
+    pkgChecksums = sorted(list(set([p.checksum for p in fullPackageList])))
     uploadSum = sha256("-".join(pkgChecksums).encode()).hexdigest()
     tmpdir = join(opts.workDir, opts.tempDirPrefix, "upload")
     # Create an area locally which has to be merged with the remote repository.
