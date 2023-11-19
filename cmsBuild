@@ -2297,6 +2297,7 @@ class Package(object):
                 else:
                     compilerPKG = PKGFactory.createWithSpec(compilerName)
                 PKGFactory[compilerName] = compilerPKG
+            if PKGFactory.has_key(compilerName):
                 self.compilerRealVersion = PKGFactory[compilerName].realVersion
             self.expandSpec()
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
