@@ -55,6 +55,7 @@ cmsBuildFilename = abspath(__file__)
 build_stats = None
 cmsdist_files = {}
 pgo_packages = []
+compiler_package_dependency = ["gcc-prerequisites"]
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -2287,7 +2288,7 @@ class Package(object):
             self.compilerRealVersion = self.realVersion
             self.expandSpec()
         else:
-            if not PKGFactory.has_key(compilerName):
+            if (not self.name in compiler_package_dependency) and (not PKGFactory.has_key(compilerName)):
                 compilerPKG = None
                 if self.options.systemCompiler == True:
                     compilerPKG = PKGFactory.create()
@@ -2296,7 +2297,8 @@ class Package(object):
                 else:
                     compilerPKG = PKGFactory.createWithSpec(compilerName)
                 PKGFactory[compilerName] = compilerPKG
-            self.compilerRealVersion = PKGFactory[compilerName].realVersion
+            if PKGFactory.has_key(compilerName):
+                self.compilerRealVersion = PKGFactory[compilerName].realVersion
             self.expandSpec()
             if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
                 self.dependencies.append(compilerName)
