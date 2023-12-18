@@ -3098,7 +3098,7 @@ def parseOptions():
     uploadGroup.add_option("--upload-tmp-repository",
                            dest="uploadTmpRepository",
                            help="Name of temporary repository to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
-                           default=getuser())
+                           default=re.sub("[^A-Za-z0-9]*", "", getuser())
     uploadGroup.add_option("--link-parent-repository",
                           dest="linkParentRepository",
                           action="store_true",
