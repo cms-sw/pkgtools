@@ -43,6 +43,7 @@ REF_CMSPKG_CMD = None
 SERVER_TMP_UPLOAD_DIRECTORY = None
 rpmEnvironmentScript = "true"
 packageBuildOptions = ""
+packageBuildOptionsChanged = None
 PKGFactory = None
 SystemCompilerVersion = {}
 BlackListReferencePkgs = []
@@ -175,8 +176,8 @@ def cmspkg_showpkgs(packages):
 
 def getPackageBuildOptions(opts):
     buildOpts = []
-    if opts.packageBuildOptions:
-        for macro in opts.packageBuildOptions:
+    if opts.buildOptions:
+        for macro in opts.buildOptions:
             item = macro.split("=",1)
             if len(item)==1: item.append("1")
             buildOpts.append(item)
@@ -1584,12 +1585,14 @@ class PackageFactory(object):
             raise IncludedFileNotFound(pkgName, incFile)
 
     def createWithSpec(self, pkgName):
+        global packageBuildOptionsChanged
         if self.has_key(pkgName): return self[pkgName]
         specLines = self.readSpec(pkgName)
         pkg = None
         specCache = "%s/specCache/%s.%s" % (
             self.options.tempdir, pkgName, sha256((self.__basePackageHash + str(specLines)).encode()).hexdigest())
         forceRecreate = False
+        if (not packageBuildOptionsChanged is None): forceRecreate = packageBuildOptionsChanged
         while True:
             if forceRecreate or (not exists(specCache)):
                 getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir, pkgName))
@@ -1604,6 +1607,9 @@ class PackageFactory(object):
                 forceRecreate = True
                 pkg = pickle.load(open(specCache,'rb'))
                 if not exists(pkg.specFilename()): continue
+                if pkg.globalBuildOptions != self.options.buildOptions:
+                    packageBuildOptionsChanged = True
+                    continue
                 pkg.setOptions(self.options)
                 for sp in pkg.subpackages: sp.checksum = '%{nil}'
                 if pkg.override_version: specLines = fixVersionLine (specLines,pkg.override_version)
@@ -1619,7 +1625,6 @@ class PackageFactory(object):
                 pkg.generateInitEnv()
                 chksum = pkg.checksum
                 cachedVersion = pkg.version
-                pkg.buildOptions = pkg.getBuildOptions()
                 pkg.calculateChecksum(force=True)
                 regen_msg = ""
                 if (pkg.checksum != chksum):
@@ -2178,7 +2183,12 @@ class Package(object):
     pkgdir = property(lambda self: self.__getPkgdir())
 
     def clean(self):
+        del self.sections
+        del self.specPreHeader
+        del self.pkgreqs
+        del self.directpkgreqs
         del self.spec
+        del self.requiresStatement
         del self.origSpec
         del self.installPostambles
         self.options = {}
@@ -2245,6 +2255,7 @@ class Package(object):
         self.versionSuffix = True
         self.requiredBy = 1
         self.buildWithRunPath = options.buildWithRunPath
+        self.globalBuildOptions = ""
         self.buildOptions = ""
 
     def rpmLocation(self):
@@ -2338,6 +2349,7 @@ class Package(object):
         self.parseRequires()
         self.dumpSpec()
         createDirs(architecture=self.cmsplatf)
+        self.globalBuildOptions = self.options.buildOptions
         self.buildOptions = self.getBuildOptions()
         self.calculateChecksum()
         self.rewriteRequires()
@@ -2463,16 +2475,17 @@ class Package(object):
 
     def getBuildOptions(self):
         buildOpts = ""
-        if self.options.packageBuildOptions:
+        if self.options.buildOptions:
            allOpts = getPackageBuildOptions(self.options)
            optsStrings = [ "prefix" ] + ["%s=%%{%s}" % (x[0],x[0]) for x in allOpts]
            result = self.rpmEvalStrings(*optsStrings, buildOptions=False)
-           for res in result[1:]:
+           while len(result)>1:
+               res = result.pop()
                opt = allOpts.pop()
                if res == ("%s=%%{%s}" % (opt[0],opt[0])):
                    continue
-               buildOpts += "%s=%s:" % (opt[0],opt[1])
-        return buildOpts
+               buildOpts += "%s=%s," % (opt[0],opt[1])
+        return buildOpts.strip(",")
 
 
     def calculateChecksum(self, force=False):
@@ -3022,8 +3035,8 @@ def parseOptions():
                                     action="append",
                                     help="Define extra macros to pass to build process.",
                                     default=None)
-    advancedBuildOptions.add_option("--package-build-options",
-                                    dest="packageBuildOptions",
+    advancedBuildOptions.add_option("--build-options",
+                                    dest="buildOptions",
                                     action="append",
                                     help="Extra build options passed set as rpmbuild macros",
                                     default=None)
@@ -4534,6 +4547,20 @@ def checkOptionsLocalSource(opts):
             sourceOptionDict[pkg]["Source"] = source_path
         opts.localSources = sourceOptionDict
 
+
+def get_build_options(opts):
+    sys.path.insert(0,join(opts.cmsdist, "etc"))
+    pkg = __import__('build_options')
+    build_opts = {}
+    try:
+        build_opts = pkg.get_build_options(opts)
+    except:
+        pass
+    sys.modules.pop('build_options')
+    sys.path.pop(0)
+    return build_opts
+
+
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
     # python from cms external area
@@ -4676,8 +4703,18 @@ if __name__ == "__main__":
                         cms_debug_packages[pkg].add(dbg)
                 else:
                     opts.rpmQueryDefines += ' --define "%s"' % macro
-        if opts.packageBuildOptions:
+        if opts.buildOptions:
+            pkgOptions= get_build_options(opts)
+            newOpts = []
+            for bopts in opts.buildOptions:
+                for opt in [ o for o in bopts.split(",") if o]:
+                    if not opt in pkgOptions:
+                        fatal("Unknown package build option '%s'. Please add it to your cmsdist/etc/build_options.py file." % opt)
+                    newOpts += pkgOptions[opt]
+            opts.buildOptions = sorted(newOpts)
             packageBuildOptions = " ".join(['--define "%s %s"' % (x[0], x[1]) for x in getPackageBuildOptions(opts)])
+            print("Using Build Options:", packageBuildOptions)
+
         #concatenate all cms_debug_packages in one place
         dbg_pkgs = []
         for pkg in cms_debug_packages:
