@@ -42,6 +42,8 @@ CMSPKG_CMD = "cmspkg"
 REF_CMSPKG_CMD = None
 SERVER_TMP_UPLOAD_DIRECTORY = None
 rpmEnvironmentScript = "true"
+packageBuildOptions = ""
+packageBuildOptionsChanged = None
 PKGFactory = None
 SystemCompilerVersion = {}
 BlackListReferencePkgs = []
@@ -170,6 +172,23 @@ def cmspkg_showpkgs(packages):
         if '-1-' in l:
             rpm_upload_cache[l.split('-1-')[0]].append(l)
     return (err, "")
+
+
+def getPackageBuildOptions(opts):
+    buildOpts = []
+    if opts.buildOptions:
+        for macro in opts.buildOptions:
+            item = macro.split("=",1)
+            if len(item)==1: item.append("1")
+            buildOpts.append(item)
+    return buildOpts
+
+
+def getRpmDefines(buildOptions=True):
+    rpmMacros = opts.rpmQueryDefines
+    if buildOptions:
+        rpmMacros = "%s %s" % (rpmMacros, packageBuildOptions)
+    return rpmMacros
 
 #################################################################
 # Utilities functions for installing packages from ref repository#
@@ -1566,12 +1585,14 @@ class PackageFactory(object):
             raise IncludedFileNotFound(pkgName, incFile)
 
     def createWithSpec(self, pkgName):
+        global packageBuildOptionsChanged
         if self.has_key(pkgName): return self[pkgName]
         specLines = self.readSpec(pkgName)
         pkg = None
         specCache = "%s/specCache/%s.%s" % (
             self.options.tempdir, pkgName, sha256((self.__basePackageHash + str(specLines)).encode()).hexdigest())
         forceRecreate = False
+        if (not packageBuildOptionsChanged is None): forceRecreate = packageBuildOptionsChanged
         while True:
             if forceRecreate or (not exists(specCache)):
                 getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir, pkgName))
@@ -1586,6 +1607,9 @@ class PackageFactory(object):
                 forceRecreate = True
                 pkg = pickle.load(open(specCache,'rb'))
                 if not exists(pkg.specFilename()): continue
+                if pkg.globalBuildOptions != self.options.buildOptions:
+                    packageBuildOptionsChanged = True
+                    continue
                 pkg.setOptions(self.options)
                 for sp in pkg.subpackages: sp.checksum = '%{nil}'
                 if pkg.override_version: specLines = fixVersionLine (specLines,pkg.override_version)
@@ -2231,6 +2255,8 @@ class Package(object):
         self.versionSuffix = True
         self.requiredBy = 1
         self.buildWithRunPath = options.buildWithRunPath
+        self.globalBuildOptions = ""
+        self.buildOptions = ""
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2323,6 +2349,8 @@ class Package(object):
         self.parseRequires()
         self.dumpSpec()
         createDirs(architecture=self.cmsplatf)
+        self.globalBuildOptions = self.options.buildOptions
+        self.buildOptions = self.getBuildOptions()
         self.calculateChecksum()
         self.rewriteRequires()
         self.dumpSpec()
@@ -2445,6 +2473,21 @@ class Package(object):
                 old = self.sections[section][subsection]
                 self.sections[section][subsection] = "%s || exit 0\n" % self.buildCondition + old
 
+    def getBuildOptions(self):
+        buildOpts = ""
+        if self.options.buildOptions:
+           allOpts = getPackageBuildOptions(self.options)
+           optsStrings = [ "prefix" ] + ["%s=%%{%s}" % (x[0],x[0]) for x in allOpts]
+           result = self.rpmEvalStrings(*optsStrings, buildOptions=False)
+           while len(result)>1:
+               res = result.pop()
+               opt = allOpts.pop()
+               if res == ("%s=%%{%s}" % (opt[0],opt[0])):
+                   continue
+               buildOpts += "%s=%s," % (opt[0],opt[1])
+        return buildOpts.strip(",")
+
+
     def calculateChecksum(self, force=False):
         """
         """
@@ -2461,6 +2504,9 @@ class Package(object):
             self.checksum = checksumCalculator.getChecksum()
             self.version = calculateHumanReadableVersion(self)
             return
+
+        if self.buildOptions:
+            checksumCalculator.addStrings(self.buildOptions)
 
         checksumCalculator.addStrings(self.origSpec)
         checksumCalculator.addStrings(DEFAULT_SECTIONS.values())
@@ -2694,7 +2740,7 @@ class Package(object):
         # FIXME: make this static? Should not change over the whole period.
         return join(abspath(self.tempDirPrefix), "tmpspec-%s" % self.name)
 
-    def rpmEvalStrings(self, *strings):
+    def rpmEvalStrings(self, *strings, buildOptions=True):
         spec = "\n".join([self.specPreHeader,
                                SPEC_HEADER % self.__dict__,
                                PKGFactory.preamble,
@@ -2704,8 +2750,9 @@ class Package(object):
         f.write(PKGFactory.postProcessSpec(spec).replace('%%', '%'))
         f.close()
         commandPrefix = getCommandPrefix(self.options)
+        rpmMacros = getRpmDefines(buildOptions)
         evalCommand = "%s ; %s rpm -q --specfile %s --info %s --define 'buildroot /foo'" % (rpmEnvironmentScript, commandPrefix,
-                                                                  self.tmpspec, self.options.rpmQueryDefines)
+                                                                  self.tmpspec, rpmMacros)
         log(evalCommand, DEBUG)
         error, output = getstatusoutput(evalCommand)
         if error:
@@ -2851,7 +2898,7 @@ class Package(object):
         buildDeps = []
         queryCommand = "%s ; %s rpm -q --info --specfile %s %s --define 'buildroot /foo' 2>/dev/null" % (
             rpmEnvironmentScript, getCommandPrefix(self.options),
-            self.tmpspec, self.options.rpmQueryDefines)
+            self.tmpspec, getRpmDefines())
         regexps = PKGFactory.headerMatchingRegexp
         matchers = [(regexps.REQUIRES_REGEXP, deps),
                     (regexps.REMOTE_SOURCE_REGEXP, sources),
@@ -2987,6 +3034,11 @@ def parseOptions():
                                     dest="rpmMacros",
                                     action="append",
                                     help="Define extra macros to pass to build process.",
+                                    default=None)
+    advancedBuildOptions.add_option("--build-options",
+                                    dest="buildOptions",
+                                    action="append",
+                                    help="Extra build options passed set as rpmbuild macros",
                                     default=None)
     advancedBuildOptions.add_option("--sources",
                                     dest="sources",
@@ -3577,7 +3629,7 @@ def buildPackage(pkg, scheduler):
     optionsDict["rpmenv"] = rpmEnvironmentScript
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                         "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
-                        "extraRpmDefines": pkg.options.rpmQueryDefines})
+                        "extraRpmDefines": getRpmDefines()})
     if not pkg.options.bootstrap:
         optionsDict["nodeps"] = "--nodeps"
 
@@ -4495,6 +4547,20 @@ def checkOptionsLocalSource(opts):
             sourceOptionDict[pkg]["Source"] = source_path
         opts.localSources = sourceOptionDict
 
+
+def get_build_options(opts):
+    sys.path.insert(0,join(opts.cmsdist, "etc"))
+    pkg = __import__('build_options')
+    build_opts = {}
+    try:
+        build_opts = pkg.get_build_options(opts)
+    except:
+        pass
+    sys.modules.pop('build_options')
+    sys.path.pop(0)
+    return build_opts
+
+
 if __name__ == "__main__":
     # Stop processing if SCRAM runtime env is set to avoid picking up
     # python from cms external area
@@ -4637,6 +4703,18 @@ if __name__ == "__main__":
                         cms_debug_packages[pkg].add(dbg)
                 else:
                     opts.rpmQueryDefines += ' --define "%s"' % macro
+        if opts.buildOptions:
+            pkgOptions= get_build_options(opts)
+            newOpts = []
+            for bopts in opts.buildOptions:
+                for opt in [ o for o in bopts.split(",") if o]:
+                    if not opt in pkgOptions:
+                        fatal("Unknown package build option '%s'. Please add it to your cmsdist/etc/build_options.py file." % opt)
+                    newOpts += pkgOptions[opt]
+            opts.buildOptions = sorted(newOpts)
+            packageBuildOptions = " ".join(['--define "%s %s"' % (x[0], x[1]) for x in getPackageBuildOptions(opts)])
+            print("Using Build Options:", packageBuildOptions)
+
         #concatenate all cms_debug_packages in one place
         dbg_pkgs = []
         for pkg in cms_debug_packages:
