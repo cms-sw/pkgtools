@@ -4703,14 +4703,32 @@ if __name__ == "__main__":
                         cms_debug_packages[pkg].add(dbg)
                 else:
                     opts.rpmQueryDefines += ' --define "%s"' % macro
+        build_opt_file = join(opts.cmsdist, "etc/build_options.txt")
+        if exists(build_opt_file):
+            print("Reading default build optiosn from ",build_opt_file)
+            with open(build_opt_file) as ref:
+                def_opts = [l.strip() for l in ref.readlines() if l.strip()]
+                if def_opts:
+                    if not opts.buildOptions:
+                        opts.buildOptions = def_opts[:]
+                    else:
+                        opts.buildOptions += def_opts
         if opts.buildOptions:
             pkgOptions= get_build_options(opts)
             newOpts = []
+            uniq_opts = {}
             for bopts in opts.buildOptions:
-                for opt in [ o for o in bopts.split(",") if o]:
+                for opt in [ o for o in bopts.strip().split(",") if o]:
                     if not opt in pkgOptions:
                         fatal("Unknown package build option '%s'. Please add it to your cmsdist/etc/build_options.py file." % opt)
-                    newOpts += pkgOptions[opt]
+                    for val in pkgOptions[opt]:
+                        opt1 = val.split("=",1)[0]
+                        if not (opt1 in uniq_opts):
+                            uniq_opts[opt1] = val
+                            newOpts.append(val)
+                            continue
+                        if val != uniq_opts[opt1]:
+                            fatal("Conflicting package build option '%s' and '%s'. Please use only one" % (val, uniq_opts[opt1]))
             opts.buildOptions = sorted(newOpts)
             packageBuildOptions = " ".join(['--define "%s %s"' % (x[0], x[1]) for x in getPackageBuildOptions(opts)])
             print("Using Build Options:", packageBuildOptions)
