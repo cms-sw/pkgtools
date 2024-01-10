@@ -7,7 +7,7 @@ from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
 from getpass import getuser
 from tempfile import mkdtemp, mkstemp, NamedTemporaryFile
-import base64
+import base64, subprocess
 from subprocess import getstatusoutput
 from urllib.request import urlopen, Request
 from urllib.error import URLError
@@ -3475,7 +3475,11 @@ def installRpm(pkg, bootstrap, scheduler):
     command = "#No command"
     if bootstrap:
         command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
-        error, output = getstatusoutput(command)
+        cmd_proc = subprocess.run(command, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        error = cmd_proc.returncode
+        output = cmd_proc.stdout.decode()
+        if cmd_proc.stderr:
+            scheduler.log("RPM installation stderr %s:\n%s" % (pkg.name, cmd_proc.stderr.decode()))
         savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation())
     else:
         workDir = pkg.workDir
