@@ -1487,6 +1487,7 @@ class PackageFactory(object):
         self.__packageCache = CacheProxy(self.__package_cache, self.__cacheKeyDecorator)
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
+        self.vpackages = []
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
         return
 
