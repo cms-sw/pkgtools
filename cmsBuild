@@ -1488,16 +1488,6 @@ class PackageFactory(object):
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
-        self.vpackages = []
-        for pkg in self.virtual_packages:
-            if ' vectorized_package ' in self.virtual_packages[pkg]:
-                for v in options.vectorization:
-                    xstr = '_%s' % v
-                    if pkg.endswith(xstr):
-                        pkg = pkg[:-len(v)-1]
-                        if pkg not in self.vpackages:
-                            self.vpackages .append(pkg)
-                        break
         return
 
     def __getPreamble(self, options):
@@ -1525,18 +1515,26 @@ class PackageFactory(object):
     def updateVirtualPackages(self, cmsdist):
         global pgo_packages
         pkgs = {}
-        for vp in glob(join(cmsdist,'*','cmsdist_packages.py')):
-            pkg_dir = dirname(vp)
-            if pkg_dir.endswith("/pgo") and (not self.options.PGOGenerate) and (not self.options.PGOUse):
+        virtual_pkd_dirs = []
+        for odir in ["vectorization", "pgo"]:
+            if exists(join(cmsdist,odir,"cmsdist_packages.py")):
+                virtual_pkd_dirs.append(odir)
+        all_virtual_pkd_dirs = [x.split(os.sep)[-2] for x in  glob(join(cmsdist,"*","cmsdist_packages.py"))]
+        for vp in virtual_pkd_dirs + [x for x in all_virtual_pkd_dirs if not x in virtual_pkd_dirs]:
+            if (vp=="vectorization") and (not self.options.vectorization):
                 continue
-            sys.path.insert(0,pkg_dir)
-            pkg = __import__('cmsdist_packages')
+            if (vp=="pgo") and (not self.options.PGOGenerate) and (not self.options.PGOUse):
+                continue
+            sys.path.insert(0,join(cmsdist, vp))
+            pkg = __import__("cmsdist_packages")
             try:
-              pkg.packages(pkgs, self)
-              if pkg_dir.endswith("/pgo"):
-                pgo_packages = pkg.pgo_packages[:]
+                pkg.packages(pkgs, self)
             except TypeError as e:
-              pkg.packages(pkgs)
+                pkg.packages(pkgs)
+            if vp=="pgo":
+                pgo_packages = pkg.pgo_packages[:]
+            if vp=="vectorization":
+                self.vpackages = pkg.MULTI_TARGET_PACKAGES[:]
             sys.modules.pop('cmsdist_packages')
             x=sys.path.pop(0)
         return pkgs
@@ -1564,15 +1562,28 @@ class PackageFactory(object):
     def readSpec(self, pkgName):
         specLines = []
         filename = specFilename(self.options, pkgName)
+
+        def get_output(cmd):
+            e , o = getstatusoutput(cmd)
+            if e:
+                fatal("Unable to generate package:%s: %s" % (pkgName, o))
+            return o
+
         try:
-            if exists(filename) and (not pkgName in pgo_packages):
+            if exists(filename) and (not pkgName in self.virtual_packages):
                 specLines = open(filename).readlines()
             elif pkgName in self.virtual_packages:
-                cmd = self.virtual_packages[pkgName]
-                e , o = getstatusoutput(cmd)
-                if e:
-                    fatal("Unable to generate package:%s: %s" % (pkgName, o))
-                specLines = [ l+"\n" for l in o.split("\n")]
+                pkgdata = self.virtual_packages[pkgName]
+                out = ""
+                if isinstance(pkgdata, list):
+                    for line in pkgdata:
+                        if line.startswith("cmd:"):
+                            out += get_output(line[4:]) +'\n'
+                        else:
+                            out += line +'\n'
+                else:
+                    out = get_output(pkgdata)
+                specLines = [ l+"\n" for l in out.split("\n")]
             else:
                 raise FileNotFound(filename)
         except IOError as e:
