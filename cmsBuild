@@ -1487,7 +1487,6 @@ class PackageFactory(object):
         self.__packageCache = CacheProxy(self.__package_cache, self.__cacheKeyDecorator)
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
-        self.vpackages = []
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
         return
 
@@ -1534,8 +1533,6 @@ class PackageFactory(object):
                 pkg.packages(pkgs)
             if vp=="pgo":
                 pgo_packages = pkg.pgo_packages[:]
-            if vp=="vectorization":
-                self.vpackages = pkg.MULTI_TARGET_PACKAGES[:]
             sys.modules.pop('cmsdist_packages')
             x=sys.path.pop(0)
         return pkgs
@@ -2711,10 +2708,6 @@ class Package(object):
             xtext = getSourcesChecksum(self, self.sourcesNumbers)
             if xtext:
                 self.spec += "\n"+xtext
-            if PKGFactory.vpackages:
-                self.spec += "%%define vectorized_packages %s\n" % (" ".join(PKGFactory.vpackages))
-            else:
-                self.spec += "%define vectorized_packages %{nil}\n"
         for section in self.sections.keys():
             for subsection in self.sections[section].keys():
                 sectionContents = self.sections[section][subsection].strip("\n ")
