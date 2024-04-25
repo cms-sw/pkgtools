@@ -4712,16 +4712,7 @@ if __name__ == "__main__":
                         cms_debug_packages[pkg].add(dbg)
                 else:
                     opts.rpmQueryDefines += ' --define "%s"' % macro
-        build_opt_file = join(opts.cmsdist, "etc/build_options.txt")
-        if exists(build_opt_file):
-            print("Reading default build optiosn from ",build_opt_file)
-            with open(build_opt_file) as ref:
-                def_opts = [l.strip() for l in ref.readlines() if l.strip()]
-                if def_opts:
-                    if not opts.buildOptions:
-                        opts.buildOptions = def_opts[:]
-                    else:
-                        opts.buildOptions += def_opts
+
         if opts.buildOptions:
             pkgOptions= get_build_options(opts)
             newOpts = []
