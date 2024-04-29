@@ -3612,7 +3612,7 @@ def downloadFromStore(pkg, scheduler):
         os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
         package_store_downloads [p.rpmfilename] = 1
         if opts.uploadPackageCache:
-            scheduler.parallel("fetch-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
+            scheduler.parallel("download-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
             scheduler.reschedule()
     return True
 
@@ -3853,7 +3853,7 @@ def installPackage(pkg, scheduler):
     if not isPackageStoreUploadEnabled(pkg): return
     for p in pkg.subpackages + [pkg]:
         if not p.rpmfilename in package_store_downloads:
-            scheduler.parallel("fetch-upload-store-%s" % basename(p.rpmfilename), [], uploadStore, p, p.rpmfilename, scheduler)
+            scheduler.parallel("download-object-store-%s" % basename(p.rpmfilename), [], uploadStore, p, p.rpmfilename, scheduler)
             scheduler.reschedule()
     return
 
