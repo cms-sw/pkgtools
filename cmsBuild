@@ -3673,9 +3673,9 @@ def buildPackage(pkg, scheduler):
             symlink(uniqueSubFilename, finalSubFilename)
 
     if isPackageStoreEnabled(pkg):
-        scheduler.log("Checking package store for %s." % pkg.pkgName())
+        scheduler.log("ObjectStore: Checking package store for %s." % pkg.pkgName())
         if downloadFromStore(pkg, scheduler):
-            scheduler.log("Reused package %s from store." % pkg.pkgName())
+            scheduler.log("ObjectStore: Reused package %s from store." % pkg.pkgName())
             create_rpm_links()
             scheduler.log("Build successful %s." % pkg.pkgName())
             return
@@ -3775,21 +3775,27 @@ def uploadStore(pkg, rpmfilename, scheduler):
         tmpFileName = tmpFileName)
     (err, msg) = executeScript(opts, upload, True)
     if err:
-        scheduler.log("ObjectStroe: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
+        scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
         return
     uploadDir=join(opts.uploadRootDirectory, "store", dirname(rpmfilename))
     runScript = format(
                 "mkdir -p %(uploadDir)s\n"
-                "if [ ! -e  %(storeFile)s ] ; then mv %(tmpFileName)s %(storeFile)s; fi\n"
+                "for x in 1 2 3 4 5 ; do\n"
+                "  if [ ! -e  %(storeFile)s ] ; then\n"
+                "    mv %(tmpFileName)s %(storeFile)s || sleep 0.$((RANDOM % 100 + 1))\n"
+                "  else\n"
+                "    break\n"
+                "  fi\n"
+                "done\n"
                 "rm -f %(tmpFileName)s",
                 uploadDir = uploadDir,
                 storeFile = join(uploadDir,uploadFile),
                 tmpFileName = tmpFileName)
     (err, out) = executeScript(opts, runScript, False)
     if err:
-        scheduler.log("ObjectStroe: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
+        scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
     else:
-         scheduler.log("ObjectStroe: Successfully uploaded %s to objectstore." % uploadFile)
+         scheduler.log("ObjectStore: Successfully uploaded %s to objectstore." % uploadFile)
     return
 
 
