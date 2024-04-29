@@ -3782,7 +3782,7 @@ def uploadStore(pkg, rpmfilename, scheduler):
                 "mkdir -p %(uploadDir)s\n"
                 "for x in 1 2 3 4 5 ; do\n"
                 "  if [ ! -e  %(storeFile)s ] ; then\n"
-                "    mv %(tmpFileName)s %(storeFile)s || sleep 0.$((RANDOM % 100 + 1))\n"
+                "    mv %(tmpFileName)s %(storeFile)s || sleep 0.$((RANDOM %% 100 + 1))\n"
                 "  else\n"
                 "    break\n"
                 "  fi\n"
