@@ -58,6 +58,7 @@ build_stats = None
 cmsdist_files = {}
 pgo_packages = []
 compiler_package_dependency = ["gcc-prerequisites"]
+package_store_downloads = {}
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -3018,6 +3019,16 @@ def parseOptions():
                       metavar="NAME",
                       help="Name of the tag. Default is to use package hash",
                       default="hash")
+    parser.add_option("--no-package-store",
+                      dest="usePackageCache",
+                      help="Do not check/download already built packages from object store on server",
+                      action="store_false",
+                      default=True)
+    parser.add_option("--no-upload-package-store",
+                      dest="uploadPackageCache",
+                      help="Do not upload newly built packages to object store on server",
+                      action="store_false",
+                      default=True)
     parser.add_option("--force-tag",
                       dest="forcetag",
                       action="store_true",
@@ -3521,8 +3532,8 @@ def installApt(pkg, scheduler, cache=[]):
         for dep in getPackages(pkg.dependencies): installApt(dep, scheduler, cache)
         if should_install_from_reference(pkg):
             if not is_package_installed(pkg, rpm_db_cache): install_reference(pkg)
-            scheduler.forceDone("check-%s" % pkg)
-            scheduler.forceDone("install-%s" % pkg)
+            scheduler.forceDone("check-%s" % pkg.pkgName())
+            scheduler.forceDone("install-%s" % pkg.pkgName())
             return
     command = "%s -f -j 1 install %s" % (CMSPKG_CMD, pkg.pkgName())
     error, output = getstatusoutput(command)
@@ -3532,9 +3543,9 @@ def installApt(pkg, scheduler, cache=[]):
         raise RpmInstallFailed(pkg, output)
     log("Done installing via cmspkg.", DEBUG)
     savePackageProvides(pkg.pkgName(), pkg.options)
-    for dep in pkg.dependencies:
-        scheduler.forceDone("check-%s" % dep)
-        scheduler.forceDone("install-%s" % dep)
+    for dep in getPackages(pkg.dependencies):
+        scheduler.forceDone("check-%s" % dep.pkgName())
+        scheduler.forceDone("install-%s" % dep.pkgName())
 
 
 def scheduleInstallPackage(pkg, scheduler):
@@ -3583,6 +3594,29 @@ def handleStaleFiles(files, noCleanup):
         unlink(staleFile)
 
 
+def isPackageStoreEnabled(pkg):
+    return pkg.versionSuffix and (opts.tag == "hash") and opts.usePackageCache
+
+
+def isPackageStoreUploadEnabled(pkg):
+    return pkg.versionSuffix and (opts.tag == "hash") and opts.uploadPackageCache
+
+
+def downloadFromStore(pkg, scheduler):
+    for p in pkg.subpackages + [pkg]:
+        cache_url = "http://%s/cmssw/store/%s" % (opts.uploadServer, p.rpmfilename)
+        if not downloadUrllib2(cache_url, pkg.builddir, opts, cmscache=False):
+            return False
+    for p in pkg.subpackages + [pkg]:
+        cachefile = abspath("RPMS/cache/%s/%s" % (p.checksum, p.rpmfilename))
+        os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
+        package_store_downloads [p.rpmfilename] = 1
+        if opts.uploadPackageCache:
+            scheduler.parallel("fetch-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
+            scheduler.reschedule()
+    return True
+
+
 def buildPackage(pkg, scheduler):
     """ This helper function is responsible for building/installing a given spec and it's associated rpm.
       What it does is the following (TODO):
@@ -3628,6 +3662,23 @@ def buildPackage(pkg, scheduler):
     finalRpmFilename = join(abspath("RPMS"), pkg.rpmfilename)
     uniqueRpmFilename = join(abspath("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename)
     handleStaleFiles([finalRpmFilename, uniqueRpmFilename], pkg.options.noCleanup)
+
+    def create_rpm_links():
+        # link the RPM from the unique name to the friendly name
+        symlink(uniqueRpmFilename, finalRpmFilename)
+        # link subpackages, if any
+        for subpackage in pkg.subpackages:
+            finalSubFilename = join(abspath("RPMS"), subpackage.rpmfilename)
+            uniqueSubFilename = join(abspath("RPMS/cache/%s" % subpackage.checksum), subpackage.rpmfilename)
+            symlink(uniqueSubFilename, finalSubFilename)
+
+    if isPackageStoreEnabled(pkg):
+        scheduler.log("Checking package store for %s." % pkg.pkgName())
+        if downloadFromStore(pkg, scheduler):
+            scheduler.log("Reused package %s from store." % pkg.pkgName())
+            create_rpm_links()
+            scheduler.log("Build successful %s." % pkg.pkgName())
+            return
 
     if pkg.options.compilingProcesses:
         optionsDict["makeprocesses"] = "--define \"compiling_processes %s\"" % pkg.options.compilingProcesses
@@ -3691,14 +3742,7 @@ def buildPackage(pkg, scheduler):
     if output:
         return output
     scheduler.log("Build successful %s." % pkg.name)
-
-    # link the RPM from the unique name to the friendly name
-    symlink(uniqueRpmFilename, finalRpmFilename)
-    # link subpackages, if any
-    for subpackage in pkg.subpackages:
-        finalSubFilename = join(abspath("RPMS"), subpackage.rpmfilename)
-        uniqueSubFilename = join(abspath("RPMS/cache/%s" % subpackage.checksum), subpackage.rpmfilename)
-        symlink(uniqueSubFilename, finalSubFilename)
+    create_rpm_links()
 
 
 def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=False):
@@ -3715,6 +3759,46 @@ def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=Fals
     if read:
       e, o = getstatusoutput("cat %s" % provides_cache)
       return o.split("\n")
+    return
+
+
+def uploadStore(pkg, rpmfilename, scheduler):
+    from socket import gethostname
+    uploadFile=basename(rpmfilename)
+    tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
+    tmpFileName = join(opts.uploadRootDirectory, "store", "tmp", "%s.%s.tmp" % (uploadFile, sha256(tmpStr.encode()).hexdigest()))
+    upload = format(
+        "scp -q -o StrictHostKeyChecking=no %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
+        srcFile = join(abspath("RPMS/cache"), pkg.checksum, dirname(rpmfilename), uploadFile),
+        user = opts.uploadUser,
+        server = opts.uploadServer,
+        tmpFileName = tmpFileName)
+    (err, msg) = executeScript(opts, upload, True)
+    if err:
+        scheduler.log("ObjectStroe: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
+        return
+    uploadDir=join(opts.uploadRootDirectory, "store", dirname(rpmfilename))
+    runScript = format(
+                "mkdir -p %(uploadDir)s\n"
+                "if [ ! -e  %(storeFile)s ] ; then mv %(tmpFileName)s %(storeFile)s; fi\n"
+                "rm -f %(tmpFileName)s",
+                uploadDir = uploadDir,
+                storeFile = join(uploadDir,uploadFile),
+                tmpFileName = tmpFileName)
+    (err, out) = executeScript(opts, runScript, False)
+    if err:
+        scheduler.log("ObjectStroe: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
+    else:
+         scheduler.log("ObjectStroe: Successfully uploaded %s to objectstore." % uploadFile)
+    return
+
+
+def updateStoreUsage(pkg, rpmfilename, scheduler):
+    #touch the files downloaded from store so that unused files can be deleted
+    uploadFile=join(opts.uploadRootDirectory, "store", rpmfilename)
+    runScript = format("[ -e %(uploadFile)s ] && touch %(uploadFile)s",uploadFile = uploadFile)
+    (err, out) = executeScript(opts, runScript, False)
+    scheduler.log("ObjctStore: Successfully updated usage of store file %s" % basename(rpmfilename))
     return
 
 
@@ -3766,6 +3850,12 @@ def installPackage(pkg, scheduler):
     f.close()
     if pkg_error: raise RpmBuildFailed(pkg)
     scheduler.reschedule()
+    if not isPackageStoreUploadEnabled(pkg): return
+    for p in pkg.subpackages + [pkg]:
+        if not p.rpmfilename in package_store_downloads:
+            scheduler.parallel("fetch-upload-store-%s" % basename(p.rpmfilename), [], uploadStore, p, p.rpmfilename, scheduler)
+            scheduler.reschedule()
+    return
 
 
 class ActionFactory(object):
@@ -4148,7 +4238,7 @@ def executeScript(opts, dumpedScript, local=True):
     if local:
         executionCmd = "sh -e %(debug)s %(filename)s"
     else:
-        executionCmd = "ssh < %(filename)s -o StrictHostKeyChecking=no -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+        executionCmd = "ssh < %(filename)s -q -o StrictHostKeyChecking=no -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
     # Run (or print-out) the script
     if not opts.pretend:
         fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
