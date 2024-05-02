@@ -3024,11 +3024,11 @@ def parseOptions():
                       help="Do not check/download already built packages from object store on server",
                       action="store_false",
                       default=True)
-    parser.add_option("--no-upload-package-store",
+    parser.add_option("--upload-package-store",
                       dest="uploadPackageCache",
-                      help="Do not upload newly built packages to object store on server",
-                      action="store_false",
-                      default=True)
+                      help="Upload newly built packages to object store on server",
+                      action="store_true",
+                      default=False)
     parser.add_option("--force-tag",
                       dest="forcetag",
                       action="store_true",
