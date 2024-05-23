@@ -2128,6 +2128,7 @@ class SubPackage(object):
         self.installDependencies = []
         self.uploadDependencies = []
         self.dependentCounter = 0
+        self.versionSuffix = parent.versionSuffix
         self.patches = parent.patches
         self.rpmdir = parent.rpmdir
         self.rpmfilename = '%s/%s+%s+%s-%s-%s.%s.rpm' % (
