@@ -136,10 +136,14 @@ def makedirs(path):
 def getPackages(packages): return [PKGFactory[p] for p in packages]
 
 
+def getCompilerDetection():
+    return SYS_COMPILER_DETECTION if opts.systemCompiler else COMPILER_DETECTION
+
+
 def detectCompilerVersion(compilerName):
     global SystemCompilerVersion
     if compilerName in SystemCompilerVersion: return SystemCompilerVersion[compilerName]
-    (error, version) = getstatusoutput(COMPILER_DETECTION[compilerName])
+    (error, version) = getstatusoutput(getCompilerDetection()[compilerName])
     if error: raise UnknownCompiler()
     SystemCompilerVersion[compilerName] = version.split("\n")[0]
     return SystemCompilerVersion[compilerName]
@@ -1479,7 +1483,7 @@ class PackageFactory(object):
                                              options.useRpath,
                                              options.architecture,
                                              INITENV_PREAMBLE,
-                                             COMPILER_DETECTION,
+                                             getCompilerDetection(),
                                              DEFAULT_SECTIONS, ]).encode()).hexdigest()
         self.options = options
         self.__cacheKeyDecorator = ArchitectureDecorator(options.architecture)
@@ -1488,6 +1492,13 @@ class PackageFactory(object):
         self.__packageCache = CacheProxy(self.__package_cache, self.__cacheKeyDecorator)
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
+        if options.systemCompiler:
+            item = Package(options)
+            item.name = 'system-compiler'
+            item.version = SystemCompilerVersion['gcc']
+            item.realversion = SystemCompilerVersion['gcc']
+            item.specCache = False
+            self.__packageCache['system-compiler'] = item
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
         return
 
@@ -4130,8 +4141,9 @@ def build(opts, args, factory):
     buildSpecs(packages)
 
 def isPackageInstalled(pkg):
+    pkgName = pkg.pkgName()
+    if pkgName in ['system-compiler']: return True
     if pkg.options.bootstrap:
-        pkgName = pkg.pkgName()
         if pkgName in rpm_db_cache:
             if not isDefaultRevision(pkg.pkgRevision):
                 if rpm_db_cache[pkgName][0] < pkg.pkgRevision:
