@@ -1495,8 +1495,10 @@ class PackageFactory(object):
         if options.systemCompiler:
             item = Package(options)
             item.name = 'system-compiler'
-            item.version = SystemCompilerVersion['gcc']
-            item.realversion = SystemCompilerVersion['gcc']
+            item.group = 'external'
+            item.version = SystemCompilerVersion['gcc'].split(".")[0]
+            item.realVersion = item.version
+            item.checksum = md5adder(item.version.encode()).hexdigest()
             item.specCache = False
             self.__packageCache['system-compiler'] = item
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
@@ -2339,9 +2341,7 @@ class Package(object):
             if (not self.name in compiler_package_dependency) and (not PKGFactory.has_key(compilerName)):
                 compilerPKG = None
                 if self.options.systemCompiler == True:
-                    compilerPKG = PKGFactory.create()
-                    compilerPKG.name = "system-compiler"
-                    compilerPKG.realVersion = detectCompilerVersion(compilerName)
+                    compilerPKG = PKGFactory["system-compiler"]
                 else:
                     compilerPKG = PKGFactory.createWithSpec(compilerName)
                 PKGFactory[compilerName] = compilerPKG
@@ -4141,9 +4141,9 @@ def build(opts, args, factory):
     buildSpecs(packages)
 
 def isPackageInstalled(pkg):
-    pkgName = pkg.pkgName()
-    if pkgName in ['system-compiler']: return True
+    if pkg.name in ['system-compiler']: return True
     if pkg.options.bootstrap:
+        pkgName = pkg.pkgName()
         if pkgName in rpm_db_cache:
             if not isDefaultRevision(pkg.pkgRevision):
                 if rpm_db_cache[pkgName][0] < pkg.pkgRevision:
@@ -4301,6 +4301,7 @@ def allPackagesToUpload(args, factory):
     dep_cache = {}
     for pkg in pkgs:
         for dep in allDeps(pkg, factory, dep_cache):
+            if dep.name in ["system-compiler"]: continue
             if dep not in fullPackageList and exists(dep.rpmLocation()):
                 fullPackageList.extend(factory.expandSubpackages([dep]))
     return fullPackageList
@@ -4796,6 +4797,7 @@ if __name__ == "__main__":
         arch_data = opts.architecture.split("_", 2)
         arch_data[2] = re.sub('^[a-z]+', '', arch_data[2])
         opts.rpmQueryDefines  = '--define "cmsdist_directory %s"' % opts.cmsdist
+        opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
