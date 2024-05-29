@@ -74,6 +74,10 @@ def remoteRsync(opts):
         port = opts.uploadPort)
 
 
+def getNonSystemPackages(pkgs):
+    return [p for p in pkgs if p not in opts.useSystemTools]
+
+
 def cmsdist_file(name, ext, options, pkgname):
     fname = 'spec' if ext == '.spec' else name + ext
     s = join(pkgname, fname)
@@ -2363,8 +2367,8 @@ class Package(object):
         else:
             self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
-        self.installDependencies = parseInstallDependencies(self.spec)
-        self.uploadDependencies = parseUploadDependencies(self.spec)
+        self.installDependencies = getNonSystemPackages(parseInstallDependencies(self.spec))
+        self.uploadDependencies = getNonSystemPackagesparseUploadDependencies(self.spec))
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
@@ -2982,6 +2986,8 @@ class Package(object):
                         for source in localSources])
         patches.extend([cmsdist_file(patch, '.patch', self.options, self.name)
                         for patch in localPatches])
+        deps = getNonSystemPackages(deps)
+        buildDeps = getNonSystemPackages(buildDeps)
         PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps, sourcesNumbers)
         return (deps, sources, patches, buildDeps, sourcesNumbers)
 
@@ -3095,6 +3101,10 @@ def parseOptions():
                                     action="store_true",
                                     help="""Use the system compiler rather than the one specified in CMSDIST""",
                                     default=False)
+    advancedBuildOptions.add_option("--use-system-tools",
+                                    dest="useSystemTools",
+                                    default="",
+                                    help="Comma separated list of package names which should be taken from system e.g. make,cmake,autoconf")
     advancedBuildOptions.add_option("--ignore-compile-errors",
                                     "-k",
                                     dest="ignoreCompileErrors",
@@ -3280,6 +3290,7 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
+    opts.useSystemTools = opts.useSystemTools.split(",")
     if opts.enableMonitor and not run_monitor_on_command:
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
@@ -3338,6 +3349,7 @@ def parseOptions():
     if len(args) < 2:
         parser.error("Please build or upload action. Use --help to see additional options.")
 
+    args = args[0] + [ for a in args if a not in opts.useSystemTools]
     opts.installDir = opts.workDir
     if (opts.repository == "cms") or opts.repository.startswith("cms."):
         opts.installDir = "/opt/cmssw"
@@ -3364,6 +3376,10 @@ def parseOptions():
 
     if opts.localSources and (not opts.forceUpload) and ('upload' in args):
         fatal("'upload' option can not be used together with '--source' flag.")
+
+    args = args[0] + getNonSystemPackages(args[1:])
+    if len(args) < 2:
+        fatal("No non-system package build provided via command-line")
 
     return opts, args
 
