@@ -101,6 +101,8 @@ if [ "X$CMS_INSTALL_PREFIX" = "X" ] ; then CMS_INSTALL_PREFIX=$RPM_INSTALL_PREFI
 
 COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep version | sed -e \'s|.*\\([0-9][.][0-9][.][0-9]\\).*|\\1|\'",
 "icc": "echo no detection callback for icc."}
+SYS_COMPILER_DETECTION = { "gcc": "gcc -v 2>&1 | grep \'\sversion\s\' | sed -e \'s|.*\sversion\s\s*\([1-9][0-9]*[.][0-9]*[.][0-9]*\).*|\\1|\'",
+"icc": "echo no detection callback for icc."}
 
 # Preambles. %dynamic_path_var is defined in rpm-preamble.
 

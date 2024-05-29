@@ -136,10 +136,14 @@ def makedirs(path):
 def getPackages(packages): return [PKGFactory[p] for p in packages]
 
 
+def getCompilerDetection():
+    return SYS_COMPILER_DETECTION if opts.systemCompiler else COMPILER_DETECTION
+
+
 def detectCompilerVersion(compilerName):
     global SystemCompilerVersion
     if compilerName in SystemCompilerVersion: return SystemCompilerVersion[compilerName]
-    (error, version) = getstatusoutput(COMPILER_DETECTION[compilerName])
+    (error, version) = getstatusoutput(getCompilerDetection()[compilerName])
     if error: raise UnknownCompiler()
     SystemCompilerVersion[compilerName] = version.split("\n")[0]
     return SystemCompilerVersion[compilerName]
@@ -1479,7 +1483,7 @@ class PackageFactory(object):
                                              options.useRpath,
                                              options.architecture,
                                              INITENV_PREAMBLE,
-                                             COMPILER_DETECTION,
+                                             getCompilerDetection(),
                                              DEFAULT_SECTIONS, ]).encode()).hexdigest()
         self.options = options
         self.__cacheKeyDecorator = ArchitectureDecorator(options.architecture)
@@ -1488,6 +1492,15 @@ class PackageFactory(object):
         self.__packageCache = CacheProxy(self.__package_cache, self.__cacheKeyDecorator)
         self.__requiresCache = CacheProxy(self.__requires_cache, self.__cacheKeyDecorator)
         self.checksums_cache = {}
+        if options.systemCompiler:
+            item = Package(options)
+            item.name = 'system-compiler'
+            item.group = 'external'
+            item.version = SystemCompilerVersion['gcc'].split(".")[0]
+            item.realVersion = item.version
+            item.checksum = md5adder(item.version.encode()).hexdigest()
+            item.specCache = False
+            self.__packageCache['system-compiler'] = item
         self.virtual_packages = self.updateVirtualPackages(options.cmsdist)
         return
 
@@ -2328,9 +2341,7 @@ class Package(object):
             if (not self.name in compiler_package_dependency) and (not PKGFactory.has_key(compilerName)):
                 compilerPKG = None
                 if self.options.systemCompiler == True:
-                    compilerPKG = PKGFactory.create()
-                    compilerPKG.name = "system-compiler"
-                    compilerPKG.realVersion = detectCompilerVersion(compilerName)
+                    compilerPKG = PKGFactory["system-compiler"]
                 else:
                     compilerPKG = PKGFactory.createWithSpec(compilerName)
                 PKGFactory[compilerName] = compilerPKG
@@ -4130,6 +4141,7 @@ def build(opts, args, factory):
     buildSpecs(packages)
 
 def isPackageInstalled(pkg):
+    if pkg.name in ['system-compiler']: return True
     if pkg.options.bootstrap:
         pkgName = pkg.pkgName()
         if pkgName in rpm_db_cache:
@@ -4289,6 +4301,7 @@ def allPackagesToUpload(args, factory):
     dep_cache = {}
     for pkg in pkgs:
         for dep in allDeps(pkg, factory, dep_cache):
+            if dep.name in ["system-compiler"]: continue
             if dep not in fullPackageList and exists(dep.rpmLocation()):
                 fullPackageList.extend(factory.expandSubpackages([dep]))
     return fullPackageList
@@ -4784,6 +4797,8 @@ if __name__ == "__main__":
         arch_data = opts.architecture.split("_", 2)
         arch_data[2] = re.sub('^[a-z]+', '', arch_data[2])
         opts.rpmQueryDefines  = '--define "cmsdist_directory %s"' % opts.cmsdist
+        if opts.systemCompiler:
+            opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
