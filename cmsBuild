@@ -74,7 +74,7 @@ def remoteRsync(opts):
         port = opts.uploadPort)
 
 
-def getNonSystemPackages(pkgs):
+def getNonSystemPackages(pkgs, opts):
     return [p for p in pkgs if p not in opts.useSystemTools]
 
 
@@ -2367,8 +2367,8 @@ class Package(object):
         else:
             self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
-        self.installDependencies = getNonSystemPackages(parseInstallDependencies(self.spec))
-        self.uploadDependencies = getNonSystemPackagesparseUploadDependencies(self.spec))
+        self.installDependencies = getNonSystemPackages(parseInstallDependencies(self.spec), self.options)
+        self.uploadDependencies = getNonSystemPackages(parseUploadDependencies(self.spec), self.options)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
@@ -2986,8 +2986,8 @@ class Package(object):
                         for source in localSources])
         patches.extend([cmsdist_file(patch, '.patch', self.options, self.name)
                         for patch in localPatches])
-        deps = getNonSystemPackages(deps)
-        buildDeps = getNonSystemPackages(buildDeps)
+        deps = getNonSystemPackages(deps, self.options)
+        buildDeps = getNonSystemPackages(buildDeps, self.options)
         PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps, sourcesNumbers)
         return (deps, sources, patches, buildDeps, sourcesNumbers)
 
@@ -3349,7 +3349,6 @@ def parseOptions():
     if len(args) < 2:
         parser.error("Please build or upload action. Use --help to see additional options.")
 
-    args = args[0] + [ for a in args if a not in opts.useSystemTools]
     opts.installDir = opts.workDir
     if (opts.repository == "cms") or opts.repository.startswith("cms."):
         opts.installDir = "/opt/cmssw"
@@ -3377,7 +3376,7 @@ def parseOptions():
     if opts.localSources and (not opts.forceUpload) and ('upload' in args):
         fatal("'upload' option can not be used together with '--source' flag.")
 
-    args = args[0] + getNonSystemPackages(args[1:])
+    args = [args[0]] + getNonSystemPackages(args[1:], opts)
     if len(args) < 2:
         fatal("No non-system package build provided via command-line")
 
@@ -4567,8 +4566,7 @@ def upload(opts, args, factory):
 
     repoInfo = {"uploadDir": uploadDir,
                 "repository": opts.repository,
-                "rsync": format("%(rsync) --rsync-path=/usr/bin/rsync --chmod=a+rX",
-                                rsync=remoteRsync(opts)),
+                "rsync": remoteRsync(opts),
                 "server": opts.uploadServer,
                 "user": opts.uploadUser}
 
