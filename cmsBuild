@@ -68,6 +68,12 @@ def fatal(message):
 def die(message):
     fatal(message)
 
+def remoteRsync(opts):
+    return format("rsync -e 'ssh -o StrictHostKeyChecking=no %(sshOpts)s -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",
+        sshOpts = opts.sshOptions,
+        port = opts.uploadPort)
+
+
 def cmsdist_file(name, ext, options, pkgname):
     fname = 'spec' if ext == '.spec' else name + ext
     s = join(pkgname, fname)
@@ -3218,6 +3224,10 @@ def parseOptions():
                            metavar="<0-65535>",
                            help="The port on which the repository sshd is listening to (default 22).",
                            default="22")
+    uploadGroup.add_option("--ssh-options",
+                           dest="sshOptions",
+                           help="Extra options to pass to ssh for uploading the newly build packages e.g. -J user@server",
+                           default="")
     uploadGroup.add_option("--upload-root-directory",
                            dest="uploadRootDirectory",
                            metavar="PATH",
@@ -3783,7 +3793,8 @@ def uploadStore(pkg, rpmfilename, scheduler):
     tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
     tmpFileName = join(opts.uploadRootDirectory, "store", "tmp", "%s.%s.tmp" % (uploadFile, sha256(tmpStr.encode()).hexdigest()))
     upload = format(
-        "scp -q -o StrictHostKeyChecking=no %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
+        "%(rsync)s %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
+        rsync=remoteRsync(opts),
         srcFile = join(abspath("RPMS/cache"), pkg.checksum, dirname(rpmfilename), uploadFile),
         user = opts.uploadUser,
         server = opts.uploadServer,
@@ -4260,7 +4271,7 @@ def executeScript(opts, dumpedScript, local=True):
     if local:
         executionCmd = "sh -e %(debug)s %(filename)s"
     else:
-        executionCmd = "ssh < %(filename)s -q -o StrictHostKeyChecking=no -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+        executionCmd = "ssh < %(filename)s -q -o StrictHostKeyChecking=no -p %(cmdPort)s %(sshOpts)s  %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
     # Run (or print-out) the script
     if not opts.pretend:
         fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
@@ -4275,6 +4286,7 @@ def executeScript(opts, dumpedScript, local=True):
                         filename=filename,
                         cmdServer=opts.uploadServer,
                         cmdUser=opts.uploadUser,
+                        sshOpts=opts.sshOptions,
                         cmdPort=opts.uploadPort)
         err, out = getstatusoutput(script)
     if opts.debug: log(out)
@@ -4539,8 +4551,8 @@ def upload(opts, args, factory):
 
     repoInfo = {"uploadDir": uploadDir,
                 "repository": opts.repository,
-                "rsync": format("rsync -e 'ssh -o StrictHostKeyChecking=no -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",
-                                port=opts.uploadPort),
+                "rsync": format("%(rsync) --rsync-path=/usr/bin/rsync --chmod=a+rX",
+                                rsync=remoteRsync(opts)),
                 "server": opts.uploadServer,
                 "user": opts.uploadUser}
 
