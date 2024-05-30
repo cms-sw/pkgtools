@@ -68,6 +68,16 @@ def fatal(message):
 def die(message):
     fatal(message)
 
+def remoteRsync(opts):
+    return format("rsync -e 'ssh -o StrictHostKeyChecking=no %(sshOpts)s -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",
+        sshOpts = opts.sshOptions,
+        port = opts.uploadPort)
+
+
+def getNonSystemPackages(pkgs, opts):
+    return [p for p in pkgs if p not in opts.useSystemTools] if opts.useSystemTools else pkgs
+
+
 def cmsdist_file(name, ext, options, pkgname):
     fname = 'spec' if ext == '.spec' else name + ext
     s = join(pkgname, fname)
@@ -2357,8 +2367,8 @@ class Package(object):
         else:
             self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
-        self.installDependencies = parseInstallDependencies(self.spec)
-        self.uploadDependencies = parseUploadDependencies(self.spec)
+        self.installDependencies = getNonSystemPackages(parseInstallDependencies(self.spec), self.options)
+        self.uploadDependencies = getNonSystemPackages(parseUploadDependencies(self.spec), self.options)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
         self.fullDependencies += self.dependencies
@@ -2976,6 +2986,8 @@ class Package(object):
                         for source in localSources])
         patches.extend([cmsdist_file(patch, '.patch', self.options, self.name)
                         for patch in localPatches])
+        deps = getNonSystemPackages(deps, self.options)
+        buildDeps = getNonSystemPackages(buildDeps, self.options)
         PKGFactory.getRequiresCache()[self.name] = (deps, sources, patches, buildDeps, sourcesNumbers)
         return (deps, sources, patches, buildDeps, sourcesNumbers)
 
@@ -3089,6 +3101,10 @@ def parseOptions():
                                     action="store_true",
                                     help="""Use the system compiler rather than the one specified in CMSDIST""",
                                     default=False)
+    advancedBuildOptions.add_option("--use-system-tools",
+                                    dest="useSystemTools",
+                                    default="",
+                                    help="Comma separated list of package names which should be taken from system e.g. make,cmake,autoconf")
     advancedBuildOptions.add_option("--ignore-compile-errors",
                                     "-k",
                                     dest="ignoreCompileErrors",
@@ -3218,6 +3234,10 @@ def parseOptions():
                            metavar="<0-65535>",
                            help="The port on which the repository sshd is listening to (default 22).",
                            default="22")
+    uploadGroup.add_option("--ssh-options",
+                           dest="sshOptions",
+                           help="Extra options to pass to ssh for uploading the newly build packages e.g. -J user@server",
+                           default="")
     uploadGroup.add_option("--upload-root-directory",
                            dest="uploadRootDirectory",
                            metavar="PATH",
@@ -3270,6 +3290,12 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
+    opts.useSystemTools = set(opts.useSystemTools.split(","))
+
+    if "gcc" in opts.useSystemTools:
+        opts.systemCompiler = True
+        opts.useSystemTools.remove("gcc")
+
     if opts.enableMonitor and not run_monitor_on_command:
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
@@ -3354,6 +3380,10 @@ def parseOptions():
 
     if opts.localSources and (not opts.forceUpload) and ('upload' in args):
         fatal("'upload' option can not be used together with '--source' flag.")
+
+    args = [args[0]] + getNonSystemPackages(args[1:], opts)
+    if len(args) < 2:
+        fatal("No non-system package build provided via command-line")
 
     return opts, args
 
@@ -3783,7 +3813,8 @@ def uploadStore(pkg, rpmfilename, scheduler):
     tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
     tmpFileName = join(opts.uploadRootDirectory, "store", "tmp", "%s.%s.tmp" % (uploadFile, sha256(tmpStr.encode()).hexdigest()))
     upload = format(
-        "scp -q -o StrictHostKeyChecking=no %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
+        "%(rsync)s %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
+        rsync=remoteRsync(opts),
         srcFile = join(abspath("RPMS/cache"), pkg.checksum, dirname(rpmfilename), uploadFile),
         user = opts.uploadUser,
         server = opts.uploadServer,
@@ -4260,7 +4291,7 @@ def executeScript(opts, dumpedScript, local=True):
     if local:
         executionCmd = "sh -e %(debug)s %(filename)s"
     else:
-        executionCmd = "ssh < %(filename)s -q -o StrictHostKeyChecking=no -p %(cmdPort)s %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
+        executionCmd = "ssh < %(filename)s -q -o StrictHostKeyChecking=no -p %(cmdPort)s %(sshOpts)s  %(cmdUser)s@%(cmdServer)s sh -e %(debug)s"
     # Run (or print-out) the script
     if not opts.pretend:
         fd, filename = mkstemp(".sh", "cmsBuildExecuted", opts.tempDirPrefix, True)
@@ -4275,6 +4306,7 @@ def executeScript(opts, dumpedScript, local=True):
                         filename=filename,
                         cmdServer=opts.uploadServer,
                         cmdUser=opts.uploadUser,
+                        sshOpts=opts.sshOptions,
                         cmdPort=opts.uploadPort)
         err, out = getstatusoutput(script)
     if opts.debug: log(out)
@@ -4539,8 +4571,7 @@ def upload(opts, args, factory):
 
     repoInfo = {"uploadDir": uploadDir,
                 "repository": opts.repository,
-                "rsync": format("rsync -e 'ssh -o StrictHostKeyChecking=no -p %(port)s' --rsync-path=/usr/bin/rsync --chmod=a+rX",
-                                port=opts.uploadPort),
+                "rsync": remoteRsync(opts),
                 "server": opts.uploadServer,
                 "user": opts.uploadUser}
 
@@ -4799,6 +4830,8 @@ if __name__ == "__main__":
         opts.rpmQueryDefines  = '--define "cmsdist_directory %s"' % opts.cmsdist
         if opts.systemCompiler:
             opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
+        for pkg in opts.useSystemTools:
+            opts.rpmQueryDefines += ' --define "use_system_%s 1"' % pkg.replace("-","_")
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
