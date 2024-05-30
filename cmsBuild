@@ -75,7 +75,7 @@ def remoteRsync(opts):
 
 
 def getNonSystemPackages(pkgs, opts):
-    return [p for p in pkgs if p not in opts.useSystemTools]
+    return [p for p in pkgs if p not in opts.useSystemTools] if opts.useSystemTools else pkgs
 
 
 def cmsdist_file(name, ext, options, pkgname):
@@ -3290,7 +3290,12 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
-    opts.useSystemTools = opts.useSystemTools.split(",")
+    opts.useSystemTools = set(opts.useSystemTools.split(","))
+
+    if "gcc" in opts.useSystemTools:
+        opts.systemCompiler = True
+        opts.useSystemTools.remove("gcc")
+
     if opts.enableMonitor and not run_monitor_on_command:
         opts.enableMonitor = False
         log ("Warning: Disabling monitoring. Failed to import run_monitor_on_command from monitor_build.")
@@ -4825,6 +4830,8 @@ if __name__ == "__main__":
         opts.rpmQueryDefines  = '--define "cmsdist_directory %s"' % opts.cmsdist
         if opts.systemCompiler:
             opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
+        for pkg in opts.useSystemTools:
+            opts.rpmQueryDefines += ' --define "use_system_%s 1"' % pkg.replace("-","_")
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
