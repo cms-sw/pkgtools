@@ -3882,7 +3882,6 @@ def checkDeps(pkg, requires, scheduler):
             for p in provides[req]:
                 if p == pkg_name: continue
                 found[p] = 1
-    print("Actual Deps:",pkg.name,found)
     print("Missing ",pkg.name,missing)
     scheduler.log("Done checking package dependencies: %s" % pkg.pkgName())
     return
