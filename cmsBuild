@@ -55,6 +55,7 @@ cms_debug_packages = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 build_stats = None
+package_provides = {}
 cmsdist_files = {}
 pgo_packages = []
 compiler_package_dependency = ["gcc-prerequisites"]
@@ -3105,6 +3106,10 @@ def parseOptions():
                                     dest="useSystemTools",
                                     default="",
                                     help="Comma separated list of package names which should be taken from system e.g. make,cmake,autoconf")
+    advancedBuildOptions.add_option("--build-without",
+                                    dest="disbleTools",
+                                    default="",
+                                    help="Comma separated list of package names which should not be built e.g. cuda,rocm etc.")
     advancedBuildOptions.add_option("--ignore-compile-errors",
                                     "-k",
                                     dest="ignoreCompileErrors",
@@ -3291,6 +3296,7 @@ def parseOptions():
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
     opts.useSystemTools = set(opts.useSystemTools.split(","))
+    opts.disbleTools = set(opts.disbleTools.split(","))
 
     if "gcc" in opts.useSystemTools:
         opts.systemCompiler = True
@@ -3538,7 +3544,6 @@ def installRpm(pkg, bootstrap, scheduler):
         output = cmd_proc.stdout.decode()
         if cmd_proc.stderr:
             scheduler.log("RPM installation stderr %s:\n%s" % (pkg.name, cmd_proc.stderr.decode()))
-        savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation())
     else:
         workDir = pkg.workDir
         tmpDir = join(workDir, pkg.tempDirPrefix, pkg.checksum)
@@ -3584,7 +3589,6 @@ def installApt(pkg, scheduler, cache=[]):
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
     log("Done installing via cmspkg.", DEBUG)
-    savePackageProvides(pkg.pkgName(), pkg.options)
     for dep in getPackages(pkg.dependencies):
         scheduler.forceDone("check-%s" % dep.pkgName())
         scheduler.forceDone("install-%s" % dep.pkgName())
@@ -3804,7 +3808,7 @@ def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=Fals
     if read:
       e, o = getstatusoutput("cat %s" % provides_cache)
       return o.split("\n")
-    return
+    return []
 
 
 def uploadStore(pkg, rpmfilename, scheduler):
@@ -3853,6 +3857,35 @@ def updateStoreUsage(pkg, rpmfilename, scheduler):
     scheduler.log("ObjctStore: Successfully updated usage of store file %s" % basename(rpmfilename))
     return
 
+def checkDeps(pkg, requires, scheduler):
+    scheduler.log("Checking package dependencies: %s" % pkg.pkgName())
+    def read_provides(dep, cache):
+        global package_provides
+        if not dep in package_provides:
+            package_provides[dep] = savePackageProvides(dep, pkg.options, read=True)
+        for p in package_provides[dep]:
+            if p not in cache: cache[p]=[]
+            cache[p].append(dep)
+        return
+
+    pkg_name =  pkg.pkgName()
+    provides = {}
+    for dep in ["system-base-import", "cms+fakesystem+1.0", pkg_name]+requires["package_deps"]:
+        read_provides(dep, provides)
+
+    missing = []
+    found = {}
+    for req in requires["rpm_requires"]:
+        if not req in provides:
+            missing.append(req)
+        else:
+            for p in provides[req]:
+                if p == pkg_name: continue
+                found[p] = 1
+    print("Missing ",pkg.name,missing)
+    scheduler.log("Done checking package dependencies: %s" % pkg.pkgName())
+    return
+
 
 def installPackage(pkg, scheduler):
     if not checkCanInstallRpm(pkg):
@@ -3860,7 +3893,6 @@ def installPackage(pkg, scheduler):
     scheduler.log("Trying to install the rpm package %s just built." % pkg.pkgName())
     pkg_error = False
     if pkg.options.bootstrap:
-        scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName())
         rpm_env = rpmEnvironmentScript
         command = "%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
         error, output = getstatusoutput(command)
@@ -3869,10 +3901,13 @@ def installPackage(pkg, scheduler):
             raise RpmBuildFailed(pkg)
         requires_cache = join(pkg.options.workDir, "DEPS", pkg.options.architecture, "requires", pkg.pkgName()+".json")
         req_data = {
-                    "package_deps": pkg.dependencies,
+                    "package_deps": [dep.pkgName() for dep in getPackages(pkg.dependencies)],
                     "rpm_requires": [l for l in  output.split("\n") if not l.startswith('rpmlib(')]
                    }
         json.dump(req_data, open(join(requires_cache),"w"))
+        savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation())
+        checkDeps(pkg, req_data, scheduler)
+        scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName())
         localPaths = [l for l in req_data["rpm_requires"] if l.startswith(pkg.options.workDir)]
         if localPaths:
             scheduler.log("Error: Local path dependency found for %s." % pkg.pkgName())
@@ -4131,6 +4166,11 @@ def build(opts, args, factory):
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
 
     for p in packages:
+      xdep = [dep for dep in opts.disbleTools if dep in p.fullDependencies]
+      if xdep:
+          log("Package %s depend on %s while you have used --build-without to build without these package." % (p.name, xdep))
+          log("Please clean up your spec to not depend on %s packages." % xdep)
+          fatal("Invalid dependencies.")
       for pkg in [p]+getPackages(p.fullDependencies):
         for ipkg in pkg.installDependencies+pkg.uploadDependencies:
           if not PKGFactory.has_key(ipkg):
@@ -4832,6 +4872,8 @@ if __name__ == "__main__":
             opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
         for pkg in opts.useSystemTools:
             opts.rpmQueryDefines += ' --define "use_system_%s 1"' % pkg.replace("-","_")
+        for pkg in opts.disbleTools:
+            opts.rpmQueryDefines += ' --define "without_%s 1"' % pkg.replace("-","_")
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
             arch_data[2],
