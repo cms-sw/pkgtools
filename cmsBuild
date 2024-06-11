@@ -3250,7 +3250,7 @@ def parseOptions():
                            help="The base directory where the repository is located. E.g. /data/cmssw.")
     uploadGroup.add_option("--upload-tmp-repository",
                            dest="uploadTmpRepository",
-                           help="Name of temporary repository to use during upload. Default=cms.<username> (Deleted/recreated for each upload request)",
+                           help="Name of temporary repository (only alphanumeric characters) to use during upload. Default=<username> (Deleted/recreated for each upload request)",
                            default=re.sub("[^A-Za-z0-9]*", "", getuser()))
     uploadGroup.add_option("--link-parent-repository",
                           dest="linkParentRepository",
