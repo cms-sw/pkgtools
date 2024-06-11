@@ -1494,7 +1494,7 @@ class PackageFactory(object):
                                              options.useRpath,
                                              options.architecture,
                                              INITENV_PREAMBLE,
-                                             getCompilerDetection(),
+                                             "" if opts.systemCompiler else getCompilerDetection(),
                                              DEFAULT_SECTIONS, ]).encode()).hexdigest()
         self.options = options
         self.__cacheKeyDecorator = ArchitectureDecorator(options.architecture)
