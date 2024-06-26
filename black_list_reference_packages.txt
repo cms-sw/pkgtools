@@ -3,9 +3,10 @@
 bootstrap-.+,.+-bundle
 gcc
 rpm
-SCRAMV1
-SCRAMV2
+SCRAMV[0-9]+
 cms-common
 cms-git-tools
+crab
+crab-.+
 .+-toolfile
 .+-tool-conf
