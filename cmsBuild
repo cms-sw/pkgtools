@@ -54,6 +54,7 @@ rpm_upload_cache = {}
 cms_debug_packages = {}
 removeInitialSpace = re.compile("^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
+pkgtools_dir = dirname (cmsBuildFilename)
 build_stats = None
 package_provides = {}
 cmsdist_files = {}
@@ -256,7 +257,7 @@ def check_reference(opts):
         print ("Reference Server:", ref_data)
         exit(1)
     log("Using reference repository:%s" % opts.reference, DEBUG)
-    black_list_file = join(dirname(cmsBuildFilename), "black_list_reference_packages.txt")
+    black_list_file = join(pkgtools_dir, "black_list_reference_packages.txt")
     black_list_pkgs = [opts.blackList]
     if exists(black_list_file): black_list_pkgs += open(black_list_file).readlines()
     for pkgs in [p.strip() for p in black_list_pkgs]:
@@ -523,7 +524,7 @@ def downloadTc(source, dest, options):
     tempdir = createTempDir(options.workDir, options.tempDirPrefix)
     args["tempdir"] = tempdir
     args["dest"] = join(dest, args["output"].lstrip("/"))
-    args["pmLocation"] = abspath(join(dirname(cmsBuildFilename), 'cmspm'))
+    args["pmLocation"] = abspath(join(pkgtools_dir, 'cmspm'))
     if "extratags" in args:
         args["extratags"] = "--additional-tags " + args["extratags"]
     else:
@@ -3054,6 +3055,19 @@ def parseOptions():
                       help="Upload newly built packages to object store on server",
                       action="store_true",
                       default=False)
+    parser.add_option("--upload-package-store-s3",
+                      dest="uploadPackageCacheS3",
+                      help="Upload newly built packages to S3 object store",
+                      action="store_true",
+                      default=False)
+    parser.add_option("--s3-server",
+                      dest="s3Server",
+                      help="S3 server for uploading newly built packages",
+                      default="s3.cern.ch")
+    parser.add_option("--s3-bucket",
+                      dest="s3Bucket",
+                      help="S3 Bucket to use",
+                      default="cmsrep")
     parser.add_option("--force-tag",
                       dest="forcetag",
                       action="store_true",
@@ -3298,6 +3312,8 @@ def parseOptions():
     opts.useSystemTools = set(opts.useSystemTools.split(","))
     opts.disbleTools = set(opts.disbleTools.split(","))
 
+    if opts.uploadPackageCacheS3:
+        opts.uploadPackageCache=True
     if "gcc" in opts.useSystemTools:
         opts.systemCompiler = True
         opts.useSystemTools.remove("gcc")
@@ -3650,9 +3666,13 @@ def isPackageStoreUploadEnabled(pkg):
 
 def downloadFromStore(pkg, scheduler):
     for p in pkg.subpackages + [pkg]:
-        cache_url = "http://%s/cmssw/store/%s" % (opts.uploadServer, p.rpmfilename)
-        if not downloadUrllib2(cache_url, pkg.builddir, opts, cmscache=False):
-            return False
+        download_ok = False
+        for store in ["http://%s.%s/store" % (opts.s3Bucket, opts.s3Server), "http://%s/cmssw/store" % opts.uploadServer]:
+            cache_url = "%s/%s" % (store, p.rpmfilename)
+            if downloadUrllib2(cache_url, pkg.builddir, opts, cmscache=False):
+                download_ok = True
+                break
+        if not download_ok: return False
     for p in pkg.subpackages + [pkg]:
         cachefile = abspath("RPMS/cache/%s/%s" % (p.checksum, p.rpmfilename))
         os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
@@ -3810,8 +3830,32 @@ def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=Fals
       return o.split("\n")
     return []
 
+def downloadS3Credentials(scheduler):
+    s3_cmd = format("%(rsync)s %(user)s@%(server)s:~/aws.credentials %(tempdir)s/credentials.txt",
+        rsync=remoteRsync(opts),
+        user = opts.uploadUser,
+        server = opts.uploadServer,
+        tempdir = opts.tempdir)
+    (err, msg) = executeScript(opts, s3_cmd, True)
+    if err:
+        scheduler.log("Warning, unable to downlaod s3 credentials: %s" % msg)
+    return
 
-def uploadStore(pkg, rpmfilename, scheduler):
+def uploadStoreS3(rpmfilename, pkg, scheduler):
+   s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d store/%(rpmfilename)s -c %(cred)s",
+       pkgtools_dir=pkgtools_dir,
+       s3Server=opts.s3Server,
+       s3Bucket=opts.s3Bucket,
+       cred=join(opts.tempdir,"credentials.txt"),
+       rpmfilename=rpmfilename,
+       srcFile=join(abspath("RPMS/cache"), pkg.checksum, rpmfilename))
+   print("Running:",s3_cmd)
+   (err, msg) = executeScript(opts, s3_cmd, True)
+   if err:
+       scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (rpmfilename, msg))
+       return
+
+def uploadStore(rpmfilename, pkg, scheduler):
     from socket import gethostname
     uploadFile=basename(rpmfilename)
     tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
@@ -3819,7 +3863,7 @@ def uploadStore(pkg, rpmfilename, scheduler):
     upload = format(
         "%(rsync)s %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
         rsync=remoteRsync(opts),
-        srcFile = join(abspath("RPMS/cache"), pkg.checksum, dirname(rpmfilename), uploadFile),
+        srcFile = join(abspath("RPMS/cache"), pkg.checksum, rpmfilename),
         user = opts.uploadUser,
         server = opts.uploadServer,
         tmpFileName = tmpFileName)
@@ -3940,7 +3984,11 @@ def installPackage(pkg, scheduler):
     if not isPackageStoreUploadEnabled(pkg): return
     for p in pkg.subpackages + [pkg]:
         if not p.rpmfilename in package_store_downloads:
-            scheduler.parallel("download-object-store-%s" % basename(p.rpmfilename), [], uploadStore, p, p.rpmfilename, scheduler)
+            if pkg.options.uploadPackageCacheS3:
+                scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), ["download-s3-credentials"], uploadStoreS3, p.rpmfilename, p, scheduler)
+            else:
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), [], uploadStore, p.rpmfilename, p, scheduler)
             scheduler.reschedule()
     return
 

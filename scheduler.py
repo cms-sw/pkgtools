@@ -136,7 +136,10 @@ class Scheduler(object):
     if taskId in self.jobs: return
     self.jobs[taskId] = {"scheduler": "parallel", "deps": deps, "spec":spec, "priorty": 1}
     if taskId.split("-")[0] in ["build", "download", "fetch"]:
-      self.jobs[taskId]["priorty"] = 100000-spec[1].requiredBy
+      try:
+          self.jobs[taskId]["priorty"] = 100000-spec[1].requiredBy
+      except:
+          self.jobs[taskId]["priorty"] = 1
     self.pendingJobs.append(taskId)
     self.finalJobDeps.append(taskId)
 
