@@ -30,17 +30,19 @@ perl -p -i -e "s/### RPM cms cmssw.*/### RPM cms cmssw $CMSSW_X_Y_Z/" CMSDIST/cm
 perl -p -i -e "s/### RPM cms fwlite.*/### RPM cms fwlite ${CMSSW_X_Y_Z}_FWLITE/" CMSDIST/fwlite.spec
 
 MSG="Prepared for ${CMSSW_X_Y_Z} on ${ARCH}"
+CHG_XFILES=""
 if [ ! "X$CMSSW_PATCH" = X ]; then
   perl -p -i -e "s/### RPM cms cmssw-patch.*/### RPM cms cmssw-patch $CMSSW_PATCH/" CMSDIST/cmssw-patch.spec
   if [ -e CMSDIST/cmssw-patch-tool-conf.spec ] ; then
     perl -p -i -e "s/### RPM cms cmssw-patch-tool-conf .+/### RPM cms cmssw-patch-tool-conf $CMSSW_X_Y_Z/" CMSDIST/cmssw-patch-tool-conf.spec
+    CHG_XFILES="cmssw-patch-tool-conf.spec"
   fi
   MSG="Prepared for ${CMSSW_PATCH} (based on ${CMSSW_X_Y_Z}) on ${ARCH}"
 fi
 
 echo $MSG
 pushd CMSDIST
-  git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec cmssw-patch-tool-conf.spec
+  git commit -m"$MSG" cmssw.spec fwlite.spec cmssw-patch.spec ${CHG_XFILES}
   git reset --hard HEAD
   git clean -fxd
 popd
