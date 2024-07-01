@@ -32,7 +32,9 @@ perl -p -i -e "s/### RPM cms fwlite.*/### RPM cms fwlite ${CMSSW_X_Y_Z}_FWLITE/"
 MSG="Prepared for ${CMSSW_X_Y_Z} on ${ARCH}"
 if [ ! "X$CMSSW_PATCH" = X ]; then
   perl -p -i -e "s/### RPM cms cmssw-patch.*/### RPM cms cmssw-patch $CMSSW_PATCH/" CMSDIST/cmssw-patch.spec
-  perl -p -i -e "s/### RPM cms cmssw-patch-tool-conf .+/### RPM cms cmssw-patch-tool-conf $CMSSW_X_Y_Z/" CMSDIST/cmssw-patch-tool-conf.spec
+  if [ -e CMSDIST/cmssw-patch-tool-conf.spec ] ; then
+    perl -p -i -e "s/### RPM cms cmssw-patch-tool-conf .+/### RPM cms cmssw-patch-tool-conf $CMSSW_X_Y_Z/" CMSDIST/cmssw-patch-tool-conf.spec
+  fi
   MSG="Prepared for ${CMSSW_PATCH} (based on ${CMSSW_X_Y_Z}) on ${ARCH}"
 fi
 
