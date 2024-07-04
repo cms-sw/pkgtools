@@ -6,6 +6,7 @@ rpm
 SCRAMV[0-9]+
 cms-common
 cms-git-tools
+cmssw-osenv
 crab
 crab-.+
 .+-toolfile
