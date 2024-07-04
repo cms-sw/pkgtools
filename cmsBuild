@@ -3604,7 +3604,7 @@ def installApt(pkg, scheduler, cache=[]):
     if error:
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
-    log("Done installing via cmspkg.", DEBUG)
+    log("Done installing %s via cmspkg." % pkg.pkgName(), DEBUG)
     for dep in getPackages(pkg.dependencies):
         scheduler.forceDone("check-%s" % dep.pkgName())
         scheduler.forceDone("install-%s" % dep.pkgName())
