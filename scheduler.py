@@ -82,9 +82,13 @@ class Scheduler(object):
     while self.parallelThreads:
       try:
         self.__doNotifications()
-        who, item = self.resultsQueue.get()
+        who, item = self.resultsQueue.get(timeout=600)
         item[0](*item[1:])
         sleep(0.1)
+      except Empty:
+        self.log("Running tasks: %s" % self.runningJobs)
+        self.log("Pending tasks: %s" % self.pendingJobs)
+        pass
       except KeyboardInterrupt:
         print ("Ctrl-c received, waiting for workers to finish")
         while self.workersQueue.full():
