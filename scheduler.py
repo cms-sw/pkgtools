@@ -74,16 +74,23 @@ class Scheduler(object):
 
     self.__doRescheduleParallel()
     # Wait until all the workers are done.
+    wait_gap = 30              # 30 sec
+    dump_status = wait_gap*60  # 30 mins
+    dump_cnt = 0
     while self.parallelThreads:
       try:
         self.__doNotifications()
-        who, item = self.resultsQueue.get(timeout=600)
+        who, item = self.resultsQueue.get(timeout=wait_gap)
         item[0](*item[1:])
         sleep(0.1)
       except Empty:
-        self.log("Running tasks: %s" % self.runningJobs)
-        self.log("Pending tasks: %s" % self.pendingJobs)
-        pass
+        dump_cnt += wait_gap
+        if dump_cnt >= dump_status:
+          dump_cnt = 0
+          self.log("Worker Queue:  %s" % self.workersQueue.qsize())
+          self.log("Result Queue:  %s" % self.resultsQueue.qsize())
+          self.log("Running tasks: %s" % self.runningJobs)
+          self.log("Pending tasks: %s" % self.pendingJobs)
       except KeyboardInterrupt:
         print ("Ctrl-c received, waiting for workers to finish")
         while self.workersQueue.full():
