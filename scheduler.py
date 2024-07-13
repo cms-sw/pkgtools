@@ -83,6 +83,7 @@ class Scheduler(object):
         who, item = self.resultsQueue.get(timeout=wait_gap)
         item[0](*item[1:])
         sleep(0.1)
+        dump_cnt = 0
       except Empty:
         dump_cnt += wait_gap
         if dump_cnt >= dump_status:
