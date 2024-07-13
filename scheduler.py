@@ -1,11 +1,6 @@
-from __future__ import print_function
 import sys
-if sys.version_info[0] == 2:
-  from Queue import Queue, PriorityQueue
-  from StringIO import StringIO
-else:
-  from queue import Queue, PriorityQueue
-  from io import StringIO
+from queue import Queue, PriorityQueue, Empty
+from io import StringIO
 from threading import Thread
 from time import sleep
 import threading
