@@ -2738,7 +2738,7 @@ class Package(object):
                 sectionContents = self.sections[section][subsection].strip("\n ")
                 if sectionContents:
                     if saveScripts:
-                        if section in ["%prep"]:
+                        if section in ["%prep"] and self.options.useGitForPatches:
                             patchedContents = PATCH_SOURCE_MACROS
                             xpatchRE = re.compile("^\s*%patch[0-9]*\s+.+$")
                             for l in sectionContents.split("\n"):
@@ -3153,6 +3153,11 @@ def parseOptions():
                                     action="store_false",
                                     help="Do not delete the build area after successful build.",
                                     default=True)
+    advancedBuildOptions.add_option("--use-git-for-patches",
+                                    dest="useGitForPatches",
+                                    action="store_true",
+                                    help="Use git to record every patch applied to package sources.",
+                                    default=False)
     advancedBuildOptions.add_option("--pretend",
                                     dest="pretend",
                                     action="store_true",
