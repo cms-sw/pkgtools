@@ -1,7 +1,7 @@
 #!/usr/bin/python3 -u
 # Driver script for building rpms from a configuration specified in CMSDIST.
 #
-import sys
+import sys, socket
 from os.path import abspath, join, exists, isdir, basename, dirname
 from os import popen, getenv, symlink, listdir, readlink, unlink, getpid
 from os import chdir, getcwd, environ, walk, sep, kill
@@ -3317,6 +3317,8 @@ def parseOptions():
     opts.useSystemTools = set(opts.useSystemTools.split(","))
     opts.disbleTools = set(opts.disbleTools.split(","))
 
+    if (not "-J" in opts.sshOptions) and (not "cern.ch" in socket.getfqdn()):
+        opts.sshOptions = "%s -J %s@lxplus.cern.ch" % (opts.sshOptions, opts.uploadUser)
     if opts.uploadPackageCacheS3:
         opts.uploadPackageCache=True
     if "gcc" in opts.useSystemTools:
