@@ -29,8 +29,8 @@ try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
 import json
 
-urlRe = re.compile(".*:.*/.*")
-urlAuthRe = re.compile('^(http(s|)://)([^:]+:[^@]+)@(.+)$')
+urlRe = re.compile(r".*:.*/.*")
+urlAuthRe = re.compile(r'^(http(s|)://)([^:]+:[^@]+)@(.+)$')
 logLevel = 10
 NORMAL = 10
 DEBUG = 20
@@ -52,7 +52,7 @@ rpm_db_cache = {}
 cmspkg_upload_cache = {"": []}
 rpm_upload_cache = {}
 cms_debug_packages = {}
-removeInitialSpace = re.compile("^[ ]*", re.M)
+removeInitialSpace = re.compile(r"^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 pkgtools_dir = dirname (cmsBuildFilename)
 build_stats = None
@@ -100,7 +100,7 @@ def isNoVersionSuffix(name):
 
 # Minimal string sanitization.
 def sanitize(s):
-    return re.sub("[^a-zA-Z_0-9*./-]", "", s)
+    return re.sub(r"[^a-zA-Z_0-9*./-]", "", s)
 
 
 def log(message, level=0):
@@ -287,7 +287,7 @@ def install_reference(pkg):
     makedirs(join(tmp_path,"BUILDROOT"))
     tmp_spec = join(tmp_path, "package.spec")
     spec = open(tmp_spec, "w")
-    infoReg = re.compile("^(Name|Version|Release|Group|License|Packager|Vendor|Summary)\s*:.*")
+    infoReg = re.compile(r"^(Name|Version|Release|Group|License|Packager|Vendor|Summary)\s*:.*")
     for l in info.split("\n"):
         if infoReg.match(l):
             spec.write(l + "\n")
@@ -394,7 +394,7 @@ def parseCvsUrl(url):
     if not cvsroot:
         cvsroot = DEFAULT_CVS_SERVER
     cvsroot = cvsroot.replace(":/", ":2401/")
-    args["tag"] = re.sub(re.compile("^-r"), "", args["tag"])
+    args["tag"] = re.sub(re.compile(r"^-r"), "", args["tag"])
     if "export" not in args:
         args["export"] = args["module"]
     args["cvsroot"] = cvsroot
@@ -425,7 +425,7 @@ def parseGitUrl(url):
     args["branch"], args["tag"] = parts
 
     if not "export" in args:
-        args["export"] = basename(re.sub("\.git$", "", re.sub("[?].*", "", gitroot)))
+        args["export"] = basename(re.sub(r"\.git$", "", re.sub(r"[?].*", "", gitroot)))
         if args["tag"] != "HEAD":
             args["export"] += args["tag"]
         else:
@@ -497,7 +497,7 @@ def downloadSvn(source, dest, options):
 def downloadCvs(source, dest, options):
     protocol, cvsroot, args = parseCvsUrl(source)
     tempdir = createTempDir(options.workDir, options.tempDirPrefix)
-    pserverUrlRe = re.compile(":pserver:.*")
+    pserverUrlRe = re.compile(r":pserver:.*")
     isPserver = pserverUrlRe.match(cvsroot)
     cvspassFilename = None
     if 'passwd' in args and isPserver:
@@ -875,7 +875,7 @@ def download(source, dest, options, pkg=None):
         source = "cmstc://?%s%s%s&module=CMSSW&export=src&output=/%s" % (release, baserel, extratags, output)
 
     cacheDir = abspath(join(options.workDir, "SOURCES/cache"))
-    urlTypeRe = re.compile("([^:+]*)([^:]*)://.*")
+    urlTypeRe = re.compile(r"([^:+]*)([^:]*)://.*")
     match = urlTypeRe.match(source)
     if not urlTypeRe.match(source):
         raise MalformedUrl(source)
@@ -1015,7 +1015,7 @@ def idToTag(tagId, origTag):
 # specifying a -CMSXYZ tag by hand, we remove such a suffix from
 # the version. This is probably not needed anymore and can go.
 def fixVersionLine(specLines, version):
-    findRpmRe = re.compile("^(###\s+RPM\s+[^\s]+\s+[^\s]+\s+).+")
+    findRpmRe = re.compile(r"^(###\s+RPM\s+[^\s]+\s+[^\s]+\s+).+")
     nLines = []
     for line in specLines:
         match = findRpmRe.match(line)
@@ -1024,13 +1024,13 @@ def fixVersionLine(specLines, version):
     return nLines
 
 def parseRPMLine(specLines, opts):
-    findRpmRe = re.compile("^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
+    findRpmRe = re.compile(r"^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
     for line in specLines:
         match = findRpmRe.match(line)
         if not match:
             continue
         results = [x.strip(" ") for x in match.groups()]
-        results[2] = re.sub("-CMS.*", "", results[2])
+        results[2] = re.sub(r"-CMS.*", "", results[2])
         group, name, version = results
         error, output = getstatusoutput("echo %s" % version)
         if error:
@@ -1043,7 +1043,7 @@ def parseRPMLine(specLines, opts):
 
 
 def parseSpecFlag(specLines, flag, args=''):
-    flagRe = re.compile("^##\s+%s%s\s*$" % (flag,args))
+    flagRe = re.compile(r"^##\s+%s%s\s*$" % (flag,args))
     for line in specLines:
         if flagRe.match(line):
             return line
@@ -1073,17 +1073,17 @@ def parseNoAutoRunPath(specLines):
     return parseSpecFlag(specLines, "NO_AUTO_RUNPATH")!=''
 
 def parseUploadDependencies(specLines):
-    line = parseSpecFlag(specLines, "UPLOAD_DEPENDENCIES",'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
+    line = parseSpecFlag(specLines, "UPLOAD_DEPENDENCIES",r'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
     if not line: return []
     return [x for x in line.split(" UPLOAD_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
 
 def parseInstallDependencies(specLines):
-    line = parseSpecFlag(specLines, "INSTALL_DEPENDENCIES",'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
+    line = parseSpecFlag(specLines, "INSTALL_DEPENDENCIES",r'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
     if not line: return []
     return [x for x in line.split(" INSTALL_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
 
 def parseNoDeleteBuildLogs(specLines):
-    line = parseSpecFlag(specLines, "NO_DELETE_BUILD_LOGS",'(\s+[a-zA-Z0-9_.-]+)+')
+    line = parseSpecFlag(specLines, "NO_DELETE_BUILD_LOGS",r'(\s+[a-zA-Z0-9_.-]+)+')
     if not line: return ''
     return line.split(" NO_DELETE_BUILD_LOGS ",1)[-1].strip()
 
@@ -1184,7 +1184,7 @@ class TagCacheAptImpl(object):
             if error:
                 die("Error while executing cmspkg search.\n%s" % output)
             lines = [line for line in output.split("\n") if line]
-            chksumRE = re.compile("\s+-\s+.*?SpecChecksum:")
+            chksumRE = re.compile(r"\s+-\s+.*?SpecChecksum:")
             items = [chksumRE.sub(' ', line).split() for line in lines]
             pairs = [item[0:2] for item in items]
             try:
@@ -1394,7 +1394,7 @@ def specFilename(opts, pkgName):
 
 def redefineMacro(name, value, maxLength=8000, initCount=0):
     exSpec = ""
-    value = re.sub("\s+", " ", value.strip())
+    value = re.sub(r"\s+", " ", value.strip())
     values = splitMacroLine(value, maxLength)
     if len(values) > 1:
         value = ""
@@ -1431,12 +1431,12 @@ class ReadOnlyDict(dict):
 
 class HeaderMatchingRegexps(object):
     def __init__(self):
-        self.REQUIRES_REGEXP = re.compile("^Requires: (.*)")
-        self.REMOTE_SOURCE_REGEXP = re.compile("^([Ss]ource[0-9]*): (.*:.*/.*)")
-        self.REMOTE_PATCH_REGEXP = re.compile("^[Pp]atch[0-9]*: (.*:.*/.*)")
-        self.LOCAL_SOURCE_REGEXP = re.compile("^([Ss]ource[0-9]*): (.*)")
-        self.LOCAL_PATCH_REGEXP = re.compile("^[Pp]atch[0-9]*: (.*)")
-        self.BUILD_REQUIRES_REGEXP = re.compile("^BuildRequires: (.*)")
+        self.REQUIRES_REGEXP = re.compile(r"^Requires: (.*)")
+        self.REMOTE_SOURCE_REGEXP = re.compile(r"^([Ss]ource[0-9]*): (.*:.*/.*)")
+        self.REMOTE_PATCH_REGEXP = re.compile(r"^[Pp]atch[0-9]*: (.*:.*/.*)")
+        self.LOCAL_SOURCE_REGEXP = re.compile(r"^([Ss]ource[0-9]*): (.*)")
+        self.LOCAL_PATCH_REGEXP = re.compile(r"^[Pp]atch[0-9]*: (.*)")
+        self.BUILD_REQUIRES_REGEXP = re.compile(r"^BuildRequires: (.*)")
 
 
 class PackageFactory(object):
@@ -1474,17 +1474,17 @@ class PackageFactory(object):
                                                "%preun": "",
                                                "%postun": "",
                                                "%files": ""})
-        self.__postprocessingRules = [(re.compile("%\{n\}"), "%{pkgname}"),
-                                      (re.compile("%\{v\}"), "%{pkgversion}"),
-                                      (re.compile("%\{i\}"), "%{pkginstroot}"),
-                                      (re.compile("%n$"), "%{pkgname}"),
-                                      (re.compile("%v$"), "%{pkgversion}"),
-                                      (re.compile("%i$"), "%{pkginstroot}"),
-                                      (re.compile("%n([^_A-Za-z0-9])"), "%{pkgname}\\1"),
-                                      (re.compile("%v([^_A-Za-z0-9])"), "%{pkgversion}\\1"),
-                                      (re.compile("%i([^_A-Za-z0-9])"), "%{pkginstroot}\\1"),
-                                      (re.compile("^Source:"), "Source0:"),
-                                      (re.compile("^Patch:"), "Patch0:")]
+        self.__postprocessingRules = [(re.compile(r"%\{n\}"), "%{pkgname}"),
+                                      (re.compile(r"%\{v\}"), "%{pkgversion}"),
+                                      (re.compile(r"%\{i\}"), "%{pkginstroot}"),
+                                      (re.compile(r"%n$"), "%{pkgname}"),
+                                      (re.compile(r"%v$"), "%{pkgversion}"),
+                                      (re.compile(r"%i$"), "%{pkginstroot}"),
+                                      (re.compile(r"%n([^_A-Za-z0-9])"), "%{pkgname}\\1"),
+                                      (re.compile(r"%v([^_A-Za-z0-9])"), "%{pkgversion}\\1"),
+                                      (re.compile(r"%i([^_A-Za-z0-9])"), "%{pkginstroot}\\1"),
+                                      (re.compile(r"^Source:"), "Source0:"),
+                                      (re.compile(r"^Patch:"), "Patch0:")]
         self.__basePackageHash = sha256(str([pickle.dumps(self),
                                              COMMANDS_SH,
                                              COMMANDS_CSH,
@@ -1714,16 +1714,16 @@ class MetaSpecSyntax(object):
     SUBPACKAGE = property(lambda self: self.__SUBPACKAGE)
 
     def __init__(self):
-        self.__SPEC_HEADER = re.compile("^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
-        self.__INCLUDE = re.compile("^## INCLUDE (.*)")
-        self.__IMPORT = re.compile("^## IMPORT (.*)")
-        self.__BUILDIF = re.compile("^## BUILDIF (.*)")
-        self.__REVISION = re.compile("^## REVISION (.*)")
+        self.__SPEC_HEADER = re.compile(r"^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
+        self.__INCLUDE = re.compile(r"^## INCLUDE (.*)")
+        self.__IMPORT = re.compile(r"^## IMPORT (.*)")
+        self.__BUILDIF = re.compile(r"^## BUILDIF (.*)")
+        self.__REVISION = re.compile(r"^## REVISION (.*)")
         self.__SUBPACKAGE = re.compile(r'^##\s+SUBPACKAGE\s+([\w+-]+)(\s+IF\s+(%[\w+-]+))?\s*$', re.M)
 
         commands = "|".join(COMMANDS_SH.keys()).strip("|").replace("+",
                                                                    "[+]")
-        initenvStr = "^## INITENV\s+(%s)\s+([^\s]*)\s+(.*)" % commands
+        initenvStr = r"^## INITENV\s+(%s)\s+([^\s]*)\s+(.*)" % commands
         self.__INITENV = re.compile(initenvStr)
 
 
@@ -1844,7 +1844,7 @@ class SourcesDownload(BuilderAction):
         return True
 
     def doExpectedResults(self):
-        remoteSourcesRE = re.compile(".*:.*/.*")
+        remoteSourcesRE = re.compile(r".*:.*/.*")
         self.files = []
         for source in self.pkg.sources:
             if remoteSourcesRE.match(source):
@@ -2468,7 +2468,7 @@ class Package(object):
         """
         currentSection = ''
         currentSubSection = ''
-        SECTION_MATCH = "(%s)[$\s]+(.*)" % "|".join(self.sections.keys()).strip('|')
+        SECTION_MATCH = r"(%s)[$\s]+(.*)" % "|".join(self.sections.keys()).strip('|')
         sectionRe = re.compile(SECTION_MATCH)
         for line in self.spec:
             match = sectionRe.match(line)
@@ -2568,7 +2568,7 @@ class Package(object):
             # for a, v in pkg.__dict__.items():
             #  print a,v
             checksumCalculator.addPkg(pkg)
-        remotefileRE = re.compile(".*:.*/.*")
+        remotefileRE = re.compile(r".*:.*/.*")
         for patch in self.patches:
             if remotefileRE.match(patch):
                 continue
@@ -2740,7 +2740,7 @@ class Package(object):
                     if saveScripts:
                         if section in ["%prep"] and self.options.useGitForPatches:
                             patchedContents = PATCH_SOURCE_MACROS
-                            xpatchRE = re.compile("^\s*%patch[0-9]*\s+.+$")
+                            xpatchRE = re.compile(r"^\s*%patch[0-9]*\s+.+$")
                             for l in sectionContents.split("\n"):
                                 if xpatchRE.match(l): l = "%{package_init_source}\n" + l + "\n%{package_commit_patch}"
                                 patchedContents += l + "\n"
@@ -2792,7 +2792,7 @@ class Package(object):
             raise MalformedSpec(self.tmpspec)
         log(output, DEBUG)
         # This allows us to build packages which have 'Description' as a part of their name.
-        description = re.split("Description\s*:", output, 1)[1]
+        description = re.split(r"Description\s*:", output, 1)[1]
         results = [line for line in description.split("\n")][1:]
         return (len(results) == 1 and results[0]) or results
 
@@ -2841,8 +2841,8 @@ class Package(object):
     def generateInitEnv(self):
         """ Parses the spec file and generates the code for init.sh/init.csh
         """
-        initSh = """cat <<\EOF_INIT_SH > %i/etc/profile.d/init.sh\n"""
-        initCsh = """cat <<\EOF_INIT_CSH > %i/etc/profile.d/init.csh\n"""
+        initSh = """cat <<\\EOF_INIT_SH > %i/etc/profile.d/init.sh\n"""
+        initCsh = """cat <<\\EOF_INIT_CSH > %i/etc/profile.d/init.csh\n"""
         if self.buildWithRunPath:
             initSh += RUNPATH_ENV['START_SH']
             initCsh += RUNPATH_ENV['START_CSH']
@@ -2944,7 +2944,7 @@ class Package(object):
         sourcesNumbers = {}
         has_checksum_source = False
         for line in popen(queryCommand).readlines():
-            line = re.sub("[\s]+", " ", line).strip("\n\t ")
+            line = re.sub(r"[\s]+", " ", line).strip("\n\t ")
             for rule, target in matchers:
                 match = rule.match(line)
                 if not match:
@@ -3270,7 +3270,7 @@ def parseOptions():
     uploadGroup.add_option("--upload-tmp-repository",
                            dest="uploadTmpRepository",
                            help="Name of temporary repository (only alphanumeric characters) to use during upload. Default=<username> (Deleted/recreated for each upload request)",
-                           default=re.sub("[^A-Za-z0-9]*", "", getuser()))
+                           default=re.sub(r"[^A-Za-z0-9]*", "", getuser()))
     uploadGroup.add_option("--link-parent-repository",
                           dest="linkParentRepository",
                           action="store_true",
@@ -3371,7 +3371,7 @@ def parseOptions():
     if "/." in opts.workDir:
         parser.error("Hidden directories not allowed as --work-dir path.")
 
-    if re.match(".*[\\\+[*$].*", opts.workDir):
+    if re.match(r".*[\\\+[*$].*", opts.workDir):
         parser.error("Please avoid '\\+[*$' in --work-dir path.")
 
     # If --tag is not provided via command line then tag will always match the
@@ -3544,7 +3544,7 @@ def getScriptlets(pkg, relocation, original):
     for sec in "pre", "post", "postun", "preun":
         scripts[sec] = 'RPM_INSTALL_PREFIX="%s"; export RPM_INSTALL_PREFIX\n' % relocation
         secEXP += sec + "|"
-    secPattern = re.compile("^(" + secEXP.strip("|") + ")install\s+scriptlet\s+")
+    secPattern = re.compile(r"^(" + secEXP.strip("|") + r")install\s+scriptlet\s+")
     for line in output.split("\n"):
         m = secPattern.match(line)
         if m:
@@ -3945,7 +3945,7 @@ def installPackage(pkg, scheduler):
     pkg_error = False
     if pkg.options.bootstrap:
         rpm_env = rpmEnvironmentScript
-        command = "%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
+        command = r"%s ; rpm  -qp --requires %s | cut -d\  -f1" % (rpm_env, pkg.rpmLocation())
         error, output = getstatusoutput(command)
         if error:
             scheduler.log(output)
@@ -4590,7 +4590,7 @@ def upload(opts, args, factory):
         "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
         "touch $MD5CACHE\n"
         "for h in %(includes)s ; do\n"
-        "  hi=$(echo $h | sed 's|^\(..\).*|\\1|')\n"
+        "  hi=$(echo $h | sed 's|^\\(..\\).*|\\1|')\n"
         "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
         "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
         "    rn=$(echo $r | sed 's|.*/||;s|.rpm$||')\n"
@@ -4632,7 +4632,7 @@ def upload(opts, args, factory):
                             uploadSum=uploadSum,
                             driverExt=driverExt,
                             BootstrapPackage=BootstrapPackage)
-    remoteSourceRE = re.compile(".*:.*/.*")
+    remoteSourceRE = re.compile(r".*:.*/.*")
     sources = ""
     for pkg in [pkg for pkg in fullPackageList if exists(pkg.rpmLocation())]:
         # FIXME: this should really parse the url to determine the output filename
