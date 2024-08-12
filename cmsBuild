@@ -3121,7 +3121,7 @@ def parseOptions():
                                     default="",
                                     help="Comma separated list of package names which should be taken from system e.g. make,cmake,autoconf")
     advancedBuildOptions.add_option("--build-without",
-                                    dest="disbleTools",
+                                    dest="disableTools",
                                     default="",
                                     help="Comma separated list of package names which should not be built e.g. cuda,rocm etc.")
     advancedBuildOptions.add_option("--ignore-compile-errors",
@@ -3314,8 +3314,8 @@ def parseOptions():
     parser.add_option_group(uploadGroup)
     parser.add_option_group(debugGroup)
     opts, args = parser.parse_args(None, None)
-    opts.useSystemTools = set(opts.useSystemTools.split(","))
-    opts.disbleTools = set(opts.disbleTools.split(","))
+    opts.useSystemTools = set([p for p in opts.useSystemTools.replace(" ","").split(",") if p])
+    opts.disableTools = set([p for p in opts.disableTools.replace(" ","").split(",") if p])
 
     if (not "-J" in opts.sshOptions) and (not "cern.ch" in socket.getfqdn()):
         opts.sshOptions = "%s -J %s@lxplus.cern.ch" % (opts.sshOptions, opts.uploadUser)
@@ -4221,7 +4221,7 @@ def build(opts, args, factory):
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
 
     for p in packages:
-      xdep = [dep for dep in opts.disbleTools if dep in p.fullDependencies]
+      xdep = [dep for dep in opts.disableTools if dep in p.fullDependencies]
       if xdep:
           log("Package %s depend on %s while you have used --build-without to build without these package." % (p.name, xdep))
           log("Please clean up your spec to not depend on %s packages." % xdep)
@@ -4927,7 +4927,7 @@ if __name__ == "__main__":
             opts.rpmQueryDefines += ' --define "use_system_gcc 1"'
         for pkg in opts.useSystemTools:
             opts.rpmQueryDefines += ' --define "use_system_%s 1"' % pkg.replace("-","_")
-        for pkg in opts.disbleTools:
+        for pkg in opts.disableTools:
             opts.rpmQueryDefines += ' --define "without_%s 1"' % pkg.replace("-","_")
         opts.rpmQueryDefines += ' --define "compilerv %s" --define "cmscompilerv %s" --define "cmsos %s"' % (
             opts.compilerVersion.replace(".",""),
