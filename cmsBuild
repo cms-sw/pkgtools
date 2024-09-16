@@ -29,6 +29,7 @@ from cmsdist_config import USE_COMPILER_VERSION, NO_VERSION_SUFFIX, NO_AUTO_RUNP
 try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
 import json
+import pprint
 
 urlRe = re.compile(r".*:.*/.*")
 urlAuthRe = re.compile(r'^(http(s|)://)([^:]+:[^@]+)@(.+)$')
@@ -4816,10 +4817,11 @@ def get_build_options(opts):
 def on_sigusr1(signum, stack):
     if scheduler:
         print("Running tasks: %s" % scheduler.jobs.keys())
-        with open(os.path.join(scriptdir, "jobs.json"), "w") as f:
-            json.dump(scheduler.jobs, f)
+        with open(os.path.join(scriptdir, "jobs.txt"), "w") as f:
+            dump = pprint.pformat(scheduler.jobs)
+            f.write(dump)
 
-        print("Dumped job details to file %s/jobs.json" % scriptdir)
+        print("Dumped job details to file %s/jobs.txt" % scriptdir)
 
 
 if __name__ == "__main__":
