@@ -4815,6 +4815,11 @@ def get_build_options(opts):
 def on_sigusr1(signum, stack):
     if scheduler:
         print("Running tasks: %s" % scheduler.runningJobs)
+        parallelJobs = [j for j in scheduler.pendingJobs if scheduler.jobs[j]["scheduler"] == "parallel"]
+        for taskId in parallelJobs:
+            pendingDeps = [dep for dep in scheduler.jobs[taskId]["deps"] if not dep in scheduler.doneJobs]
+            if pendingDeps:
+                print("Pending tasks: %s: %s" % (taskId, pendingDeps))
 
 
 if __name__ == "__main__":
