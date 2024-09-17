@@ -3847,9 +3847,12 @@ def downloadS3Credentials(scheduler):
         user = opts.uploadUser,
         server = opts.uploadServer,
         tempdir = opts.tempdir)
+    scheduler.log("Downloading S3Credentials.")
     (err, msg) = executeScript(opts, s3_cmd, True)
     if err:
         scheduler.log("Warning, unable to downlaod s3 credentials: %s" % msg)
+    else:
+        scheduler.log("Done downloading S3Credentials.")
     return
 
 def uploadStoreS3(rpmfilename, pkg, scheduler):
@@ -3860,11 +3863,13 @@ def uploadStoreS3(rpmfilename, pkg, scheduler):
        cred=join(opts.tempdir,"credentials.txt"),
        rpmfilename=rpmfilename,
        srcFile=join(abspath("RPMS/cache"), pkg.checksum, rpmfilename))
-   print("Running:",s3_cmd)
+   scheduler.log("Uploading to S3 store: store/%s" % rpmfilename)
    (err, msg) = executeScript(opts, s3_cmd, True)
    if err:
        scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (rpmfilename, msg))
-       return
+   else:
+       scheduler.log("Done uploading store/%s" % rpmfilename)
+   return
 
 def uploadStore(rpmfilename, pkg, scheduler):
     from socket import gethostname
