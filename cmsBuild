@@ -4823,6 +4823,14 @@ def on_sigusr1(signum, stack):
     if scheduler:
         print("Running tasks: %s" % scheduler.jobs.keys())
         with open(os.path.join(scriptdir, "jobs.txt"), "w") as f:
+            if stack:
+                f.write("Current stack\n")
+                depth = 20
+                while stack and (depth > 0):
+                    f.write(str(stack.f_code)+"\n")
+                    stack = stack.f_back
+                    depth -= 1
+                f.write("\n\nJobs\n")
             dump = pprint.pformat(scheduler.jobs)
             f.write(dump)
 
