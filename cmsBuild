@@ -4821,7 +4821,6 @@ def get_build_options(opts):
 
 def on_sigusr1(signum, stack):
     if scheduler:
-        print("Running tasks: %s" % scheduler.jobs.keys())
         with open(os.path.join(scriptdir, "jobs.txt"), "w") as f:
             if stack:
                 f.write("Current stack\n")
@@ -4832,10 +4831,16 @@ def on_sigusr1(signum, stack):
                     f.write(f'Frame {idx}: {function_name} at {filename}:{line_number}\n')
                     f.write(f'Locals: {frame.f_locals}\n')
                     f.write("---\n")
-                f.write("\n\nJobs\n")
+                f.write("\n\n")
+            f.write("Pending Jobs\n")
+            f.write(pprint.pformat(scheduler.runningJobs)
+            f.write("Done Jobs\n")
+            f.write(pprint.pformat(scheduler.doneJobs)
+            f.write("Broken Jobs\n")
+            f.write(pprint.pformat(scheduler.brokenJobs)
+            f.write("Jobs details\n")
             dump = pprint.pformat(scheduler.jobs)
             f.write(dump)
-
         print("Dumped job details to file %s/jobs.txt" % scriptdir)
 
 
