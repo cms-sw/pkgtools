@@ -62,7 +62,6 @@ package_provides = {}
 cmsdist_files = {}
 pgo_packages = []
 compiler_package_dependency = ["gcc-prerequisites"]
-package_store_downloads = {}
 scheduler = None
 scriptdir = ""
 
@@ -3687,8 +3686,7 @@ def downloadFromStore(pkg, scheduler):
     for p in pkg.subpackages + [pkg]:
         cachefile = abspath("RPMS/cache/%s/%s" % (p.checksum, p.rpmfilename))
         os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
-        package_store_downloads [p.rpmfilename] = 1
-        if opts.uploadPackageCache:
+        if opts.uploadPackageCache and (not opts.uploadPackageCacheS3):
             scheduler.parallel("download-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
             scheduler.reschedule()
     return True
@@ -3823,6 +3821,19 @@ def buildPackage(pkg, scheduler):
         return output
     scheduler.log("Build successful %s." % pkg.name)
     create_rpm_links()
+    if isPackageStoreUploadEnabled(pkg):
+        s3credentials = []
+        if pkg.options.uploadPackageCacheS3:
+            s3credentials += ["download-s3-credentials"]
+            scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
+        for p in pkg.subpackages + [pkg]:
+            uploadDependencies = s3credentials + ["install-%s" % p.pkgName()]
+            if pkg.options.uploadPackageCacheS3:
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
+            else:
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
+        scheduler.reschedule()
+    return
 
 
 def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=False):
@@ -4003,15 +4014,6 @@ def installPackage(pkg, scheduler):
     f.close()
     if pkg_error: raise RpmBuildFailed(pkg)
     scheduler.reschedule()
-    if not isPackageStoreUploadEnabled(pkg): return
-    for p in pkg.subpackages + [pkg]:
-        if not p.rpmfilename in package_store_downloads:
-            if pkg.options.uploadPackageCacheS3:
-                scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), ["download-s3-credentials"], uploadStoreS3, p.rpmfilename, p, scheduler)
-            else:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), [], uploadStore, p.rpmfilename, p, scheduler)
-            scheduler.reschedule()
     return
 
 
@@ -4185,6 +4187,7 @@ def checkPackageInCache(pkg, scheduler):
         scheduler.serial("install-%s" % subpkg.pkgName(), subinstallActionDependencies, installPackage, subpkg,
                          scheduler)
     scheduler.reschedule()
+    return
 
 
 # New version using the new scheduler.
