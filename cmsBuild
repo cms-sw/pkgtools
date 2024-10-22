@@ -4694,7 +4694,7 @@ def upload(opts, args, factory):
         tmpdir=tmpdir,
         **repoInfo)
     (err, msg) = executeScript(opts, upload, True)
-    if err: logAndDieOnError(err, "Error while uploading to remote repository.")
+    if err: logAndDieOnError(err, "Error while uploading to remote repository.\n"+msg)
 
     upload = format(
         "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s'\n",
@@ -4711,7 +4711,7 @@ def upload(opts, args, factory):
             log(
                 "Parallel upload session succeded before us. Starting uploading procedure from scratch. This will check again build area consistency.")
         else:
-            logAndDieOnError(err, "Error while uploading to remote repository.")
+            logAndDieOnError(err, "Error while uploading to remote repository.\n"+msg)
         return False
     log("Upload successfully finished to %s" % fullUploadRepo)
     return True
