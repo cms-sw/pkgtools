@@ -4829,19 +4829,19 @@ def get_build_options(opts):
 
 
 def on_sigusr1(signum, stack):
-    if scheduler:
-        with open(os.path.join(scriptdir, "jobs.txt"), "w") as f:
-            if stack:
-                f.write("Current stack\n")
-                import inspect
-                frames = inspect.getouterframes(stack)
-                for idx, frame_info in enumerate(frames):
-                    frame, filename, line_number, function_name, lines, index = frame_info
-                    f.write(f'Frame {idx}: {function_name} at {filename}:{line_number}\n')
-                    f.write("---\n")
-                f.write("\n\n")
+    with open(os.path.join(scriptdir, "jobs.txt"), "w") as f:
+        if stack:
+            f.write("Current stack\n")
+            import inspect
+            frames = inspect.getouterframes(stack)
+            for idx, frame_info in enumerate(frames):
+                frame, filename, line_number, function_name, lines, index = frame_info
+                f.write(f'Frame {idx}: {function_name} at {filename}:{line_number}\n')
+                f.write("---\n")
+            f.write("\n\n")
+        if scheduler:
             f.write(pprint.pformat(scheduler.__dict__))
-        print("Dumped job details to file %s/jobs.txt" % scriptdir)
+    print("Dumped job details to file %s/jobs.txt" % scriptdir)
 
 
 if __name__ == "__main__":
