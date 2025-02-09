@@ -4840,26 +4840,7 @@ def on_sigusr1(signum, stack):
                     f.write(f'Frame {idx}: {function_name} at {filename}:{line_number}\n')
                     f.write("---\n")
                 f.write("\n\n")
-            runningJobs = copy.deepcopy(scheduler.runningJobs)
-            doneJobs = copy.deepcopy(scheduler.doneJobs)
-            brokenJobs = copy.deepcopy(scheduler.brokenJobs)
-            jobs = {}
-            for job in scheduler.jobs.keys():
-                job_deps = scheduler.jobs[job]["deps"]
-                if job == 'final-job':
-                    job_deps = scheduler.finalJobDeps
-                deps = [d for d in job_deps if ((not d in doneJobs) and (not d in brokenJobs))]
-                if deps:
-                    jobs[job] = {"deps": deps}
-            f.write("\n==================================\nPending Jobs\n")
-            f.write(pprint.pformat(runningJobs))
-            f.write("\n==================================\nDone Jobs\n")
-            f.write(pprint.pformat(doneJobs))
-            f.write("\n==================================\nBroken Jobs\n")
-            f.write(pprint.pformat(brokenJobs))
-            f.write("\n==================================\nJobs details\n")
-            f.write(pprint.pformat(jobs))
-            f.write("\n")
+            f.write(pprint.pformat(scheduler.__dict_))
         print("Dumped job details to file %s/jobs.txt" % scriptdir)
 
 
