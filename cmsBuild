@@ -4840,7 +4840,7 @@ def on_sigusr1(signum, stack):
                     f.write(f'Frame {idx}: {function_name} at {filename}:{line_number}\n')
                     f.write("---\n")
                 f.write("\n\n")
-            f.write(pprint.pformat(scheduler.__dict_))
+            f.write(pprint.pformat(scheduler.__dict__))
         print("Dumped job details to file %s/jobs.txt" % scriptdir)
 
 
