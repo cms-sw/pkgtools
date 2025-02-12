@@ -3686,9 +3686,9 @@ def downloadFromStore(pkg, scheduler):
     for p in pkg.subpackages + [pkg]:
         cachefile = abspath("RPMS/cache/%s/%s" % (p.checksum, p.rpmfilename))
         os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
-        if opts.uploadPackageCache and (not opts.uploadPackageCacheS3):
-            scheduler.parallel("download-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
-            scheduler.reschedule()
+        #if opts.uploadPackageCache and (not opts.uploadPackageCacheS3):
+        #    scheduler.parallel("download-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
+        #    scheduler.reschedule()
     return True
 
 
