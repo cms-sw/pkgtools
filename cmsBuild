@@ -282,7 +282,7 @@ def install_reference(pkg):
     if error:
         log("Command:\n %(command)s failed with the following message: %(info)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, info)
-    provides = savePackageProvides(pkg.pkgName(), pkg.options, rpm_cmd=REF_CMSPKG_CMD, read=True)
+    provides = savePackageProvides(pkg.pkgName(), pkg.options, rpm_cmd=REF_CMSPKG_CMD, read=True, force=True)
     pkg_parts = pkg.pkgName().split("+", 2)
     args = {"cmsroot": pkg.options.workDir, "refroot": pkg.options.reference, "cmsplatf": pkg.options.architecture}
     args['pkgdir'] = join(pkg.options.architecture, *pkg_parts)
@@ -3836,9 +3836,9 @@ def buildPackage(pkg, scheduler):
     return
 
 
-def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=False):
+def savePackageProvides(pkg_name, options, rpm_pkg=None, rpm_cmd=None, read=False, force=False):
     provides_cache = join(options.workDir, "DEPS", options.architecture, "provides", pkg_name)
-    if not exists(provides_cache):
+    if (not exists(provides_cache)) or force:
         opt = "-q --provides "
         pkg2search = pkg_name
         if rpm_pkg:
@@ -3982,7 +3982,7 @@ def installPackage(pkg, scheduler):
                     "rpm_requires": [l for l in  output.split("\n") if not l.startswith('rpmlib(')]
                    }
         json.dump(req_data, open(join(requires_cache),"w"))
-        savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation())
+        savePackageProvides(pkg.pkgName(), pkg.options, pkg.rpmLocation(), force=True)
         checkDeps(pkg, req_data, scheduler)
         scheduler.log("Checking local path dependency for rpm package %s just build." % pkg.pkgName())
         localPaths = [l for l in req_data["rpm_requires"] if l.startswith(pkg.options.workDir)]
