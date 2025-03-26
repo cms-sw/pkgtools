@@ -3785,6 +3785,19 @@ def buildPackage(pkg, scheduler):
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
 
+    if isPackageStoreUploadEnabled(pkg):
+        s3credentials = []
+        if pkg.options.uploadPackageCacheS3:
+            s3credentials += ["download-s3-credentials"]
+            scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
+        for p in pkg.subpackages + [pkg]:
+            uploadDependencies = s3credentials + ["install-%s" % p.pkgName()]
+            if pkg.options.uploadPackageCacheS3:
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
+            else:
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
+        scheduler.reschedule()
+
     if opts.enableMonitor:
         from json import dump as jdump
         err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
@@ -3821,18 +3834,6 @@ def buildPackage(pkg, scheduler):
         return output
     scheduler.log("Build successful %s." % pkg.name)
     create_rpm_links()
-    if isPackageStoreUploadEnabled(pkg):
-        s3credentials = []
-        if pkg.options.uploadPackageCacheS3:
-            s3credentials += ["download-s3-credentials"]
-            scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
-        for p in pkg.subpackages + [pkg]:
-            uploadDependencies = s3credentials + ["install-%s" % p.pkgName()]
-            if pkg.options.uploadPackageCacheS3:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
-            else:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
-        scheduler.reschedule()
     return
 
 
