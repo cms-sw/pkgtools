@@ -3686,9 +3686,6 @@ def downloadFromStore(pkg, scheduler):
     for p in pkg.subpackages + [pkg]:
         cachefile = abspath("RPMS/cache/%s/%s" % (p.checksum, p.rpmfilename))
         os.rename(join(pkg.builddir, basename(p.rpmfilename)), cachefile)
-        #if opts.uploadPackageCache and (not opts.uploadPackageCacheS3):
-        #    scheduler.parallel("download-update-store-%s" % basename(p.rpmfilename), [], updateStoreUsage, p, p.rpmfilename, scheduler)
-        #    scheduler.reschedule()
     return True
 
 
@@ -3854,6 +3851,10 @@ def downloadS3Credentials(scheduler):
     return
 
 def uploadStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+   logfile = "%s/log" % pkg.builddir
+   if not exists(logfile):
+     scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
+     return
    upload_log = join(opts.tempdir,"s3upload-"+pkg.pkgName()+".log")
    s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d store/%(rpmfilename)s -c %(cred)s >>%(upload_log)s 2>&1",
        upload_log=upload_log,
@@ -3876,6 +3877,10 @@ def uploadStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60
    return
 
 def uploadStore(rpmfilename, pkg, scheduler):
+    logfile = "%s/log" % pkg.builddir
+    if not exists(logfile):
+      scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
+      return
     from socket import gethostname
     uploadFile=basename(rpmfilename)
     tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
@@ -4184,7 +4189,6 @@ def checkPackageInCache(pkg, scheduler):
                 scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
             else:
                 scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
-
     scheduler.reschedule()
     return
 
