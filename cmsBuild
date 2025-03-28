@@ -3595,6 +3595,8 @@ def installRpm(pkg, bootstrap, scheduler):
         scheduler.log("Failed to install RPM for %s" % pkg.name)
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
+    if pkg.name is "root":
+        raise RpmInstallFailed(pkg, "Testing force install failure for root")
     scheduler.log("Done installation via rpm for %s" % pkg.name)
 
 
