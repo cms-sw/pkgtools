@@ -3710,9 +3710,7 @@ def buildPackage(pkg, scheduler):
     scheduler.log("Creating directory %s if not existing." % pkg.builddir)
     if not exists(pkg.builddir):
         makedirs(pkg.builddir)
-    logfile = "%s/log" % pkg.builddir
 
-    scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
     optionsDict = {
         "topdir": abspath("."),
         "specdir": pkg.specdir,
@@ -3773,6 +3771,8 @@ def buildPackage(pkg, scheduler):
     if err:
         return "ERROR: unable to find working rpmbuild"
 
+    logfile = "%s/log" % pkg.builddir
+    scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
     rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; "\
                       "export _CMSBUILD_BUILD_ENV_=1; " \
                       "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
