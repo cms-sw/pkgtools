@@ -245,8 +245,13 @@ class Scheduler(object):
     self.finalJobDeps.append(taskId)
 
   def doSerial(self, taskId, deps, *commandSpec):
+    pendingDeps = [dep for dep in deps if not dep in self.doneJobs]
     brokenDeps = [dep for dep in deps if dep in self.brokenJobs]
     if brokenDeps:
+      if pendingDeps:
+        print("SMA: making job %s failed but it has some undone deps." % taskId, pendingDeps)
+        self.resultsQueue.put((threading.currentThread(), [self.doSerial, taskId, deps] + list(commandSpec)))
+        return
       transition(taskId, self.pendingJobs, self.brokenJobs)
       self.errors[taskId] = "The following dependencies could not complete:\n%s" % "\n".join(brokenDeps)
       # Remember to do the scheduling again!
