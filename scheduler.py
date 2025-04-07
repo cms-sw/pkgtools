@@ -247,7 +247,7 @@ class Scheduler(object):
   def doSerial(self, taskId, deps, *commandSpec):
     brokenDeps = [dep for dep in deps if dep in self.brokenJobs]
     if brokenDeps:
-      pendingDeps = [dep for dep in deps if (not dep in self.doneJobs) and (not in brokenDeps)]
+      pendingDeps = [dep for dep in deps if (not dep in self.doneJobs) and (not dep in brokenDeps)]
       if pendingDeps:
         print("SMA: making job %s failed but it has some undone deps." % taskId, pendingDeps)
         self.resultsQueue.put((threading.currentThread(), [self.doSerial, taskId, deps] + list(commandSpec)))
