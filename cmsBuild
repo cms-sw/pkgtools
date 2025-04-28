@@ -5010,7 +5010,7 @@ if __name__ == "__main__":
                 else:
                     macro += " 1"
                 if macro.startswith("archfirst "):
-                    if not macro.split(" ")[-1] in ["no", "0"]:
+                    if macro.split(" ")[-1].lower() in ["no", "0"]:
                         archFirst = False
                     else:
                         archFirst = True
