@@ -64,6 +64,7 @@ pgo_packages = []
 compiler_package_dependency = ["gcc-prerequisites"]
 scheduler = None
 scriptdir = ""
+archFirst = True
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -297,7 +298,7 @@ def install_reference(pkg):
     for l in provides:
         if ref_permission_error in l: continue
         spec.write("Provides: " + l + "\n")
-    spec.write("Obsoletes: %s\n" % pkg.pkgName())
+    spec.write("Obsoletes: %s < %s\n" % (pkg.pkgName(), pkg.rpmVersion))
     spec.write("Prefix: %s\n" % pkg.options.installDir)
     spec.write(REFERENCE_PACKAGE_POST % args)
     spec.close()
@@ -2391,18 +2392,21 @@ class Package(object):
         self.calculateChecksum()
         self.rewriteRequires()
         self.dumpSpec()
+        pkg_dir = join(self.cmsplatf, self.group, self.name, self.version)
+        if not archFirst:
+            pkg_dir = join(self.group, self.name, self.version, self.cmsplatf)
+        self.builddir = join(self.options.workDir, "BUILD", pkg_dir)
         prepareSaveSpec(self)
         saveSpec(self)
         result = self.rpmEvalStrings("%pkgrel",
                                      "%pkginstroot",
-                                     "%_builddir",
                                      "%_specdir",
                                      "%_rpmdir",
                                      "%_rpmfilename",
                                      "%_srpmfilename")
         assert (result)
         try:
-            [self.pkgrel, self.pkginstroot, self.builddir,
+            [self.pkgrel, self.pkginstroot,
              self.__specdir, self.rpmdir,
              self.rpmfilename, self.srpmfilename] = result
         except ValueError as e:
@@ -2724,8 +2728,9 @@ class Package(object):
         for dep in getPackages(self.fullDependencies): dep.dependentCounter += 1
 
     def dumpSpec(self, saveScripts=False):
+        spec_heaader = "\n".join([l + " < %(rpmVersion)s" if l.startswith("Obsoletes: ") else l for l in SPEC_HEADER.split("\n")])
         self.spec = "\n".join([self.specPreHeader,
-                               SPEC_HEADER % self.__dict__,
+                               spec_heaader % self.__dict__,
                                PKGFactory.preamble])
         if self.buildWithRunPath:
             rpath = "false"
@@ -2738,12 +2743,18 @@ class Package(object):
                 self.spec += "\n"+xtext
         for section in self.sections.keys():
             for subsection in self.sections[section].keys():
-                sectionContents = self.sections[section][subsection].strip("\n ")
+                xpatchRE = re.compile(r"^(.*%patch)([0-9]+)(\s+.+)$")
+                sectionContents = ""
+                for l in self.sections[section][subsection].strip("\n ").split("\n"):
+                    m = xpatchRE.match(l)
+                    if m: l = m.group(1) + " -P " + m.group(2) + m.group(3)
+                    sectionContents += l + "\n"
+                sectionContents = sectionContents.strip("\n ")
                 if sectionContents:
                     if saveScripts:
                         if section in ["%prep"] and self.options.useGitForPatches:
                             patchedContents = PATCH_SOURCE_MACROS
-                            xpatchRE = re.compile(r"^\s*%patch[0-9]*\s+.+$")
+                            xpatchRE = re.compile(r"^\s*%patch([0-9]+| -P [0-9]+)\s+.+$")
                             for l in sectionContents.split("\n"):
                                 if xpatchRE.match(l): l = "%{package_init_source}\n" + l + "\n%{package_commit_patch}"
                                 patchedContents += l + "\n"
@@ -2761,13 +2772,16 @@ class Package(object):
                                 rConf = '%{relocateConfig}'
                                 replicateStr = '%%{?AutoSetupDependenciesRelocate:%%AutoSetupDependenciesRelocate}\n%s' % rConf
                                 sectionContents = replicateStr.join(sectionContents.split(rConf,1))
-                        self.spec += "\n\n%s %s %s\n" % (section, subsection, PKGFactory.sectionOptions[section])
+                        sec_opt = PKGFactory.sectionOptions[section]
+                        if section == "%files" and sec_opt == "-f %_builddir/files": sec_opt = ""
+                        self.spec += "\n\n%s %s %s\n" % (section, subsection, sec_opt)
                         self.spec += sectionContents
-        self.spec = PKGFactory.postProcessSpec(self.spec)
-
         for subpackage in self.subpackages:
             subpackage.updateFromParent(self)
             self.spec += '\n\n' + subpackage.dumpSpecFragment()
+        if not "%changelog" in self.sections:
+            self.spec += '\n\n%changelog\n* Sat Apr 19 2025 smuzaffar - 1-1\n- Initial changelog\n'
+        self.spec = PKGFactory.postProcessSpec(self.spec)
 
     def __getTmpSpecName(self):
         # FIXME: make this static? Should not change over the whole period.
@@ -2918,9 +2932,10 @@ class Package(object):
         text = "" if (not oldSourcesNumbers) else getSourcesChecksum(self, oldSourcesNumbers)
         text += "\n".join([self.specPreHeader,
                           SPEC_HEADER % self.__dict__,
-                          PKGFactory.postProcessSpec(PKGFactory.preamble),
+                          PKGFactory.preamble,
                           "%%description",
-                          PKGFactory.postProcessSpec(self.sections[''][subpackage])])
+                          self.sections[''][subpackage]])
+        text = PKGFactory.postProcessSpec(text)
         spec.write(text)
         spec.close()
         deps = []
@@ -3564,7 +3579,7 @@ def installRpm(pkg, bootstrap, scheduler):
     output = ""
     command = "#No command"
     if bootstrap:
-        command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
+        command = "%s ; rpm -Uvh ${CMSPKG_RPM_OPTS} --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, pkg.rpmLocation())
         cmd_proc = subprocess.run(command, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
         error = cmd_proc.returncode
         output = cmd_proc.stdout.decode()
@@ -3758,6 +3773,7 @@ def buildPackage(pkg, scheduler):
     optionsDict["xtmpdir"] = join(pkg.builddir, 'cmsdist-tmp')
     optionsDict["rpmenv"] = rpmEnvironmentScript
     optionsDict["xenv"] = ""
+    optionsDict["_builddir"] = pkg.builddir
     if 'rust' in pkg.fullDependencies:
       optionsDict["xenv"] = "CARGO_HOME=%s/cargo_home" % optionsDict["tmpdir"]
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
@@ -3776,8 +3792,8 @@ def buildPackage(pkg, scheduler):
     rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; "\
                       "export _CMSBUILD_BUILD_ENV_=1; " \
                       "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
-                      "TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s rpmbuild %(nodeps)s --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
-                      " %(makeprocesses)s %(ignoreCompileErrors)s %(extraRpmDefines)s" \
+                      "TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
+                      " %(makeprocesses)s %(ignoreCompileErrors)s  --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
                       " %(specdir)s/spec >%(builddir)s/log 2>&1" % optionsDict
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
@@ -4985,12 +5001,20 @@ if __name__ == "__main__":
             opts.rpmQueryDefines += ' --define "package_vectorization %s"' % " ".join(opts.vectorization)
         else:
             opts.rpmQueryDefines += ' --define "package_vectorization %{nil}"'
+
+        archFirst = True
         if opts.rpmMacros:
             for macro in opts.rpmMacros:
                 if '=' in macro:
                     macro = macro.replace('=', ' ')
                 else:
                     macro += " 1"
+                if macro.startswith("archfirst "):
+                    if macro.split(" ")[-1].lower() in ["no", "0"]:
+                        archFirst = False
+                    else:
+                        archFirst = True
+                    continue
                 if macro.startswith("cms_debug_packages "):
                     for dbg in macro.split(" ",1)[-1].strip().split(","):
                         pkg = dbg.split("/")[0]
@@ -4998,6 +5022,8 @@ if __name__ == "__main__":
                         cms_debug_packages[pkg].add(dbg)
                 else:
                     opts.rpmQueryDefines += ' --define "%s"' % macro
+        opts.rpmQueryDefines += ' --define "archfirst %s"' % ("yes" if archFirst else "no")
+        opts.rpmQueryDefines += ' --define "cmsBuild_bootstrap %s"' % (1 if opts.bootstrap else 0)
 
         if opts.buildOptions:
             pkgOptions= get_build_options(opts)
