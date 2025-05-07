@@ -17,24 +17,25 @@ if [ ! -e "$REF/$PKG" ] ; then exit 0 ; fi
 mkdir -p "$DIR/$PKG"
 SCRAM_PROJECT=false
 if [ -d "$REF/$PKG/.SCRAM" ] ; then SCRAM_PROJECT=true ; fi
+rsync_cmd="rsync -a --no-group"
 for d in $(find "$REF/$PKG" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
   if [ "$d" = "etc" ] && [ -e "$REF/$PKG/etc/profile.d" ]  ; then
     mkdir "$DIR/$PKG/$d"
     for sd in $(find "$REF/$PKG/$d" -maxdepth 1 -mindepth 1 | sed 's|.*/||') ; do
       if [ "$sd" = "profile.d" ] && [ -e "$REF/$PKG/$d/$sd/init.sh" ] ; then
-        rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
+        $rsync_cmd "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
       elif [ "$sd" = "scram.d" ] ; then
-        rsync -a "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
+        $rsync_cmd "$REF/$PKG/$d/$sd/" "$DIR/$PKG/$d/$sd/"
       else
         ln -s "$REF/$PKG/$d/$sd" "$DIR/$PKG/$d/$sd"
       fi
     done
   elif [ "$d" = "tools" ] && [ -d "$REF/$PKG/$d/selected" ] ; then
-    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+    $rsync_cmd "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
   elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = ".SCRAM" ] ; then
-    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+    $rsync_cmd "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
   elif [ "$SCRAM_PROJECT" = "true" ] && [ "$d" = "config" ] ; then
-    rsync -a "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
+    $rsync_cmd "$REF/$PKG/$d/" "$DIR/$PKG/$d/"
   else
     ln -s $REF/$PKG/$d $DIR/$PKG/$d
   fi
