@@ -308,7 +308,7 @@ def install_reference(pkg):
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
     e, rpm_path = getstatusoutput("find %s -name '*.rpm'" % (tmp_path))
-    command = "%s ; rpm -Uvh --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, rpm_path)
+    command = "%s ; rpm -Uvh ${CMSPKG_RPM_OPTS} --prefix %s %s" % (rpmEnvironmentScript, pkg.options.workDir, rpm_path)
     error, output = getstatusoutput(command)
     if error:
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
