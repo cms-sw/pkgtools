@@ -3794,7 +3794,7 @@ def buildPackage(pkg, scheduler):
                       "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
                       "TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
                       " %(makeprocesses)s %(ignoreCompileErrors)s  --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
-                      " %(specdir)s/spec >%(builddir)s/log 2>&1 ;" \
+                      " %(specdir)s/spec >%(builddir)s/log 2>&1 && " \
                       " rm -rf %(buildRoot)s" % optionsDict
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
