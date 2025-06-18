@@ -681,6 +681,8 @@ def downloadPip(source, dest, options):
                     pack = spSrc[i + 1]
                     i = i + 1
                 else:
+                    if "no-binary" in spSrc[i]:
+                        spSrc[i] = re.sub(',arch=[a-z0-9_]+','',spSrc[i])
                     pip_opts = pip_opts + ' ' + spSrc[i]
                     if "no-binary" in spSrc[i] and "all" not in spSrc[i]:
                         isSourceDownload=False #not totally robust - but basically use pip if source is overridden
