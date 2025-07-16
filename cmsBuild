@@ -141,6 +141,32 @@ def isDefaultRevision(rev):
     return False
 
 
+# In order to not change the hash of all packages, we have this function
+# which can re-write the specs. For example adding %i/lib64 in to
+# library path if not already added
+def patchSpecContents(sectionContents):
+    found_EOF_INIT_SH = False
+    found_lib64 = False
+    new_Cont = []
+    for l in sectionContents.split("\n"):
+        new_Cont.append(l)
+        if found_lib64:
+            continue
+        if "EOF_INIT_SH" in l and l.endswith("/etc/profile.d/init.sh"):
+            found_EOF_INIT_SH = True
+            continue
+        if not found_EOF_INIT_SH:
+            continue
+        if "/lib64 ] || " in l:
+            found_lib64 = True
+            continue
+        if l == "EOF_INIT_SH":
+            new_Cont[-1] = '[ ! -d %i/lib64 ] || export %{dynamic_path_var}="%i/lib64${%{dynamic_path_var}:+:$%{dynamic_path_var}}";'
+            new_Cont.append(l)
+            found_lib64 = True
+    return "\n".join(new_Cont)
+
+
 # We have our own version rather than using the one from os
 # because the latter does not work seem to be thread safe.
 def makedirs(path):
@@ -2765,6 +2791,8 @@ class Package(object):
                             secScript = "cmsdist-%s.sh" % section[1:]
                             sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (
                                 secScript, secScript, sectionContents)
+                        if section in ["%install"]:
+                            sectionContents = patchSpecContents(sectionContents)
                         if self.options.reference and (section in ["%install"]):
                             sectionContents += "\n%{relocateReference}\n"
                         if not self.noAutoDependency:
