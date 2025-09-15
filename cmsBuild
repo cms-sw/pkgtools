@@ -352,11 +352,11 @@ def downloadUrllib2(source, destDir, options, cmscache=False):
             source = m.group(1)+m.group(4)
             headers['Authorization'] = "Basic %s" % base64.b64encode(m.group(3))
         req = Request(source, headers=headers)
-        s = urlopen(req)
+        s = urlopen(req, timeout = 300)
         tmpfile = "%s.%f.tmp" % (dest, time())
         f = open(tmpfile, "wb")
         # Read in blocks to avoid using too much memory.
-        block_sz = 8192 * 16
+        block_sz = 1024 * 1024 * 8
         while True:
             buffer = s.read(block_sz)
             if not buffer:
