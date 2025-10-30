@@ -677,7 +677,7 @@ def downloadUserCommand(source, dest, options):
 
 def downloadPip(source, dest, options):
     # Valid PIP URL formats are
-    # pip://package/version?[pip_options=downloadOptions&][pip=pip_command&][pip_package=package&]output=/tarbalname
+    # pip://package/version?[pip_options=downloadOptions&][pip=pip_command&][download_wheel=1&][pip_package=package&]output=/tarbalname
     # pip://package/version/tarbalname
     url_parts = source.split("pip://", 1)[1].split("?", 1)
     opts = []
@@ -685,6 +685,7 @@ def downloadPip(source, dest, options):
     pkg = url_parts[0].split("/")
     pack = pkg[0].strip()
     tar_names = [pack.replace("-", "_"), pack] if '-' in pack else [pack]
+    if "download_wheel=1" in opts: tar_names = []
     for tar_name in tar_names:
       pypi_file = '%s-%s.tar.gz' % (tar_name, pkg[1].strip())
       pypi_url = 'https://pypi.io/packages/source/%s/%s/%s' % (pack[0], pack, pypi_file)
