@@ -3830,6 +3830,7 @@ def buildPackage(pkg, scheduler):
                       " rm -rf %(buildRoot)s" % optionsDict
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
+    build_opts = {}
     if opts.enableMonitor:
         from json import dump as jdump
         err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
@@ -3839,13 +3840,14 @@ def buildPackage(pkg, scheduler):
                       "architecture": opts.architecture, "cmsdist": cmsdist_branch, "name": pkg.name,
                       "realversion": pkg.realVersion, "version": pkg.version, "checksum": pkg.checksum,
                       "hostname": hname}
-        with open(pkg.builddir + "/opts.json", "w") as bopts_file:
-            jdump(build_opts, bopts_file)
-
         error, output = run_monitor_on_command(rpmbuildCommand, "%s/%s.json" % (pkg.builddir, pkg.name))
     else:
         error, output = getstatusoutput(rpmbuildCommand)
 
+    if opts.enableMonitor:
+        build_opts["exit_code"] = error
+        with open(pkg.builddir + "/opts.json", "w") as bopts_file:
+            jdump(build_opts, bopts_file)
     if error:
         if not exists(logfile):
             return "Error happened before any log output.\n%s" % output
