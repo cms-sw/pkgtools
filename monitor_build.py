@@ -4,7 +4,12 @@ import psutil
 from json import dump as json_dump
 from time import time, sleep
 
+# Sampling interval in seconds
+SAMPLE_INTERVAL = 1.0
+cpu_initialized = set()
+
 def update_monitor_stats(proc):
+    global cpu_initialized
     children = []
     try: children = proc.children(recursive=True)
     except: return {}
@@ -12,21 +17,44 @@ def update_monitor_stats(proc):
     clds = len(children)
     if clds==0: return stats
     stats['processes'] = clds
-    for cld in children:
-        try:
-            cld.cpu_percent(interval=None)
-            sleep(0.1)
-            stats['cpu'] += int(cld.cpu_percent(interval=None))
-            stats['num_fds'] += cld.num_fds()
-            stats['num_threads'] += cld.num_threads()
-            mem = None
+
+    # Step 1: Initialize CPU counters for new PIDs
+    current_pids = set()
+    for p in children:
+        pid = p.pid
+        current_pids.add(pid)
+        if pid not in cpu_initialized:
             try:
-                mem   = cld.memory_full_info()
-                for a in ["uss", "pss"]: stats[a]+=getattr(mem,a)
+                p.cpu_percent(interval=None)
+                cpu_initialized.add(pid)
             except:
-                mem   = cld.memory_info()
-            for a in ["rss", "vms", "shared", "data"]: stats[a]+=getattr(mem,a)
-        except: pass
+                continue
+
+    # Step 2: Sleep once to allow CPU measurement
+    sleep(SAMPLE_INTERVAL)
+
+    # Step 3: Collect CPU%, memory, threads, FDs
+    for p in children:
+        try:
+            stats["cpu"] += p.cpu_percent(interval=None)
+            try:
+                mem = p.memory_full_info()
+                stats["uss"] += getattr(mem, "uss", 0)
+                stats["pss"] += getattr(mem, "pss", 0)
+            except:
+                mem = p.memory_info()
+            for a in ["rss", "vms", "shared", "data"]:
+                stats[a] += getattr(mem, a)
+            stats["num_threads"] += p.num_threads()
+            try:
+                stats["num_fds"] += p.num_fds()
+            except:
+                pass
+        except:
+            continue
+
+    # Step 4: Cleanup exited PIDs
+    cpu_initialized.intersection_update(current_pids)
     return stats
 
 def monitor_stats(p_id, stats_file_name):
@@ -35,10 +63,11 @@ def monitor_stats(p_id, stats_file_name):
     data = []
     while p.is_running():
         stats = update_monitor_stats(p)
-        if not stats: continue
+        if not stats:
+            sleep(SAMPLE_INTERVAL)
+            continue
         stats['time'] = int(time()-stime)
         data.append(stats)
-        sleep(1.0)
     with open(stats_file_name, "w") as sf:
         json_dump(data, sf)
     return
