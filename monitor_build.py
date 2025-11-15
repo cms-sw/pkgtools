@@ -36,7 +36,7 @@ def update_monitor_stats(proc):
     # Step 3: Collect CPU%, memory, threads, FDs
     for p in children:
         try:
-            stats["cpu"] += p.cpu_percent(interval=None)
+            stats["cpu"] += int(p.cpu_percent(interval=None))
             try:
                 mem = p.memory_full_info()
                 stats["uss"] += getattr(mem, "uss", 0)
