@@ -37,13 +37,13 @@ class ResourceManager(object):
                     self.machineResources[prm] -= ex_stats[prm]
                 externals_ordered.append(ex_stats["name"])
                 self.allocated[ex_stats["name"]] = ex_stats
-                self.scheduler.log("Allocating resouces %s" % ex_stats)
+                self.scheduler.log("Allocating resources %s" % ex_stats)
                 count-=1
                 if count<=0:
                   break
             elif self.highestPriortyOnly:
               break
-        self.scheduler.log("Available resouces %s" % self.machineResources)
+        self.scheduler.log("Available resources %s" % self.machineResources)
         return externals_ordered
 
     def releaseResourcesForExternal(self, external):
