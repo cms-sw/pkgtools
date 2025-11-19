@@ -2427,6 +2427,7 @@ class Package(object):
             pkg_dir = join(self.group, self.name, self.version, self.cmsplatf)
         self.builddir = join(self.options.workDir, "BUILD", pkg_dir)
         prepareSaveSpec(self)
+        saveSpec(self, forPackaging=True)
         saveSpec(self)
         result = self.rpmEvalStrings("%pkgrel",
                                      "%pkginstroot",
@@ -2757,7 +2758,7 @@ class Package(object):
     def updateDependentCount(self):
         for dep in getPackages(self.fullDependencies): dep.dependentCounter += 1
 
-    def dumpSpec(self, saveScripts=False):
+    def dumpSpec(self, saveScripts=False, forPackahing=False):
         spec_heaader = "\n".join([l + " < %(rpmVersion)s" if l.startswith("Obsoletes: ") else l for l in SPEC_HEADER.split("\n")])
         self.spec = "\n".join([self.specPreHeader,
                                spec_heaader % self.__dict__,
@@ -2772,6 +2773,8 @@ class Package(object):
             if xtext:
                 self.spec += "\n"+xtext
         for section in self.sections.keys():
+            if forPackahing and section in ["%prep", "%build", "%install"]:
+                continue
             for subsection in self.sections[section].keys():
                 xpatchRE = re.compile(r"^(.*%patch)([0-9]+)(\s+.+)$")
                 sectionContents = ""
@@ -2857,6 +2860,9 @@ class Package(object):
     def specFilename(self):
         return join(self.specdir, "spec")
 
+    def finalSpecFilenameForPackaging(self):
+        return join(self.options.workDir, self.options.tempDirPrefix, "packaging-%s.spec" % self.name)
+
     def finalSpecFilename(self):
         return join(abspath("SPECS"), self.pkgdir, "spec")
 
@@ -2919,6 +2925,10 @@ class Package(object):
 
     def getFinalSpec(self):
         self.dumpSpec(saveScripts=True)
+        return self.spec
+
+    def getFinalSpecForPackaging(self):
+        self.dumpSpec(saveScripts=True, forPackahing=True)
         return self.spec
 
     def __hash__(self):
@@ -3485,10 +3495,12 @@ def prepareSaveSpec(p):
         if not exists(directory): makedirs(directory)
 
 
-def saveSpec(p):
-    f = open(p.finalSpecFilename(), 'w')
+def saveSpec(pkg, forPackaging=False):
+    spec = pkg.getFinalSpecForPackaging() if forPackaging else pkg.getFinalSpec()
+    outFile = pkg.finalSpecFilenameForPackaging() if forPackaging else pkg.finalSpecFilename()
+    f = open(outFile, 'w')
     # Removes the Requires: and BuildRequires:
-    for l in p.getFinalSpec().split("\n"):
+    for l in spec.split("\n"):
         if ("+" not in l) and (("Requires: " in l) or ("BuildRequires: " in l)): continue
         f.write(l+"\n")
     # Fix for RPM 4.4.: We need to add something at the end of the spec file otherwise
@@ -3736,7 +3748,15 @@ def downloadFromStore(pkg, scheduler):
     return True
 
 
-def buildPackage(pkg, scheduler):
+def checkRPMBuild():
+    err, out = getstatusoutput("%s ; rpmbuild --version" % rpmEnvironmentScript)
+    if err:
+        return "ERROR: unable to find working rpmbuild\n%s" % out
+    scheduler.log("RPM Version check done: %s" % out)
+    return
+
+
+def buildPackage(pkg, scheduler, index, actions):
     """ This helper function is responsible for building/installing a given spec and it's associated rpm.
       What it does is the following (TODO):
       * Checks if the rpm is already installed in the RPM DB. If yes, exits.
@@ -3754,10 +3774,6 @@ def buildPackage(pkg, scheduler):
             pkg.name, pkg.parent.name))
         return
 
-    scheduler.log("Creating directory %s if not existing." % pkg.builddir)
-    if not exists(pkg.builddir):
-        makedirs(pkg.builddir)
-
     optionsDict = {
         "topdir": abspath("."),
         "specdir": pkg.specdir,
@@ -3771,10 +3787,14 @@ def buildPackage(pkg, scheduler):
     finalRpmCacheDir = dirname(join(abspath("RPMS"), pkg.rpmfilename))
     srpmsCacheDir = join(abspath("SRPMS/cache/%s" % pkg.checksum))
 
-    missingDirs = [d for d in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir]
+    if index == 0:
+        missingDirs = [d for d in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir]
                    if not exists(d)]
-    for directory in missingDirs:
-        makedirs(directory)
+        scheduler.log("Creating directory %s if not existing." % pkg.builddir)
+        if not exists(pkg.builddir):
+            makedirs(pkg.builddir)
+        for directory in missingDirs:
+            makedirs(directory)
 
     finalRpmFilename = join(abspath("RPMS"), pkg.rpmfilename)
     uniqueRpmFilename = join(abspath("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename)
@@ -3789,12 +3809,14 @@ def buildPackage(pkg, scheduler):
             uniqueSubFilename = join(abspath("RPMS/cache/%s" % subpackage.checksum), subpackage.rpmfilename)
             symlink(uniqueSubFilename, finalSubFilename)
 
-    if isPackageStoreEnabled(pkg):
+    if isPackageStoreEnabled(pkg) and (index == 0):
         scheduler.log("ObjectStore: Checking package store for %s." % pkg.pkgName())
         if downloadFromStore(pkg, scheduler):
             scheduler.log("ObjectStore: Reused package %s from store." % pkg.pkgName())
             create_rpm_links()
             scheduler.log("Build successful %s." % pkg.pkgName())
+            for idx in range(index+1, len(actions)):
+                scheduler.forceDone(actions[idx])
             return
 
     if pkg.options.compilingProcesses:
@@ -3806,6 +3828,7 @@ def buildPackage(pkg, scheduler):
     optionsDict["rpmenv"] = rpmEnvironmentScript
     optionsDict["xenv"] = ""
     optionsDict["_builddir"] = pkg.builddir
+    optionsDict["spec"] = "%s/spec" % pkg.specdir
     if 'rust' in pkg.fullDependencies:
       optionsDict["xenv"] = "CARGO_HOME=%s/cargo_home" % optionsDict["tmpdir"]
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
@@ -3814,20 +3837,30 @@ def buildPackage(pkg, scheduler):
     if not pkg.options.bootstrap:
         optionsDict["nodeps"] = "--nodeps"
 
-    # FIXME: should be done only once!
-    err, out = getstatusoutput("%s ; rpmbuild --version" % rpmEnvironmentScript)
-    if err:
-        return "ERROR: unable to find working rpmbuild"
-
     logfile = "%s/log" % pkg.builddir
-    scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
-    rpmbuildCommand = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; "\
-                      "export _CMSBUILD_BUILD_ENV_=1; " \
-                      "mkdir -p %(xtmpdir)s; %(rpmenv)s ;" \
-                      "TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s -ba --define '_topdir %(topdir)s'" \
-                      " %(makeprocesses)s %(ignoreCompileErrors)s  --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
-                      " %(specdir)s/spec >%(builddir)s/log 2>&1 && " \
-                      " rm -rf %(buildRoot)s" % optionsDict
+    optionsDict["logfile"] = logfile
+    last_action = (index == len(actions)-1)
+    action_name = actions[index].replace("-%s" % pkg.pkgName(), "")[6:]
+    scheduler.log("Building %s(%s). Log can be found in %s." % (pkg.name, action_name, logfile))
+    if last_action:
+         optionsDict["spec"] = self.finalSpecFilenameForPackaging()
+        self.finalSpecFilenameForPackaging()
+        scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
+
+    rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit", "-bs --short-circuit", "-bb"]
+    optionsDict["rpmbuild_stage"] = rpmbuild_stages[index]
+    rpmbuildCommand = "export _CMSBUILD_BUILD_ENV_=1; %(rpmenv)s;" \
+                       " TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s" \
+                       " rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s %(rpmbuild_stage)s" \
+                       " --define '_topdir %(topdir)s' %(makeprocesses)s %(ignoreCompileErrors)s" \
+                       " --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
+                       " %(spec)s >>%(logfile)s 2>&1" % optionsDict
+    if index == 0:
+        pre_cmd = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; " \
+                  "mkdir -p %(xtmpdir)s; " % optionsDict
+        rpmbuildCommand = pre_cmd + rpmbuildCommand
+    if last_action:
+        rpmbuildCommand += " && rm -rf %(buildRoot)s" % optionsDict
     rpmbuildCommand = rpmbuildCommand.strip()
     scheduler.log(rpmbuildCommand)
     build_opts = {}
@@ -3840,11 +3873,15 @@ def buildPackage(pkg, scheduler):
                       "architecture": opts.architecture, "cmsdist": cmsdist_branch, "name": pkg.name,
                       "realversion": pkg.realVersion, "version": pkg.version, "checksum": pkg.checksum,
                       "hostname": hname}
-        error, output = run_monitor_on_command(rpmbuildCommand, "%s/%s.json" % (pkg.builddir, pkg.name))
+
+        monitor_file_suffix = "-%s" % action_name
+        if monitor_file_suffix == "-build":
+            monitor_file_suffix = ""
+        error, output = run_monitor_on_command(rpmbuildCommand, "%s/%s%s.json" % (pkg.builddir, pkg.name, monitor_file_suffix))
     else:
         error, output = getstatusoutput(rpmbuildCommand)
 
-    if opts.enableMonitor:
+    if opts.enableMonitor and last_action:
         build_opts["exit_code"] = error
         with open(pkg.builddir + "/opts.json", "w") as bopts_file:
             jdump(build_opts, bopts_file)
@@ -3854,9 +3891,9 @@ def buildPackage(pkg, scheduler):
         logLines = open(logfile).readlines()
         return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
             pkg.name, logfile, "".join(logLines[-20:]))
-    if opts.deleteBuildDirectory:
+    if opts.deleteBuildDirectory and last_action:
       optionsDict["pkgname"] = pkg.name
-      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s.json opts.json" % pkg.name if opts.enableMonitor else "")
+      optionsDict["logs"] = "log %s %s" % (pkg.buildLogsToKeep , "%s*.json opts.json" % pkg.name if opts.enableMonitor else "")
       cmd = "rm -rf %(tmpdir)s/%(pkgname)s-logs && " \
             "mkdir %(tmpdir)s/%(pkgname)s-logs && " \
             "for log in %(logs)s ; do mv %(builddir)s/$log %(tmpdir)s/%(pkgname)s-logs/ || true; done ; " \
@@ -3866,8 +3903,10 @@ def buildPackage(pkg, scheduler):
       e, o = getstatusoutput(cmd)
     if output:
         return output
-    scheduler.log("Build successful %s." % pkg.name)
-    create_rpm_links()
+
+    if last_action:
+        create_rpm_links()
+    scheduler.log("Build successful %s(%s)." % (pkg.name, action_name))
     return
 
 
@@ -4201,7 +4240,10 @@ def checkPackageInCache(pkg, scheduler):
         dep_pkg = [p.pkgName() for p in getPackages(pkg.fullDependencies) if p.name == d][0]
         if (not dep_pkg in rpm_db_cache) and (not "install-"+dep_pkg in fetchDependencies):
             fetchDependencies += ["install-" + dep_pkg]
-    buildActionDependencies = []
+    check_rpm_task = "check-working-rpmbuild"
+    buildActionDependencies = [check_rpm_task]
+    if not check_rpm_task in scheduler.jobs:
+        scheduler.serial(check_rpm_task, [], checkRPMBuild)
     pkgSources = pkg.sources + pkg.patches
     if pkgSources:
         urls = [url for url in pkgSources if urlRe.match(url)]
@@ -4220,10 +4262,13 @@ def checkPackageInCache(pkg, scheduler):
     for p in getPackages(pkg.fullDependencies):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
-    installActionDependencies = ["build-%s" % pkgName]
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
-    scheduler.parallel("build-%s" % pkgName, buildActionDependencies, buildPackage, pkg, scheduler)
-    scheduler.serial("install-%s" % pkgName, installActionDependencies, installPackage, pkg, scheduler)
+    actions = []
+    for action in ["build-prep", "build-build", "build-install", "build-srpm", "build-rpms"]:
+        actions.append("%s-%s" % (action, pkgName))
+    for idx in range(len(actions)):
+        scheduler.parallel(actions[idx], buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
+    scheduler.serial("install-%s" % pkgName, [actions[-1]], installPackage, pkg, scheduler)
     # Install sub-packages too if any
     subinstallActionDependencies = ["install-%s" % pkgName]
     for subpkg in pkg.subpackages:
