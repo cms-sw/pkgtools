@@ -3843,8 +3843,7 @@ def buildPackage(pkg, scheduler, index, actions):
     action_name = actions[index].replace("-%s" % pkg.pkgName(), "")[6:]
     scheduler.log("Building %s(%s). Log can be found in %s." % (pkg.name, action_name, logfile))
     if last_action:
-         optionsDict["spec"] = self.finalSpecFilenameForPackaging()
-        self.finalSpecFilenameForPackaging()
+        optionsDict["spec"] = pkg.finalSpecFilenameForPackaging()
         scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
 
     rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit", "-bs --short-circuit", "-bb"]
