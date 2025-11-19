@@ -16,10 +16,11 @@ class ResourceManager(object):
             stats = {"name": ext_full}
             ext = ext_full.split('+')[1]
             ext_items = ext_full.split("-")
-            build_type = ext_items[1] if ext_items[1] in ["prep", "build", "install", "srpm", "rpms"] else ""
-            pkg_stats = self.esStats[build_type]["packages"] if build_type else self.esStats["packages"]
+            build_type = ext_items[1] if ext_items[1] in ["prep", "build", "install", "srpm", "rpms"] else "build"
+            pkg_stats = self.esStats["packages"][build_type]
             if ext not in pkg_stats:
                 idx = -1
+                ext = "%s:%s" % (build_type, ext)
                 for exp in self.esStats["known"]:
                     if re.match(exp[0], ext):
                         idx = exp[1]
