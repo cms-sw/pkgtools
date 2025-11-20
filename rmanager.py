@@ -15,8 +15,12 @@ class ResourceManager(object):
         for ext_full in externalsList:
             stats = {"name": ext_full}
             ext = ext_full.split('+')[1]
-            if ext not in self.esStats["packages"]:
+            ext_items = ext_full.split("-")
+            build_type = ext_items[1] if ext_items[1] in ["prep", "build", "install", "srpm", "rpms"] else "build"
+            pkg_stats = self.esStats["packages"][build_type]
+            if ext not in pkg_stats:
                 idx = -1
+                ext = "%s:%s" % (build_type, ext)
                 for exp in self.esStats["known"]:
                     if re.match(exp[0], ext):
                         idx = exp[1]
@@ -26,7 +30,7 @@ class ResourceManager(object):
                 self.scheduler.log("New external found, creating default entry %s" % stats)
             else:
                 for k in self.esStats["defaults"]:
-                    stats[k] = self.esStats["packages"][ext][k]
+                    stats[k] = pkg_stats[ext][k]
             externals_to_run.append(stats)
         # first order them by metric and then run over to alloc resources
         externalsList_sorted = [ext for ext in sorted(externals_to_run, key=lambda x: tuple(x[k] for k in self.priorityList), reverse=True)]
