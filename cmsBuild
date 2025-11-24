@@ -4267,7 +4267,7 @@ def checkPackageInCache(pkg, scheduler):
         actions.append("%s-%s" % (action, pkgName))
     for idx in range(len(actions)):
         scheduler.parallel(actions[idx], buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
-    scheduler.serial("install-%s" % pkgName, [actions[-1]], installPackage, pkg, scheduler)
+    scheduler.serial("install-%s" % pkgName, actions, installPackage, pkg, scheduler)
     # Install sub-packages too if any
     subinstallActionDependencies = ["install-%s" % pkgName]
     for subpkg in pkg.subpackages:
