@@ -17,7 +17,7 @@ class ResourceManager(object):
             ext = ext_full.split('+')[1]
             ext_items = ext_full.split("-")
             build_type = ext_items[1] if ext_items[1] in ["prep", "build", "install", "srpm", "rpms"] else "build"
-            pkg_stats = self.esStats["packages"][build_type]
+            pkg_stats = self.esStats["packages"].get(build_type, {})
             if ext not in pkg_stats:
                 idx = -1
                 ext = "%s:%s" % (build_type, ext)
@@ -47,7 +47,9 @@ class ResourceManager(object):
                   break
             elif self.highestPriortyOnly:
               break
-        self.scheduler.log("Available resources %s" % self.machineResources)
+        if externals_ordered:
+            self.scheduler.log("Available resources %s" % self.machineResources)
+            self.scheduler.log("Buildable tasks %s: %s" % (len(externals_ordered), ",".join(externals_ordered)))
         return externals_ordered
 
     def releaseResourcesForExternal(self, external):
