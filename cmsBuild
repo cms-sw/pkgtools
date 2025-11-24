@@ -3815,7 +3815,7 @@ def buildPackage(pkg, scheduler, index, actions):
             scheduler.log("ObjectStore: Reused package %s from store." % pkg.pkgName())
             create_rpm_links()
             scheduler.log("Build successful %s." % pkg.pkgName())
-            for idx in range(index+1, len(actions)):
+            for idx in range(len(actions)-1, 0, -1):
                 scheduler.forceDone(actions[idx])
             return
 
