@@ -1440,6 +1440,20 @@ def redefineMacro(name, value, maxLength=8000, initCount=0):
         exSpec += subexSpec
     return (exSpec, value)
 
+def get_generated_packages(pkgs, cmsdist, pkgs_dir, obj):
+    py_dir = join(cmsdist, pkgs_dir)
+    py_package = join(py_dir, "cmsdist_packages.py")
+    if not exists(py_package):
+        return None
+    sys.path.insert(0, py_dir)
+    pkg = __import__("cmsdist_packages")
+    try:
+        pkg.packages(pkgs, obj)
+    except TypeError as e:
+        pkg.packages(pkgs)
+    sys.modules.pop('cmsdist_packages')
+    sys.path.pop(0)
+    return pkg
 
 def splitMacroLine(value, maxLength=8000):
     nvalue = [value]
@@ -1575,26 +1589,16 @@ class PackageFactory(object):
     def updateVirtualPackages(self, cmsdist):
         global pgo_packages
         pkgs = {}
-        virtual_pkd_dirs = []
-        for odir in ["vectorization", "pgo"]:
-            if exists(join(cmsdist,odir,"cmsdist_packages.py")):
-                virtual_pkd_dirs.append(odir)
+        virtual_pkd_dirs = ["vectorization", "pgo"]
         all_virtual_pkd_dirs = [x.split(os.sep)[-2] for x in  glob(join(cmsdist,"*","cmsdist_packages.py"))]
         for vp in virtual_pkd_dirs + [x for x in all_virtual_pkd_dirs if not x in virtual_pkd_dirs]:
             if (vp=="vectorization") and (not self.options.vectorization):
                 continue
             if (vp=="pgo") and (not self.options.PGOGenerate) and (not self.options.PGOUse):
                 continue
-            sys.path.insert(0,join(cmsdist, vp))
-            pkg = __import__("cmsdist_packages")
-            try:
-                pkg.packages(pkgs, self)
-            except TypeError as e:
-                pkg.packages(pkgs)
-            if vp=="pgo":
+            pkg = get_generated_packages(pkgs, cmsdist, vp, self)
+            if vp=="pgo" and pkg:
                 pgo_packages = pkg.pgo_packages[:]
-            sys.modules.pop('cmsdist_packages')
-            x=sys.path.pop(0)
         return pkgs
 
     def processIncludes(self, specLines, pkgName, includes):
@@ -3469,6 +3473,14 @@ def parseOptions():
 
     if opts.localSources and (not opts.forceUpload) and ('upload' in args):
         fatal("'upload' option can not be used together with '--source' flag.")
+
+    opts.overrideSystemTools = set()
+    if opts.useSystemTools:
+       sys_pkgs = {}
+       get_generated_packages(sys_pkgs, opts.cmsdist, "system", opts)
+       for pkg in sys_pkgs:
+           opts.overrideSystemTools.add(pkg)
+           opts.useSystemTools.remove(pkg)
 
     args = [args[0]] + getNonSystemPackages(args[1:], opts)
     if len(args) < 2:
