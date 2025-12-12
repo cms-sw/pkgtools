@@ -36,15 +36,15 @@ def update_monitor_stats(proc):
         except:
             continue
         try:
-            mem = p.memory_full_info()
-            stats["uss"] += getattr(mem, "uss", 0)
-            stats["pss"] += getattr(mem, "pss", 0)
-        except:
-            mem = p.memory_info()
-        for a in ["rss", "vms", "shared", "data"]:
-            stats[a] += getattr(mem, a, 0)
-        stats["num_threads"] += p.num_threads()
-        try: stats["num_fds"] += p.num_fds()
+            stats['num_fds'] += p.num_fds()
+            stats['num_threads'] += p.num_threads()
+            mem = {}
+            try:
+                mem   = p.memory_full_info()
+                for a in ["uss", "pss"]: stats[a]+=getattr(mem,a)
+            except:
+                mem   = p.memory_info()
+            for a in ["rss", "vms", "shared", "data"]: stats[a]+=getattr(mem,a)
         except: pass
     cpu_times = new_cpu_times
     return stats
