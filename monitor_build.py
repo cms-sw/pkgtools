@@ -38,13 +38,14 @@ def update_monitor_stats(proc):
         try:
             stats['num_fds'] += p.num_fds()
             stats['num_threads'] += p.num_threads()
-            mem = {}
+            mem = None
             try:
-                mem   = p.memory_full_info()
-                for a in ["uss", "pss"]: stats[a]+=getattr(mem,a)
+                mem = p.memory_full_info()
+                for a in ["uss", "pss"]: stats[a] += getattr(mem, a)
             except:
-                mem   = p.memory_info()
-            for a in ["rss", "vms", "shared", "data"]: stats[a]+=getattr(mem,a)
+                try:    mem = p.memory_info()
+                except: mem = p.memory_info_ex()
+            for a in ["rss", "vms", "shared", "data"]: stats[a] += getattr(mem, a)
         except: pass
     cpu_times = new_cpu_times
     return stats
