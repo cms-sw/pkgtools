@@ -2,59 +2,52 @@ import subprocess
 from threading import Thread
 import psutil
 from json import dump as json_dump
-from time import time, sleep
+from time import time, sleep, monotonic
 
 # Sampling interval in seconds
 SAMPLE_INTERVAL = 1.0
-cpu_initialized = set()
+cpu_times = {}
 
 def update_monitor_stats(proc):
-    global cpu_initialized
-    children = []
-    try: children = proc.children(recursive=True)
+    global cpu_times
+    try:children = proc.children(recursive=True)
     except: return {}
     stats = {"rss": 0, "vms": 0, "shared": 0, "data": 0, "uss": 0, "pss": 0, "num_fds": 0, "num_threads": 0, "processes": 0, "cpu": 0}
-    clds = len(children)
-    if clds==0: return stats
-    stats['processes'] = clds
-
-    # Step 1: Initialize CPU counters for new PIDs
-    current_pids = set()
-    for p in children:
-        pid = p.pid
-        current_pids.add(pid)
-        if pid not in cpu_initialized:
-            try:
-                p.cpu_percent(interval=None)
-                cpu_initialized.add(pid)
-            except:
-                continue
-
-    # Step 2: Sleep once to allow CPU measurement
+    stats['processes'] = len(children)
     sleep(SAMPLE_INTERVAL)
-
-    # Step 3: Collect CPU%, memory, threads, FDs
-    for p in children:
+    new_cpu_times = {}
+    for p in [proc] + children:
+        pid = p.pid
         try:
-            stats["cpu"] += int(p.cpu_percent(interval=None))
-            try:
-                mem = p.memory_full_info()
-                stats["uss"] += getattr(mem, "uss", 0)
-                stats["pss"] += getattr(mem, "pss", 0)
-            except:
-                mem = p.memory_info()
-            for a in ["rss", "vms", "shared", "data"]:
-                stats[a] += getattr(mem, a)
-            stats["num_threads"] += p.num_threads()
-            try:
-                stats["num_fds"] += p.num_fds()
-            except:
-                pass
+            current_time = monotonic()
+            new_cpu = p.cpu_times()
+            old_cpu, last_time = cpu_times.get(pid, (None, None))
+            cpu_delta = 0
+            elapsed = 0
+            if old_cpu:
+                delta = (new_cpu.user - old_cpu.user) + (new_cpu.system - old_cpu.system)
+                elapsed = current_time - last_time
+            else:
+                delta = new_cpu.user + new_cpu.system
+                elapsed = time() - p.create_time()
+            if elapsed>=0.1:
+                stats["cpu"] += int((delta / elapsed) * 100.0)
+            new_cpu_times[pid] = (new_cpu, current_time)
         except:
             continue
-
-    # Step 4: Cleanup exited PIDs
-    cpu_initialized.intersection_update(current_pids)
+        try:
+            stats['num_fds'] += p.num_fds()
+            stats['num_threads'] += p.num_threads()
+            mem = None
+            try:
+                mem = p.memory_full_info()
+                for a in ["uss", "pss"]: stats[a] += getattr(mem, a)
+            except:
+                try:    mem = p.memory_info()
+                except: mem = p.memory_info_ex()
+            for a in ["rss", "vms", "shared", "data"]: stats[a] += getattr(mem, a)
+        except: pass
+    cpu_times = new_cpu_times
     return stats
 
 def monitor_stats(p_id, stats_file_name):
