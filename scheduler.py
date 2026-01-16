@@ -12,8 +12,9 @@ from rmanager import ResourceManager
 class _SchedulerQuitCommand(object):
   pass
 
-def transition(what, fromList, toList):
+def transition(what, fromList, toList, key="unknow"):
   try:
+    print("DEBUG:%s: transition %s" % (key, what))
     fromList.remove(what)
   except ValueError as e:
     print (what + " not in source list")
@@ -150,7 +151,7 @@ class Scheduler(object):
       brokenDeps = [dep for dep in self.jobs[taskId]["deps"] if dep in self.brokenJobs]
       if not brokenDeps:
         continue
-      transition(taskId, self.pendingJobs, self.brokenJobs)
+      transition(taskId, self.pendingJobs, self.brokenJobs, "parallel:pending->broken")
       self.errors[taskId] = "The following dependencies could not complete:\n%s" % "\n".join(brokenDeps)
 
     # If no tasks left, quit. Notice we need to check also for serial jobs
@@ -200,7 +201,7 @@ class Scheduler(object):
     for taskId in forceJobs + downloadJobs + buildJobs:
       taskType = taskId.split("-")[0]
       self.runningJobsCount[taskType] += 1
-      transition(taskId, self.pendingJobs, self.runningJobs)
+      transition(taskId, self.pendingJobs, self.runningJobs, "parallel:pending->running")
       self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
 
   # Update the job with the result of running.
@@ -209,9 +210,9 @@ class Scheduler(object):
     if taskType in self.runningJobsCount:
       self.runningJobsCount[taskType] -= 1
     if not error:
-      transition(taskId, self.runningJobs, self.doneJobs)
+      transition(taskId, self.runningJobs, self.doneJobs, "status:running->done")
       return
-    transition(taskId, self.runningJobs, self.brokenJobs)
+    transition(taskId, self.runningJobs, self.brokenJobs, "status:running->broken")
     self.errors[taskId] = error
   
   # One task at the time.
@@ -234,7 +235,7 @@ class Scheduler(object):
     if taskId in self.doneJobs: return
     if not taskId in self.jobs: self.jobs[taskId]={}
     if not taskId in self.pendingJobs: self.pendingJobs.append(taskId)
-    transition(taskId, self.pendingJobs, self.doneJobs)
+    transition(taskId, self.pendingJobs, self.doneJobs, "Force:pending->done")
     
   def serial(self, taskId, deps, *commandSpec):
     if taskId in self.jobs: return
@@ -252,7 +253,7 @@ class Scheduler(object):
       if [dep for dep in pendingDeps if not dep in brokenDeps]:
         self.resultsQueue.put((threading.currentThread(), [self.doSerial, taskId, deps] + list(commandSpec)))
         return
-      transition(taskId, self.pendingJobs, self.brokenJobs)
+      transition(taskId, self.pendingJobs, self.brokenJobs, "serial:pending->broken")
       self.errors[taskId] = "The following dependencies could not complete:\n%s" % "\n".join(brokenDeps)
       # Remember to do the scheduling again!
       self.notifyMaster(self.__rescheduleParallel)
@@ -264,7 +265,7 @@ class Scheduler(object):
       return
     # No broken dependencies and no pending ones. Run the job.
     if not (taskId in self.doneJobs):
-      transition(taskId, self.pendingJobs, self.runningJobs)
+      transition(taskId, self.pendingJobs, self.runningJobs, "serial:pending->running")
       try:
         result = commandSpec[0](*commandSpec[1:])
       except Exception as e:
