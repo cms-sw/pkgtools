@@ -1106,15 +1106,19 @@ def parseUseCompilerVersionLine(specLines):
 def parseNoAutoRunPath(specLines):
     return parseSpecFlag(specLines, "NO_AUTO_RUNPATH")!=''
 
-def parseUploadDependencies(specLines):
-    line = parseSpecFlag(specLines, "UPLOAD_DEPENDENCIES",r'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
+def _parseDependenciesOption(specLines, keyword):
+    line = parseSpecFlag(specLines, keyword,r'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
     if not line: return []
-    return [x for x in line.split(" UPLOAD_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
+    return [x for x in line.split(" %s " % keyword,1)[-1].strip().split(" ") if x]
+
+def parseUploadDependencies(specLines):
+    return _parseDependenciesOption(specLines, "UPLOAD_DEPENDENCIES")
 
 def parseInstallDependencies(specLines):
-    line = parseSpecFlag(specLines, "INSTALL_DEPENDENCIES",r'(\s+[a-zA-Z][a-zA-Z0-9_-]+)+')
-    if not line: return []
-    return [x for x in line.split(" INSTALL_DEPENDENCIES ",1)[-1].strip().split(" ") if x]
+    return _parseDependenciesOption(specLines, "INSTALL_DEPENDENCIES")
+
+def parseForceRequires(specLines):
+    return _parseDependenciesOption(specLines, "FORCE_REQUIRES")
 
 def parseNoDeleteBuildLogs(specLines):
     line = parseSpecFlag(specLines, "NO_DELETE_BUILD_LOGS",r'(\s+[a-zA-Z0-9_.-]+)+')
@@ -2189,6 +2193,7 @@ class SubPackage(object):
         self.origBuildDependencies = [parent.name] + parent.origBuildDependencies
         self.fullDependencies = [parent.name] + parent.fullDependencies
         self.installDependencies = []
+        self.forceRequires = []
         self.uploadDependencies = []
         self.dependentCounter = 0
         self.versionSuffix = parent.versionSuffix
@@ -2316,6 +2321,7 @@ class Package(object):
         self.origBuildDependencies = []
         self.fullDependencies = []
         self.installDependencies = []
+        self.forceRequires = []
         self.uploadDependencies = []
         self.origSpec = []
         self.spec = []
@@ -2408,6 +2414,7 @@ class Package(object):
             self.versionSuffix = not parseNoVersionSuffix(self.spec)
         self.noAutoDependency = parseNoAutoDependencyLine(self.spec)
         self.installDependencies = getNonSystemPackages(parseInstallDependencies(self.spec), self.options)
+        self.forceRequires = getNonSystemPackages(parseForceRequires(self.spec), self.options)
         self.uploadDependencies = getNonSystemPackages(parseUploadDependencies(self.spec), self.options)
         self.buildLogsToKeep = parseNoDeleteBuildLogs(self.spec)
         self.buildRequireToolfile = parseBuildRequireToolfileLine(self.spec)
@@ -3047,7 +3054,7 @@ class Package(object):
         for d in userCommandDependencies(sources):
             if not d in deps + buildDeps: buildDeps.append(d)
 
-        deps = [siteSpecific(d) for d in deps]
+        deps = [siteSpecific(d) for d in deps + self.forceRequires]
         sources.extend([cmsdist_file(source, '.file', self.options, self.name)
                         for source in localSources])
         patches.extend([cmsdist_file(patch, '.patch', self.options, self.name)
@@ -4339,6 +4346,22 @@ def getPackageDependencies(pkg):
                                            "sources": p.sources, "doc": doc_file}})
     return self_description
 
+def checkDisabledPackages(packages, opts):
+    deps_error = False
+    checked_pkgs = []
+    for pkg in packages:
+        for p in [pkg] + getPackages(pkg.fullDependencies):
+            if p.name in checked_pkgs: continue
+            checked_pkgs.append(p.name)
+            xdep = [d for d in opts.disableTools if (d in p.origRequires) and (not d in p.forceRequires)]
+            if xdep:
+                log("Error: Package %s depend on %s while you have used --build-without to build without these package." % (p.name, xdep))
+                log("       Please clean up your spec to not depend on %s packages." % xdep)
+                deps_error = True
+    if deps_error:
+        fatal("Invalid dependencies.")
+    return
+
 def build(opts, args, factory):
     err, out = getstatusoutput("%s ; rpm --version" % rpmEnvironmentScript)
     if err:
@@ -4350,15 +4373,12 @@ def build(opts, args, factory):
     packages = [factory.createWithSpec(pkgName) for pkgName in args]
 
     for p in packages:
-      xdep = [dep for dep in opts.disableTools if dep in p.fullDependencies]
-      if xdep:
-          log("Package %s depend on %s while you have used --build-without to build without these package." % (p.name, xdep))
-          log("Please clean up your spec to not depend on %s packages." % xdep)
-          fatal("Invalid dependencies.")
       for pkg in [p]+getPackages(p.fullDependencies):
         for ipkg in pkg.installDependencies+pkg.uploadDependencies:
           if not PKGFactory.has_key(ipkg):
             packages.insert(0, factory.createWithSpec(ipkg))
+
+    checkDisabledPackages(packages, opts)
 
     if opts.depsLog:
         from json import dumps as jdumps
