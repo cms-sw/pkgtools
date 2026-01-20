@@ -175,7 +175,8 @@ class Scheduler(object):
         if dumpMsg:
           self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
-      allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
+      if taskId in self.pendingJobs:
+        allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
     buildJobs =[]
     downloadJobs = []
     forceJobs = []
