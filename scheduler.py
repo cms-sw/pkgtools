@@ -147,12 +147,18 @@ class Scheduler(object):
     parallelJobs = [j for j in self.pendingJobs if self.jobs[j]["scheduler"] == "parallel"]
     # First of all clean up the pending parallel jobs from all those
     # which have broken dependencies.
-    for taskId in parallelJobs:
-      brokenDeps = [dep for dep in self.jobs[taskId]["deps"] if dep in self.brokenJobs]
-      if not brokenDeps:
-        continue
-      transition(taskId, self.pendingJobs, self.brokenJobs, "parallel:pending->broken")
-      self.errors[taskId] = "The following dependencies could not complete:\n%s" % "\n".join(brokenDeps)
+    while True:
+      has_broken = False
+      for taskId in parallelJobs[:]:
+        brokenDeps = [dep for dep in self.jobs[taskId]["deps"] if dep in self.brokenJobs]
+        if not brokenDeps:
+          continue
+        has_broken = True
+        parallelJobs.remove(taskId)
+        transition(taskId, self.pendingJobs, self.brokenJobs, "parallel:pending->broken")
+        self.errors[taskId] = "The following dependencies could not complete:\n%s" % "\n".join(brokenDeps)
+      if not has_broken:
+        break
 
     # If no tasks left, quit. Notice we need to check also for serial jobs
     # since they might queue more parallel payloads.
@@ -175,8 +181,7 @@ class Scheduler(object):
         if dumpMsg:
           self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
-      if taskId in self.pendingJobs:
-        allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
+      allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
     buildJobs =[]
     downloadJobs = []
     forceJobs = []
