@@ -16,10 +16,10 @@ def transition(what, fromList, toList, key="unknow"):
   try:
     print("DEBUG:%s: transition %s" % (key, what))
     fromList.remove(what)
+    toList.append(what)
   except ValueError as e:
     print (what + " not in source list")
-    raise e
-  toList.append(what)
+  return
 
 class Scheduler(object):
   # A simple job scheduler.
@@ -181,7 +181,8 @@ class Scheduler(object):
         if dumpMsg:
           self.log("Pending tasks: %s: %s" % (taskId, pendingDeps),30)
         continue
-      allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
+      if taskId in self.pendingJobs:
+        allJobs.append({"id": taskId, "priorty": self.jobs[taskId]["priorty"]})
     buildJobs =[]
     downloadJobs = []
     forceJobs = []
