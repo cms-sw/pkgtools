@@ -207,7 +207,7 @@ class Scheduler(object):
       else:
         buildJobs = buildJobs[:bldCount]
     for taskId in forceJobs + downloadJobs + buildJobs:
-      if transition(taskId, self.pendingJobs, self.runningJobs, "parallel:pending->running")
+      if transition(taskId, self.pendingJobs, self.runningJobs, "parallel:pending->running"):
         taskType = taskId.split("-")[0]
         self.runningJobsCount[taskType] += 1
         self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
