@@ -19,7 +19,8 @@ def transition(what, fromList, toList, key="unknow"):
     toList.append(what)
   except ValueError as e:
     print (what + " not in source list")
-  return
+    return False
+  return True
 
 class Scheduler(object):
   # A simple job scheduler.
@@ -206,10 +207,12 @@ class Scheduler(object):
       else:
         buildJobs = buildJobs[:bldCount]
     for taskId in forceJobs + downloadJobs + buildJobs:
-      taskType = taskId.split("-")[0]
-      self.runningJobsCount[taskType] += 1
-      transition(taskId, self.pendingJobs, self.runningJobs, "parallel:pending->running")
-      self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
+      if transition(taskId, self.pendingJobs, self.runningJobs, "parallel:pending->running")
+        taskType = taskId.split("-")[0]
+        self.runningJobsCount[taskType] += 1
+        self.__scheduleParallel(taskId, self.jobs[taskId]["spec"], priorty=self.jobs[taskId]["priorty"])
+      elif self.resourceManager:
+        self.resourceManager.releaseResourcesForExternal(taskId)
 
   # Update the job with the result of running.
   def __updateJobStatus(self, taskId, error):
