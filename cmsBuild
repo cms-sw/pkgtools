@@ -2316,6 +2316,7 @@ class Package(object):
         self.installPostamblesEnv = {"SH": "", "CSH": ""}
         self.installPostambles = ""
         self.dependencies = []
+        self.origRequires = []
         self.origDependencies = []
         self.buildDependencies = []
         self.origBuildDependencies = []
