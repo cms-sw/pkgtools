@@ -3687,12 +3687,16 @@ def installApt(pkg, scheduler, cache=[]):
             scheduler.forceDone("check-%s" % pkg.pkgName())
             scheduler.forceDone("install-%s" % pkg.pkgName())
             return
-    command = "%s -f -j 1 install %s" % (CMSPKG_CMD, pkg.pkgName())
-    error, output = getstatusoutput(command)
+    logFile = join(pkg.workDir, pkg.tempDirPrefix, "cmspkg-install-%s.log" % pkg.pkg.pkgName())
+    command = "%s -f -j 1 install %s >%s 2>&1" % (CMSPKG_CMD, pkg.pkgName(), logFile)
     log("About to install %s using cmspkg..." % pkg.pkgName(), DEBUG)
+    error, output = getstatusoutput(command)
     if error:
+        error, output = getstatusoutput("cat %s" % logFile)
         log("Command:\n %(command)s failed with the following message: %(output)s" % locals(), DEBUG)
         raise RpmInstallFailed(pkg, output)
+    else:
+        getstatusoutput("rm -f %s" % logFile)
     log("Done installing %s via cmspkg." % pkg.pkgName(), DEBUG)
     for dep in getPackages(pkg.dependencies):
         scheduler.forceDone("check-%s" % dep.pkgName())
