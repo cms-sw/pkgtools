@@ -3687,7 +3687,7 @@ def installApt(pkg, scheduler, cache=[]):
             scheduler.forceDone("check-%s" % pkg.pkgName())
             scheduler.forceDone("install-%s" % pkg.pkgName())
             return
-    logFile = join(pkg.workDir, pkg.tempDirPrefix, "cmspkg-install-%s.log" % pkg.pkg.pkgName())
+    logFile = join(pkg.workDir, pkg.tempDirPrefix, "cmspkg-install-%s.log" % pkg.pkgName())
     command = "%s -f -j 1 install %s >%s 2>&1" % (CMSPKG_CMD, pkg.pkgName(), logFile)
     log("About to install %s using cmspkg..." % pkg.pkgName(), DEBUG)
     error, output = getstatusoutput(command)
