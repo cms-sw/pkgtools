@@ -3892,6 +3892,8 @@ def buildPackage(pkg, scheduler, index, actions):
         err, cmsdist_branch = getstatusoutput("cd %s; git rev-parse --abbrev-ref HEAD" % opts.cmsdist)
         if err: cmsdist_branch = ""
         err, hname = getstatusoutput("hostname")
+        if err:
+            err, hname = getstatusoutput("uname -n")
         build_opts = {"builders": opts.workersPoolSize, "build_jobs": opts.compilingProcesses,
                       "architecture": opts.architecture, "cmsdist": cmsdist_branch, "name": pkg.name,
                       "realversion": pkg.realVersion, "version": pkg.version, "checksum": pkg.checksum,
