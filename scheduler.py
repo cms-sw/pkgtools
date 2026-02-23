@@ -14,11 +14,10 @@ class _SchedulerQuitCommand(object):
 
 def transition(what, fromList, toList, key="unknow"):
   try:
-    print("DEBUG:%s: transition %s" % (key, what))
     fromList.remove(what)
     toList.append(what)
   except ValueError as e:
-    print (what + " not in source list")
+    print("DEBUG:%s: Transition failed for %s: Not in source list." % (key, what))
     return False
   return True
 
