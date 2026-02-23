@@ -13,7 +13,7 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError
 import signal
 def cmp(a, b): return (a > b) - (a < b)
-from time import strftime, time, sleep
+from time import strftime, time, sleep, mktime, strptime
 import copy
 import re, os
 import traceback
@@ -3804,7 +3804,8 @@ def buildPackage(pkg, scheduler, index, actions):
         "builddir": pkg.builddir,
         "makeprocesses": "",
         "ignoreCompileErrors": "",
-        "nodeps": ""
+        "nodeps": "",
+        "pkgname": pkg.name
     }
 
     rpmsCacheDir = dirname(join(abspath("RPMS/cache/%s" % pkg.checksum), pkg.rpmfilename))
@@ -3872,7 +3873,8 @@ def buildPackage(pkg, scheduler, index, actions):
 
     rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit", "-bs --short-circuit", "-bb"]
     optionsDict["rpmbuild_stage"] = rpmbuild_stages[index]
-    rpmbuildCommand = "export _CMSBUILD_BUILD_ENV_=1; %(rpmenv)s;" \
+    rpmbuildCommand = "CMSBUILD_PACKAGE=%(pkgname)s;  export _CMSBUILD_BUILD_ENV_=1; " \
+                       " %(rpmenv)s;" \
                        " TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s" \
                        " rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s %(rpmbuild_stage)s" \
                        " --define '_topdir %(topdir)s' %(makeprocesses)s %(ignoreCompileErrors)s" \
@@ -4995,6 +4997,12 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
     environ["LC_ALL"] = "C"
+    # --- Fixed reproducible build environment ---
+    # Set SOURCE_DATE_EPOCH to a fixed value (today) for reproducible timestamps in RPMs
+    os.environ["SOURCE_DATE_EPOCH"] = str(int(mktime(strptime("2026-02-21", "%Y-%m-%d"))))
+    # Set PYTHONHASHSEED to a fixed value for reproducible Python builds
+    os.environ["PYTHONHASHSEED"] = "0"
+
     opts, args = parseOptions()
     checkOptionsLocalSource(opts)
     if opts.externalsStatsFile and os.path.exists(opts.externalsStatsFile):
