@@ -1057,7 +1057,7 @@ def fixVersionLine(specLines, version):
         else: nLines.append(match.group(1)+" "+version)
     return nLines
 
-def parseRPMLine(specLines, opts):
+def parseRPMLine(specLines, opts, pkgname):
     findRpmRe = re.compile(r"^###\s+RPM\s+([^\s]+)\s+([^\s]+)\s+(.+)")
     for line in specLines:
         match = findRpmRe.match(line)
@@ -1066,6 +1066,8 @@ def parseRPMLine(specLines, opts):
         results = [x.strip(" ") for x in match.groups()]
         results[2] = re.sub(r"-CMS.*", "", results[2])
         group, name, version = results
+        if name in ["%n" , "%{n}"]:
+            name = pkgname
         error, output = getstatusoutput("echo %s" % version)
         if error:
             raise MalformedSpec
@@ -1674,7 +1676,7 @@ class PackageFactory(object):
             if forceRecreate or (not exists(specCache)):
                 getstatusoutput("rm -f %s/specCache/%s.*" % (self.options.tempdir, pkgName))
                 pkg = self.create()
-                pkg.initWithSpec(specLines)
+                pkg.initWithSpec(specLines, pkgName)
                 pkg.depSum = sha256(" ".join([self[d].pkgName() for d in sorted(pkg.fullDependencies)]).encode()).hexdigest()
                 pickle.dump(pkg, open(specCache, "wb"), 1)
                 pkg.setOptions(self.options)
@@ -2375,14 +2377,14 @@ class Package(object):
         self.origSpec = fixVersionLine (self.origSpec,self.realVersion)
         self.override_version = self.realVersion
 
-    def initWithSpec(self, specLines):
+    def initWithSpec(self, specLines, pkgName):
         """ This parses the spec files and creates a structure with its contents.
         """
         if parseNoAutoRunPath(self.spec):
             self.buildWithRunPath = False
             specLines = [line for line in specLines if not line.startswith('## ') or ('NO_AUTO_RUNPATH' not in line)]
         self.origSpec = specLines
-        self.group, self.name, self.realVersion = parseRPMLine(self.origSpec, self.options)
+        self.group, self.name, self.realVersion = parseRPMLine(self.origSpec, self.options, pkgName)
         if self.buildWithRunPath and (self.name in NO_AUTO_RUNPATH):
             self.buildWithRunPath = False
         if '%' in self.realVersion: self.updateVersion()
@@ -5098,7 +5100,7 @@ if __name__ == "__main__":
             except IOError as e:
                 fatal("The spec %s does not match the requested architecture %s." % (pathname, opts.architecture))
             if parseUseCompilerVersionLine(lines) or opts.architecture in USE_COMPILER_VERSION:
-                (group, name, version) = parseRPMLine(lines, opts)
+                (group, name, version) = parseRPMLine(lines, opts, opts.compilerName)
                 opts.compilerVersion = version.split("-")[0]
             else:
                 opts.compilerVersion = ".".join([x for x in compactCompilerVersion])
