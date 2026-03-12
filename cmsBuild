@@ -3900,6 +3900,7 @@ def buildPackage(pkg, scheduler, index, actions):
                        " %(rpmenv)s; source %(pkgtools)s/build-system-env.sh %(compiling_processes)s;" \
                        " %(prefix)s" \
                        " rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s %(rpmbuild_stage)s" \
+                       " --define '_smp_build_nthreads %(compiling_processes)s" \
                        " --define '_topdir %(topdir)s' %(makeprocesses)s %(ignoreCompileErrors)s" \
                        " --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
                        " %(spec)s >>%(logfile)s 2>&1" % optionsDict
