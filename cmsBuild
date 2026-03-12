@@ -25,7 +25,7 @@ import itertools
 import pickle
 from hashlib import sha256
 from cmsBuild_consts import *
-from cmsdist_config import USE_COMPILER_VERSION, NO_VERSION_SUFFIX, NO_AUTO_RUNPATH
+from cmsdist_config import USE_COMPILER_VERSION, NO_VERSION_SUFFIX, NO_AUTO_RUNPATH, DISABLE_AUTO_PROVIDE_REQUIRES
 try: from monitor_build import run_monitor_on_command
 except: run_monitor_on_command=None
 import json
@@ -100,6 +100,12 @@ def cmsdist_file(name, ext, options, pkgname):
 def isNoVersionSuffix(name):
   for reg in NO_VERSION_SUFFIX:
     if reg.match(name): return True
+  return False
+
+def disableAutoProvideRequires(pkg):
+  if pkg.noCompilerOption:
+    for reg in DISABLE_AUTO_PROVIDE_REQUIRES:
+      if reg.match(pkg.name): return True
   return False
 
 # Minimal string sanitization.
@@ -2340,6 +2346,7 @@ class Package(object):
         self.buildWithRunPath = options.buildWithRunPath
         self.globalBuildOptions = ""
         self.buildOptions = ""
+        self.noCompilerOption = False
 
     def rpmLocation(self):
         return join(self.rpmdir, self.rpmfilename)
@@ -2396,6 +2403,7 @@ class Package(object):
             self.requiresStatement = ""
             self.compilerRealVersion = self.realVersion
             self.expandSpec()
+            self.noCompilerOption = parseNoCompilerLine(self.spec)
         else:
             if (not self.name in compiler_package_dependency) and (not PKGFactory.has_key(compilerName)):
                 compilerPKG = None
@@ -2407,10 +2415,11 @@ class Package(object):
             if PKGFactory.has_key(compilerName):
                 self.compilerRealVersion = PKGFactory[compilerName].realVersion
             self.expandSpec()
-            if self.options.systemCompiler == False and parseNoCompilerLine(self.spec) == False:
+            self.noCompilerOption = parseNoCompilerLine(self.spec)
+            if self.options.systemCompiler == False and self.noCompilerOption == False:
                 self.dependencies.append(compilerName)
                 self.origDependencies.append(compilerName)
-        if parseNoCompilerLine(self.spec): self.buildWithRunPath = False
+        if self.noCompilerOption: self.buildWithRunPath = False
         if isNoVersionSuffix(self.name):
             self.versionSuffix = False
         else:
@@ -3204,6 +3213,11 @@ def parseOptions():
                                     help="Ignores CMSSW compilation errors.",
                                     action="store_true",
                                     default=False)
+    advancedBuildOptions.add_option("--fail-on-missing-dependency",
+                                    dest="failOnMissingDependency",
+                                    help="Fail package build if there are missing dependencies.",
+                                    action="store_true",
+                                    default=False)
     advancedBuildOptions.add_option("--no-bootstrap",
                                     dest="bootstrap",
                                     action="store_false",
@@ -3873,7 +3887,13 @@ def buildPackage(pkg, scheduler, index, actions):
         optionsDict["spec"] = pkg.finalSpecFilenameForPackaging()
         scheduler.log("Building %s. Log can be found in %s." % (pkg.name, logfile))
 
-    rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit", "-bs --short-circuit", "-bb"]
+    # Always disable auto Provides/Requires for install step (-bi)
+    # Disabled auto Provides/Requires for final step (-bb) for selected packages e.g data packages
+    disableProvReqFlags = "--define '__find_requires %{nil}'  --define '__find_provides %{nil}'"
+    disableProvReq = ""
+    if disableAutoProvideRequires(pkg):
+        disableProvReq = disableProvReqFlags
+    rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit %s" % disableProvReqFlags, "-bs --short-circuit", "-bb " + disableProvReq]
     optionsDict["rpmbuild_stage"] = rpmbuild_stages[index]
     rpmbuildCommand = "CMSBUILD_PACKAGE=%(pkgname)s;  export _CMSBUILD_BUILD_ENV_=1; " \
                        " %(rpmenv)s;" \
@@ -4070,7 +4090,10 @@ def checkDeps(pkg, requires, scheduler):
             for p in provides[req]:
                 if p == pkg_name: continue
                 found[p] = 1
-    print("Missing ",pkg.name,missing)
+    if missing:
+        print("Missing ",pkg.name, missing)
+        if pkg.options.failOnMissingDependency:
+            raise RpmBuildFailed(pkg)
     scheduler.log("Done checking package dependencies: %s" % pkg.pkgName())
     return
 

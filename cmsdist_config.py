@@ -5,4 +5,8 @@ NO_VERSION_SUFFIX = [
   compile("fwlite"), compile("fwlite-patch"),
   compile("^data-[A-Z][A-Za-z0-9]+-[A-Za-z][A-Za-z0-9]+$")
 ]
+DISABLE_AUTO_PROVIDE_REQUIRES = [
+  compile("^data-[A-Z][A-Za-z0-9]+-[A-Za-z][A-Za-z0-9]+$"),
+  compile("^geant4-G4[a-zA-Z0-9]+$")
+]
 NO_AUTO_RUNPATH = []
