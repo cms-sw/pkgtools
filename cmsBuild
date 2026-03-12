@@ -3313,6 +3313,8 @@ def parseOptions():
                                     default=False, help="Use the new scheduler to install / build packages")
     advancedBuildOptions.add_option("--monitor", dest="enableMonitor", action="store_true",
                                     default=False, help="Enable rpmbuild jobs stats monitoring")
+    advancedBuildOptions.add_option("--monitor-commands", dest="enableMonitorCommands", action="store_true",
+                                    default=False, help="Record the running commands during stats monitoring.")
     advancedBuildOptions.add_option("--ldps", "--log-deps",
                                     dest="depsLog", action="store_true",
                                     default=False, help="store json formatted log of dependencies in workDir/WEB/arch")
@@ -3860,18 +3862,17 @@ def buildPackage(pkg, scheduler, index, actions):
                 scheduler.forceDone(actions[idx])
             return
 
-    if pkg.options.compilingProcesses:
-        optionsDict["makeprocesses"] = "--define \"compiling_processes %s\"" % pkg.options.compilingProcesses
+    jobs = pkg.options.compilingProcesses if pkg.options.compilingProcesses else 1
+    optionsDict["makeprocesses"] = "--define \"compiling_processes %s\"" % jobs
     if pkg.options.ignoreCompileErrors:
         optionsDict["ignoreCompileErrors"] = "--define \"ignore_compile_errors 1\""
+    optionsDict["compiling_processes"] = jobs
+    optionsDict["pkgtools"] = pkgtools_dir
     optionsDict["tmpdir"] = join(opts.workDir, opts.tempDirPrefix)
     optionsDict["xtmpdir"] = join(pkg.builddir, 'cmsdist-tmp')
     optionsDict["rpmenv"] = rpmEnvironmentScript
-    optionsDict["xenv"] = ""
     optionsDict["_builddir"] = pkg.builddir
     optionsDict["spec"] = "%s/spec" % pkg.specdir
-    if 'rust' in pkg.fullDependencies:
-      optionsDict["xenv"] = "CARGO_HOME=%s/cargo_home" % optionsDict["tmpdir"]
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                         "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
                         "extraRpmDefines": getRpmDefines()})
@@ -3895,9 +3896,9 @@ def buildPackage(pkg, scheduler, index, actions):
         disableProvReq = disableProvReqFlags
     rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit %s" % disableProvReqFlags, "-bs --short-circuit", "-bb " + disableProvReq]
     optionsDict["rpmbuild_stage"] = rpmbuild_stages[index]
-    rpmbuildCommand = "CMSBUILD_PACKAGE=%(pkgname)s;  export _CMSBUILD_BUILD_ENV_=1; " \
-                       " %(rpmenv)s;" \
-                       " TMPDIR=%(xtmpdir)s %(xenv)s %(prefix)s" \
+    rpmbuildCommand = "CMSBUILD_PACKAGE=%(pkgname)s;  export _CMSBUILD_BUILD_ENV_=1; export TMPDIR=%(xtmpdir)s; " \
+                       " %(rpmenv)s; source %(pkgtools)s/build-system-env.sh %(compiling_processes)s;" \
+                       " %(prefix)s" \
                        " rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s %(rpmbuild_stage)s" \
                        " --define '_topdir %(topdir)s' %(makeprocesses)s %(ignoreCompileErrors)s" \
                        " --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
@@ -3926,7 +3927,8 @@ def buildPackage(pkg, scheduler, index, actions):
         monitor_file_suffix = "-%s" % action_name
         if monitor_file_suffix == "-build":
             monitor_file_suffix = ""
-        error, output = run_monitor_on_command(rpmbuildCommand, "%s/%s%s.json" % (pkg.builddir, pkg.name, monitor_file_suffix))
+        json_output = "%s/%s%s.json" % (pkg.builddir, pkg.name, monitor_file_suffix)
+        error, output = run_monitor_on_command(rpmbuildCommand, json_output, opts.enableMonitorCommands)
     else:
         error, output = getstatusoutput(rpmbuildCommand)
 
