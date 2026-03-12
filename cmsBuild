@@ -2211,6 +2211,7 @@ class SubPackage(object):
             self.cmsplatf, self.group, self.name, self.version, '1', self.pkgRevision, self.cmsplatf)
         self.srpmfilename = parent.srpmfilename
         self.pkginstroot = parent.pkginstroot
+        self.noCompilerOption = parent.noCompilerOption
         self.parent = parent
 
     def dumpSpecFragment(self, computeSpecChecksum=True):
