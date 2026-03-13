@@ -8,11 +8,13 @@ from time import time, sleep, monotonic
 SAMPLE_INTERVAL = 1.0
 cpu_times = {}
 
-def update_monitor_stats(proc):
+def update_monitor_stats(proc, commands=False):
     global cpu_times
     try:children = proc.children(recursive=True)
     except: return {}
     stats = {"rss": 0, "vms": 0, "shared": 0, "data": 0, "uss": 0, "pss": 0, "num_fds": 0, "num_threads": 0, "processes": 0, "cpu": 0}
+    if commands:
+        stats["commands" ] = []
     stats['processes'] = len(children)
     sleep(SAMPLE_INTERVAL)
     new_cpu_times = {}
@@ -30,8 +32,12 @@ def update_monitor_stats(proc):
             else:
                 delta = new_cpu.user + new_cpu.system
                 elapsed = time() - p.create_time()
+            pcpu = 0
             if elapsed>=0.1:
-                stats["cpu"] += int((delta / elapsed) * 100.0)
+                pcpu = int((delta / elapsed) * 100.0)
+                stats["cpu"] += pcpu
+            if commands:
+                stats["commands"].append({"pid": pid, "command": p.cmdline(), "old_cpu": old_cpu, "new_cpu": new_cpu, "delta": delta, "elapsed": elapsed, "cpu": pcpu})
             new_cpu_times[pid] = (new_cpu, current_time)
         except:
             continue
@@ -50,12 +56,12 @@ def update_monitor_stats(proc):
     cpu_times = new_cpu_times
     return stats
 
-def monitor_stats(p_id, stats_file_name):
+def monitor_stats(p_id, stats_file_name, commands=False):
     stime = int(time())
     p = psutil.Process(p_id)
     data = []
     while p.is_running():
-        stats = update_monitor_stats(p)
+        stats = update_monitor_stats(p, commands)
         if not stats:
             sleep(SAMPLE_INTERVAL)
             continue
@@ -65,9 +71,9 @@ def monitor_stats(p_id, stats_file_name):
         json_dump(data, sf)
     return
 
-def run_monitor_on_command(command_to_monitor, stats_file_name):
+def run_monitor_on_command(command_to_monitor, stats_file_name, commands=False):
     p = subprocess.Popen(command_to_monitor, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds= True)
-    mon_thd = Thread(target=monitor_stats, args=(p.pid, stats_file_name,))
+    mon_thd = Thread(target=monitor_stats, args=(p.pid, stats_file_name, commands,))
     mon_thd.start()
     stout, sterr = p.communicate() # this blocks until the process is finished
     mon_thd.join() # wait for monitoring thread to write its output

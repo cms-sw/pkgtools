@@ -1,0 +1,10 @@
+export CMAKE_BUILD_PARALLEL_LEVEL="$1"
+export MAX_JOBS="$1"
+export NINJA_NUM_JOBS="$1"
+export CYTHON_NTHREADS="$1"
+export MESON_NUM_PROCESSES="$1"
+export OMP_NUM_THREADS="$1"
+export OMP_THREAD_LIMIT="$1"
+export OMP_DYNAMIC=FALSE
+export CARGO_BUILD_JOBS="$1"
+export CARGO_HOME="${TMPDIR}/cargo_home"
