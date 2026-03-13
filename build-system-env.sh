@@ -6,4 +6,5 @@ export MESON_NUM_PROCESSES="$1"
 export OMP_NUM_THREADS="$1"
 export OMP_THREAD_LIMIT="$1"
 export OMP_DYNAMIC=FALSE
+export CARGO_BUILD_JOBS="$1"
 export CARGO_HOME="${TMPDIR}/cargo_home"
