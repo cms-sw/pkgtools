@@ -2604,6 +2604,9 @@ class Package(object):
         if self.buildOptions:
             checksumCalculator.addStrings(self.buildOptions)
 
+        if self.name in self.options.forceBuild:
+            checksumCalculator.addStrings("ForceBuild: %s" % time())
+
         checksumCalculator.addStrings(self.origSpec)
         checksumCalculator.addStrings(DEFAULT_SECTIONS.values())
         checksumCalculator.addStrings(PKGFactory.sectionOptions.values())
@@ -3214,6 +3217,11 @@ def parseOptions():
                                     help="Ignores CMSSW compilation errors.",
                                     action="store_true",
                                     default=False)
+    advancedBuildOptions.add_option("--force-build",
+                                    dest="forceBuild",
+                                    help="Force build/rebuild packages which are directly provided on command-line.",
+                                    action="store_true",
+                                    default=False)
     advancedBuildOptions.add_option("--fail-on-missing-dependency",
                                     dest="failOnMissingDependency",
                                     help="Fail package build if there are missing dependencies.",
@@ -3512,6 +3520,11 @@ def parseOptions():
     args = [args[0]] + getNonSystemPackages(args[1:], opts)
     if len(args) < 2:
         fatal("No non-system package build provided via command-line")
+
+    if (args[0] == "build") and opts.forceBuild:
+        opts.forceBuild = args[1:]
+    else:
+        opts.forceBuild = []
 
     return opts, args
 

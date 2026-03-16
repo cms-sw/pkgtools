@@ -37,7 +37,7 @@ def update_monitor_stats(proc, commands=False):
                 pcpu = int((delta / elapsed) * 100.0)
                 stats["cpu"] += pcpu
             if commands:
-                stats["commands"].append({"pid": pid, "command": p.cmdline(), "old_cpu": old_cpu, "new_cpu": new_cpu, "delta": delta, "elapsed": elapsed, "cpu": pcpu})
+                stats["commands"].append({"pid": pid, "command": " ".join(p.cmdline())[:200], "old_cpu": old_cpu, "new_cpu": new_cpu, "delta": delta, "elapsed": elapsed, "cpu": pcpu, "threads": p.num_threads()})
             new_cpu_times[pid] = (new_cpu, current_time)
         except:
             continue
