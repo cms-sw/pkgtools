@@ -886,6 +886,12 @@ def download(source, dest, options, pkg=None):
     source_name = pkg.sourcesNumbers[source] if pkg else None
     noCmssdtCache = True if 'no-cmssdt-cache=1' in source else False
     isCmsdistGenerated = True if 'cmdist-generated=1' in source else False
+    if source.startswith('no-cmssdt-cache+'):
+        noCmssdtCache = True
+        source = source[16:]
+    if source.startswith('cmdist-generated+'):
+        isCmsdistGenerated = True
+        source = source[17:]
     source = fixUrl(source)
     checksum = getUrlChecksum(source)
 
