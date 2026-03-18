@@ -760,8 +760,31 @@ downloadHandlers = {'cvs': downloadCvs,
                     'pip': downloadPip,
                     'usercommand': downloadUserCommand}
 
+
+def hasNoCmsdistCacheProperty(s):
+    for prop in ['no-cmssdt-cache']:
+        for x in ["+", "=1"]:
+            x = "%s%s" % (prop, x)
+            if x in s:
+                return True
+    return False
+
+
+def hasCmsdistGeneratedProperty(s):
+    for prop in ['cmdist-generated', 'cmsdist-generated']:
+        for x in ["+", "=1"]:
+            x = "%s%s" % (prop, x)
+            if x in s:
+                return True
+    return False
+
+
 def fixUrl(s):
-    for x in ['no-cmssdt-cache=1', 'cmdist-generated=1']:
+    for p in ['no-cmssdt-cache', 'cmdist-generated', 'cmsdist-generated']:
+        x = "%s+" % p
+        if x in s:
+            s = s.replace(x, '')
+        x = "%s=1" % p
         if x in s:
             s = s.replace(x,'').replace("&&","&").replace("?&","?")
             if s.endswith('&'): s=s[:-1]
@@ -884,14 +907,8 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
 
 def download(source, dest, options, pkg=None):
     source_name = pkg.sourcesNumbers[source] if pkg else None
-    noCmssdtCache = True if 'no-cmssdt-cache=1' in source else False
-    isCmsdistGenerated = True if 'cmdist-generated=1' in source else False
-    if source.startswith('no-cmssdt-cache+'):
-        noCmssdtCache = True
-        source = source[16:]
-    if source.startswith('cmdist-generated+'):
-        isCmsdistGenerated = True
-        source = source[17:]
+    noCmssdtCache = hasNoCmsdistCacheProperty(source)
+    isCmsdistGenerated = hasCmsdistGeneratedProperty(source)
     source = fixUrl(source)
     checksum = getUrlChecksum(source)
 
@@ -1391,7 +1408,7 @@ def getSourcesChecksum(pkg, sourcesNumbers):
     text = ""
     has_cmsdist_generated = False
     for s in sourcesNumbers:
-        if 'cmdist-generated=1' in s:
+        if hasCmsdistGeneratedProperty(s):
             has_cmsdist_generated = True
             text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), getUrlChecksum(fixUrl(s)))
     if has_cmsdist_generated:
