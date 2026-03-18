@@ -6,12 +6,10 @@ from time import time, sleep, monotonic
 
 # Sampling interval in seconds
 SAMPLE_INTERVAL = 1.0
-cpu_times = {}
 
-def update_monitor_stats(proc, commands=False):
-    global cpu_times
+def update_monitor_stats(proc, cpu_times, commands=False):
     try:children = proc.children(recursive=True)
-    except: return {}
+    except: return {}, cpu_times
     stats = {"rss": 0, "vms": 0, "shared": 0, "data": 0, "uss": 0, "pss": 0, "num_fds": 0, "num_threads": 0, "processes": 0, "cpu": 0}
     if commands:
         stats["commands" ] = []
@@ -53,15 +51,15 @@ def update_monitor_stats(proc, commands=False):
                 except: mem = p.memory_info_ex()
             for a in ["rss", "vms", "shared", "data"]: stats[a] += getattr(mem, a)
         except: pass
-    cpu_times = new_cpu_times
-    return stats
+    return stats, new_cpu_times
 
 def monitor_stats(p_id, stats_file_name, commands=False):
     stime = int(time())
     p = psutil.Process(p_id)
     data = []
+    cpu_times = {}
     while p.is_running():
-        stats = update_monitor_stats(p, commands)
+        stats, cpu_times = update_monitor_stats(p, cpu_times, commands)
         if not stats:
             sleep(SAMPLE_INTERVAL)
             continue
