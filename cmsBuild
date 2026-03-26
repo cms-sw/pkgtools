@@ -3933,7 +3933,7 @@ def buildPackage(pkg, scheduler, index, actions):
         disableProvReq = disableProvReqFlags
     rpmbuild_stages = ["-bp", "-bc --short-circuit", "-bi --short-circuit %s" % disableProvReqFlags, "-bs --short-circuit", "-bb " + disableProvReq]
     optionsDict["rpmbuild_stage"] = rpmbuild_stages[index]
-    extra_macros_file = "%(builddir)s/%(pkgname)s-rpm.macros" % optionsDict
+    extra_macros_file = "%(xtmpdir)s/%(pkgname)s-rpm.macros" % optionsDict
     optionsDict["pkg_macros"] = ""
     if exists(extra_macros_file):
         optionsDict["pkg_macros"] = "--load %s" % extra_macros_file
