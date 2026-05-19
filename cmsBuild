@@ -65,6 +65,7 @@ compiler_package_dependency = ["gcc-prerequisites"]
 scheduler = None
 scriptdir = ""
 archFirst = True
+packaging_steps = ("prep", "build", "install", "srpm", "rpms")
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -1752,10 +1753,14 @@ class PackageFactory(object):
         for dep in pkg.fullDependencies:
           self[dep].requiredBy += 1
         if build_stats:
-          pkg_time = 300 if pkg.name not in build_stats["packages"] else build_stats["packages"][pkg.name]["time"]
-          for dep in pkg.fullDependencies:
-            if dep in build_stats["packages"]:
-              build_stats["packages"][dep]["time"] += pkg_time
+          total_pkg_time = 0
+          for build_steps in packaging_steps:
+            pkg_time = 300 if pkg.name not in build_stats["packages"][build_steps] else build_stats["packages"][build_steps][pkg.name]["time"]
+            total_pkg_time += pkg_time
+          for build_steps in packaging_steps:
+            for dep in pkg.fullDependencies:
+              if dep in build_stats["packages"][build_steps]:
+                build_stats["packages"][build_steps][dep]["time"] += total_pkg_time
         self[pkgName] = pkg
         if pkg.name != pkgName:
             log("FATAL: Package name '%s' and spec name '%s' does not match" % (pkg.name, pkgName))
@@ -4361,8 +4366,8 @@ def checkPackageInCache(pkg, scheduler):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
     actions = []
-    for action in ["build-prep", "build-build", "build-install", "build-srpm", "build-rpms"]:
-        actions.append("%s-%s" % (action, pkgName))
+    for action in packaging_steps:
+        actions.append("build-%s-%s" % (action, pkgName))
     for idx in range(len(actions)):
         scheduler.parallel(actions[idx], buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
     scheduler.serial("install-%s" % pkgName, actions, installPackage, pkg, scheduler)
