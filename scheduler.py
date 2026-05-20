@@ -15,10 +15,9 @@ class _SchedulerQuitCommand(object):
 def transition(what, fromList, toList, key="unknow"):
   try:
     fromList.remove(what)
-    toList.append(what)
   except ValueError as e:
     print("DEBUG:%s: Transition failed for %s: Not in source list." % (key, what))
-    return False
+  toList.append(what)
   return True
 
 class Scheduler(object):
