@@ -1694,7 +1694,7 @@ class PackageFactory(object):
             raise IncludedFileNotFound(pkgName, incFile)
 
     def createWithSpec(self, pkgName):
-        global packageBuildOptionsChanged
+        global packageBuildOptionsChanged, build_stats
         if self.has_key(pkgName): return self[pkgName]
         specLines = self.readSpec(pkgName)
         pkg = None
