@@ -8,6 +8,7 @@ class ResourceManager(object):
         self.allocated = {}
         self.highestPriortyOnly = highestPriortyOnly
         self.priorityList = ["time"] # can be any list from the stat keys
+        self.messageCache = {}
 
     def allocResourcesForExternals(self, externalsList, count=1000): # return ordered list for externals that can be started
         externals_to_run = []
@@ -27,7 +28,9 @@ class ResourceManager(object):
                         break
                 for k in self.esStats["defaults"]:
                     stats[k] = self.esStats["defaults"][k][idx]
-                self.scheduler.log("New external found, creating default entry %s" % stats)
+                if not ext_full in self.messageCache:
+                    self.messageCache[ext_full] = 1
+                    self.scheduler.log("New external found, creating default entry %s" % stats)
             else:
                 for k in self.esStats["defaults"]:
                     stats[k] = pkg_stats[ext][k]
