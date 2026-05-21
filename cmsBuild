@@ -1753,7 +1753,13 @@ class PackageFactory(object):
         for dep in pkg.fullDependencies:
           self[dep].requiredBy += 1
         if build_stats:
+            if (not "packages" in build_stats) or (not "build" in build_stats["packages"]):
+                build_stats = None
+        if build_stats:
           total_pkg_time = 0
+          for build_steps in packaging_steps:
+              if not build_steps in build_stats["packages"]:
+                  build_stats["packages"][build_steps] = copy.deepcopy(build_stats["packages"]["build"])
           for build_steps in packaging_steps:
             pkg_time = 300 if pkg.name not in build_stats["packages"][build_steps] else build_stats["packages"][build_steps][pkg.name]["time"]
             total_pkg_time += pkg_time
