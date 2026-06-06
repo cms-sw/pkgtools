@@ -66,6 +66,7 @@ scheduler = None
 scriptdir = ""
 archFirst = True
 packaging_steps = ("prep", "build", "install", "srpm", "rpms")
+priorities = {}
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -83,6 +84,20 @@ def remoteRsync(opts):
 
 def getNonSystemPackages(pkgs, opts):
     return [p for p in pkgs if p not in opts.useSystemTools] if opts.useSystemTools else pkgs
+
+
+def getPriority(package):
+    global priorities
+    if package in priorities: return priorities[package]
+    result = set()
+    stack = list(PKGFactory[package].reverseDependency)
+    while stack:
+        p = stack.pop()
+        if p not in result:
+            result.add(p)
+            stack.extend(PKGFactory[p].reverseDependency)
+    priorities[package] = 100000-len(result)
+    return priorities[package]
 
 
 def cmsdist_file(name, ext, options, pkgname):
@@ -1751,7 +1766,7 @@ class PackageFactory(object):
                 log("Read from cache: %s" % pkg.pkgName())
             break
         for dep in pkg.fullDependencies:
-          self[dep].requiredBy += 1
+            self[dep].reverseDependency.add(pkgName)
         if build_stats:
             if (not "packages" in build_stats) or (not "build" in build_stats["packages"]):
                 build_stats = None
@@ -2246,6 +2261,8 @@ class SubPackage(object):
         self.srpmfilename = parent.srpmfilename
         self.pkginstroot = parent.pkginstroot
         self.noCompilerOption = parent.noCompilerOption
+        self.reverseDependency = parent.reverseDependency
+        self.priority = 1
         self.parent = parent
 
     def dumpSpecFragment(self, computeSpecChecksum=True):
@@ -2377,7 +2394,8 @@ class Package(object):
         self.override_version = ""
         self.buildLogsToKeep = ""
         self.versionSuffix = True
-        self.requiredBy = 1
+        self.reverseDependency = set()
+        self.priority = 1
         self.buildWithRunPath = options.buildWithRunPath
         self.globalBuildOptions = ""
         self.buildOptions = ""
@@ -4203,7 +4221,6 @@ def installPackage(pkg, scheduler):
     f.write(pkg.checksum)
     f.close()
     if pkg_error: raise RpmBuildFailed(pkg)
-    scheduler.reschedule()
     return
 
 
@@ -4327,7 +4344,6 @@ def checkPackageInCache(pkg, scheduler):
     scheduled = scheduleInstallPackage(pkg, scheduler)
     if scheduled:
         scheduler.log("Package %s found in repository" % pkgName)
-        scheduler.reschedule()
         return
     scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
     fetchDependencies = []
@@ -4353,6 +4369,7 @@ def checkPackageInCache(pkg, scheduler):
     if not check_rpm_task in scheduler.jobs:
         scheduler.serial(check_rpm_task, [], checkRPMBuild)
     pkgSources = pkg.sources + pkg.patches
+    pkg.priority = getPriority(pkg.name)
     if pkgSources:
         urls = [url for url in pkgSources if urlRe.match(url)]
         srcDeps = fetchDependencies
@@ -4367,16 +4384,13 @@ def checkPackageInCache(pkg, scheduler):
         if not isPackageInstalled(p):
             scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
-    for p in getPackages(pkg.fullDependencies):
-        if not isPackageInstalled(p):
-            scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
     actions = []
     for action in packaging_steps:
         actions.append("build-%s-%s" % (action, pkgName))
     for idx in range(len(actions)):
         scheduler.parallel(actions[idx], buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
-    scheduler.serial("install-%s" % pkgName, actions, installPackage, pkg, scheduler)
+    scheduler.serial("install-%s" % pkgName, [actions[-1]], installPackage, pkg, scheduler)
     # Install sub-packages too if any
     subinstallActionDependencies = ["install-%s" % pkgName]
     for subpkg in pkg.subpackages:
@@ -4393,7 +4407,6 @@ def checkPackageInCache(pkg, scheduler):
                 scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
             else:
                 scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
-    scheduler.reschedule()
     return
 
 
