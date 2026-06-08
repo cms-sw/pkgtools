@@ -20,34 +20,92 @@ class TaskTypes(Enum):
   PARALLEL = 2
 
 class Scheduler(object):
-  # A simple job scheduler.
-  # Workers queue is to specify to threads what to do. Results
-  # queue is whatched by the master thread to wait for results
-  # of workers computations.
-  # All worker threads begin trying to fetch from the command queue (and are
-  # therefore blocked).
-  # Master thread does the scheduling and then sits waiting for results.
-  # Scheduling implies iterating on the list of jobs and creates an entry
-  # in the parallel queue for all the jobs which does not have any dependency
-  # which is not done.
-  # If a job has dependencies which did not build, move it do the failed queue.
-  # Post an appropriate build command for all the new jobs which got added.
-  # If there are jobs still to be done, post a reschedule job on the command queue
-  # if there are no jobs left, post the "kill worker" task.
+  """
+  Event-driven dependency scheduler.
+
+  Architecture:
+    - The master thread owns all scheduler state.
+    - Worker threads execute parallel jobs only.
+    - Workers never modify scheduler state directly.
+    - Workers communicate with the master via notifyQueue.
+    - Dependency completion immediately activates dependent jobs.
+
+  Job lifecycle:
+
+      PENDING
+         |
+         v
+      readyQueue
+         |
+         v
+      RUNNING
+       /   \
+      v     v
+    DONE  BROKEN
+
+  Scheduling priority:
+    Lower numeric values indicate higher priority.
+
+  Example:
+    priority=1     -> highest priority
+    priority=1000  -> lowest priority
+
+  Priorities are typically derived from reverse dependency
+  counts so that packages which unlock the largest portion
+  of the dependency graph are scheduled first.
+  """
   def __init__(self, parallelThreads, logDelegate=None, buildStats=None, parallelDownloads=2, checkCycles=False):
     self.cv = threading.Condition()
     self.checkCycles = checkCycles
     self.executingTasks = 0
     self.shutdownRequested = False
+
+    # Execution queue for parallel jobs.
+    #
+    # Entries:
+    #   (priority, sequence, taskId, callback)
+    #
+    # Lower priority values are scheduled first.
+    # Sequence provides FIFO ordering within equal priorities.
     self.workersQueue = PriorityQueue()
+
+    # Execution queue for serial jobs.
+    # Serial jobs run in the master thread and are processed
+    # according to scheduler priority.
+    #
+    # Entries:
+    #   (priority, sequence, taskId, callback)
+    #
+    # Lower priority values are processed first.
+    # Sequence provides FIFO ordering within equal priorities.
     self.resultsQueue = PriorityQueue()
+
+    # Thread-safe communication channel from worker threads to the master thread.
+    # Workers never modify scheduler state directly.
+    # Instead they enqueue notifications which are later
+    # executed by the master thread.
     self.notifyQueue = Queue()
+
     self.readyQueue = Queue()
+
+    # Set of runnable parallel jobs waiting for resource
+    # allocation and scheduling.
+    #
+    # Jobs are first activated into readyQueue.
+    # Parallel jobs are then moved into parallelReady where
+    # download/build limits and resource manager constraints
+    # can be applied before actual scheduling.
     self.parallelReady = set()
+
     self.jobs = {}
     self.reverseDeps = {}
     self.stateCounter = {}
+
+    # Monotonically increasing sequence number used to
+    # preserve FIFO ordering among jobs having identical
+    # priorities in PriorityQueue.
     self.jobSequence = 0
+
     for state in State:
       self.stateCounter[state] = 0
     self.doneJobs = set()
@@ -61,7 +119,13 @@ class Scheduler(object):
     self.errors = {}
     self.workers = []
     self.masterThread = threading.current_thread()
+
+    # Synthetic job added during shutdown.
+    #
+    # Depends on every scheduled job and provides a single
+    # aggregate success/failure result for the entire build.
     self.final_job = "final-job"
+
     self.runtimeError = []
     if not logDelegate:
       self.logDelegate = self.__doLog 
@@ -137,6 +201,13 @@ class Scheduler(object):
           break
     return
 
+  # Valid transitions:
+  #
+  #   PENDING -> RUNNING
+  #   RUNNING -> DONE
+  #   RUNNING -> BROKEN
+  #
+  # Any other transition indicates a scheduler bug.
   def __setState(self, taskId, new_state):
     assert(self.masterThread == threading.current_thread())
     old = self.jobs[taskId]["state"]
@@ -194,6 +265,18 @@ class Scheduler(object):
         self.workersQueue.put((0, 1, "__QUIT__", None))
 
   def __isQuiescent(self):
+    """
+    Return True when no more work can be performed.
+
+    The scheduler is quiescent when:
+    - no worker is executing a task
+    - no jobs are PENDING
+    - no jobs are RUNNING
+    - no activated jobs are waiting
+    - no notifications are pending
+    - no serial jobs are pending
+    At this point the build graph has fully converged.
+    """
     assert(self.masterThread == threading.current_thread())
     return (
         self.executingTasks == 0 and
@@ -215,6 +298,17 @@ class Scheduler(object):
         break
 
   def __tryActivate(self, taskId):
+    """
+    Attempt to activate a pending task.
+    A task becomes runnable when:
+    - all dependencies exist
+    - all dependencies are DONE
+
+    If any dependency is BROKEN then the task and all of its
+    downstream dependents are immediately marked BROKEN.
+
+    Successfully activated tasks are inserted into readyQueue.
+    """
     assert(self.masterThread == threading.current_thread())
     job = self.jobs[taskId]
     if job["state"] != State.PENDING:
@@ -225,6 +319,10 @@ class Scheduler(object):
       if d not in self.jobs:
         return
       dep_state = self.jobs[d]["state"]
+
+      # Dependency failure is propagated immediately through
+      # the reverse dependency graph so that downstream jobs
+      # do not remain pending waiting for a scheduler pass.
       if dep_state == State.BROKEN:
         error = f"Dependency {d} failed."
         stack = [taskId]
@@ -259,6 +357,9 @@ class Scheduler(object):
     return False
 
   def __addJob(self, job_type, taskId, priority, deps, tryActivate, *spec):
+    # queued=True means the job has already been activated and
+    # inserted into readyQueue. This prevents duplicate activation
+    # when multiple dependencies complete at nearly the same time.
     assert(self.masterThread == threading.current_thread())
     if taskId in self.jobs: return
     if taskId != self.final_job:
@@ -280,8 +381,20 @@ class Scheduler(object):
       self.__tryActivate(taskId)
  
   def __dispatchReadyJobs(self):
+    """
+    Dispatch runnable jobs.
+
+    Scheduling policy:
+    1. Move activated jobs from readyQueue.
+    2. Serial jobs are scheduled immediately.
+    3. Parallel jobs are collected in parallelReady.
+    4. Download jobs are limited by max_download.
+    5. Build jobs are limited by max_build.
+    6. ResourceManager may further restrict which
+       build jobs can run.
+    7. Eligible jobs are scheduled in priority order.
+    """
     assert(self.masterThread == threading.current_thread())
-    # 1. Drain readyQueue into a local batch
     ready = []
     while True:
       try:
@@ -307,6 +420,12 @@ class Scheduler(object):
     forceJobs = []
     bldCount = self.reservedJobsCount["max_build"]-self.reservedJobsCount["build"]
     dwnCount = self.reservedJobsCount["max_download"]-self.reservedJobsCount["download"]
+    # Sort by scheduler priority.
+    #
+    # Lower numeric values indicate higher priority.
+    # Jobs with identical priorities preserve scheduling
+    # order through the sequence number assigned when
+    # they are queued for execution.
     for taskId in sorted(self.parallelReady, key=lambda tid: self.jobs[tid].get("priority", 1)):
       job = self.jobs[taskId]
       taskType = job["task_type"]
