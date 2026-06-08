@@ -10,15 +10,30 @@ from rmanager import ResourceManager
 from enum import Enum
 
 class State(Enum):
+  # Represents newly added task
   PENDING = 1
+  # Job has been scheduled and queued for execution.
+  # A worker may not yet have started running it.
   RUNNING = 2
+  # Represents a successful task
   DONE = 3
+  # Represents a failed task
   BROKEN = 4
 
 class TaskTypes(Enum):
   SERIAL = 1
   PARALLEL = 2
 
+# Scheduler invariants:
+#
+# 1. Only the master thread may modify scheduler state.
+# 2. Workers communicate exclusively through notifyQueue.
+# 3. Every job is in exactly one state:
+#      PENDING, RUNNING, DONE or BROKEN.
+# 4. DONE and BROKEN are terminal states.
+# 5. A task enters RUNNING exactly once.
+# 6. Dependency activation is event-driven.
+# 7. Dependency failures propagate immediately through the reverse dependency graph.
 class Scheduler(object):
   """
   Event-driven dependency scheduler.
@@ -57,7 +72,14 @@ class Scheduler(object):
   def __init__(self, parallelThreads, logDelegate=None, buildStats=None, parallelDownloads=2, checkCycles=False):
     self.cv = threading.Condition()
     self.checkCycles = checkCycles
+
+    # Number of worker tasks currently executing.
+    #
+    # This differs from State.RUNNING because RUNNING includes
+    # jobs which have been scheduled but not yet picked up by a
+    # worker thread.
     self.executingTasks = 0
+
     self.shutdownRequested = False
 
     # Execution queue for parallel jobs.
@@ -98,7 +120,18 @@ class Scheduler(object):
     self.parallelReady = set()
 
     self.jobs = {}
+
+    # Reverse dependency graph:
+    #
+    #   task -> set(tasks depending on task)
+    #
+    # Used for:
+    #   - immediate activation of dependents
+    #   - failure propagation
+    #
+    # Avoids rescanning the entire job graph whenever a task completes.
     self.reverseDeps = {}
+
     self.stateCounter = {}
 
     # Monotonically increasing sequence number used to
@@ -193,6 +226,11 @@ class Scheduler(object):
         pass
       except KeyboardInterrupt:
         print("Ctrl-C received, shutting down")
+        # Shutdown is cooperative.
+        #
+        # Running jobs are allowed to complete.
+        # No new jobs are scheduled after shutdown is requested.
+        # Workers exit when they receive the synthetic __QUIT__ task.
         self.__requestShutdown()
       with self.cv:
         if self.shutdownRequested:
@@ -337,6 +375,12 @@ class Scheduler(object):
         return
       if dep_state != State.DONE:
         return
+
+    # Activation and dispatch are separated intentionally.
+    #
+    # Multiple jobs may become runnable at once. Deferring
+    # dispatch allows batching and enables resource-aware
+    # scheduling decisions.
     job["queued"] = True
     self.readyQueue.put(taskId)
     self.notifyMaster(self.__dispatchReadyJobs)
@@ -361,6 +405,10 @@ class Scheduler(object):
     # inserted into readyQueue. This prevents duplicate activation
     # when multiple dependencies complete at nearly the same time.
     assert(self.masterThread == threading.current_thread())
+    # Duplicate job definitions are ignored.
+    #
+    # This commonly occurs when multiple package specifications
+    # attempt to schedule the same logical task.
     if taskId in self.jobs: return
     if taskId != self.final_job:
       if self.final_job in deps:
@@ -440,6 +488,11 @@ class Scheduler(object):
         forceJobs.append(taskId)
     if bldCount>0 and buildJobs:
       if self.resourceManager:
+        # ResourceManager may reduce the set of runnable build
+        # jobs based on memory/CPU constraints.
+        #
+        # A job may therefore be runnable from a dependency
+        # perspective but still wait here until resources become available.
         buildJobs = self.resourceManager.allocResourcesForExternals(buildJobs, count=bldCount)
       else:
         buildJobs = buildJobs[:bldCount]
@@ -460,6 +513,9 @@ class Scheduler(object):
       if self.jobs[depTask]["state"] != State.PENDING:
         continue
       self.__tryActivate(depTask)
+    # This task can never trigger dependent activation again.
+    # Remove its reverse dependency entry to reduce memory
+    # usage and future graph traversals.
     self.reverseDeps.pop(taskId, None)
     self.notifyMaster(self.__dispatchReadyJobs)
   
