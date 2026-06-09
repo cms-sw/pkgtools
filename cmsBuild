@@ -66,6 +66,7 @@ scheduler = None
 scriptdir = ""
 archFirst = True
 packaging_steps = ("prep", "build", "install", "srpm", "rpms")
+priorities = {}
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -83,6 +84,20 @@ def remoteRsync(opts):
 
 def getNonSystemPackages(pkgs, opts):
     return [p for p in pkgs if p not in opts.useSystemTools] if opts.useSystemTools else pkgs
+
+
+def getPriority(package):
+    global priorities
+    if package in priorities: return priorities[package]
+    result = set()
+    stack = list(PKGFactory[package].reverseDependency)
+    while stack:
+        p = stack.pop()
+        if p not in result:
+            result.add(p)
+            stack.extend(PKGFactory[p].reverseDependency)
+    priorities[package] = 100000-len(result)
+    return priorities[package]
 
 
 def cmsdist_file(name, ext, options, pkgname):
@@ -1751,7 +1766,7 @@ class PackageFactory(object):
                 log("Read from cache: %s" % pkg.pkgName())
             break
         for dep in pkg.fullDependencies:
-          self[dep].requiredBy += 1
+            self[dep].reverseDependency.add(pkgName)
         if build_stats:
             if (not "packages" in build_stats) or (not "build" in build_stats["packages"]):
                 build_stats = None
@@ -2246,6 +2261,7 @@ class SubPackage(object):
         self.srpmfilename = parent.srpmfilename
         self.pkginstroot = parent.pkginstroot
         self.noCompilerOption = parent.noCompilerOption
+        self.reverseDependency = parent.reverseDependency
         self.parent = parent
 
     def dumpSpecFragment(self, computeSpecChecksum=True):
@@ -2377,7 +2393,7 @@ class Package(object):
         self.override_version = ""
         self.buildLogsToKeep = ""
         self.versionSuffix = True
-        self.requiredBy = 1
+        self.reverseDependency = set()
         self.buildWithRunPath = options.buildWithRunPath
         self.globalBuildOptions = ""
         self.buildOptions = ""
@@ -3785,14 +3801,15 @@ def scheduleInstallPackage(pkg, scheduler):
 
     scheduler.log("Checking if %s is cached." % pkg.name)
     actionName = "install-%s" % pkg.pkgName()
+    priority = getPriority(pkg.name)
     if checkCanInstallRpm(pkg):
         scheduler.log("%s is available from local RPMS area. Not building. Installing..." % pkg.pkgName())
-        scheduler.serial(actionName, [], installRpm, pkg, bootstrapped, scheduler)
+        scheduler.serial(actionName, priority, [], installRpm, pkg, bootstrapped, scheduler)
         return True
     if checkIfOnServer(pkg):
         scheduler.log("%s is available from remote repository \"%s\". Not building. Downloading and installing..." % (
             pkg.name, pkg.options.repository))
-        scheduler.serial(actionName, [], installApt, pkg, scheduler)
+        scheduler.serial(actionName, priority, [], installApt, pkg, scheduler)
         return True
     return False
 
@@ -4203,7 +4220,6 @@ def installPackage(pkg, scheduler):
     f.write(pkg.checksum)
     f.close()
     if pkg_error: raise RpmBuildFailed(pkg)
-    scheduler.reschedule()
     return
 
 
@@ -4327,7 +4343,6 @@ def checkPackageInCache(pkg, scheduler):
     scheduled = scheduleInstallPackage(pkg, scheduler)
     if scheduled:
         scheduler.log("Package %s found in repository" % pkgName)
-        scheduler.reschedule()
         return
     scheduler.log("Package %s not found in repository. Queuing for build." % pkgName)
     fetchDependencies = []
@@ -4351,8 +4366,9 @@ def checkPackageInCache(pkg, scheduler):
     check_rpm_task = "check-working-rpmbuild"
     buildActionDependencies = [check_rpm_task]
     if not check_rpm_task in scheduler.jobs:
-        scheduler.serial(check_rpm_task, [], checkRPMBuild)
+        scheduler.serial(check_rpm_task, -1, [], checkRPMBuild)
     pkgSources = pkg.sources + pkg.patches
+    priority = getPriority(pkg.name)
     if pkgSources:
         urls = [url for url in pkgSources if urlRe.match(url)]
         srcDeps = fetchDependencies
@@ -4360,40 +4376,36 @@ def checkPackageInCache(pkg, scheduler):
             srcDeps = []
             for url in urls:
                 srcDeps.append("download-%s" % getUrlChecksum(url))
-                scheduler.parallel(srcDeps[-1], fetchDependencies, fetchSources, pkg, scheduler, url)
-        scheduler.parallel("fetch-%s" % pkgName, srcDeps, fetchSources, pkg, scheduler)
+                scheduler.parallel(srcDeps[-1], priority, fetchDependencies, fetchSources, pkg, scheduler, url)
+        scheduler.parallel("fetch-%s" % pkgName, priority, srcDeps, fetchSources, pkg, scheduler)
         buildActionDependencies.append("fetch-%s" % pkgName)
     for p in getPackages(list(set(pkg.origDependencies+pkg.origBuildDependencies+pkg.installDependencies+pkg.uploadDependencies))):
         if not isPackageInstalled(p):
-            scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
+            scheduler.serial("check-%s" % p.pkgName(), getPriority(p.name), [], checkPackageInCache, p, scheduler)
             buildActionDependencies.append("install-%s" % p.pkgName())
-    for p in getPackages(pkg.fullDependencies):
-        if not isPackageInstalled(p):
-            scheduler.serial("check-%s" % p.pkgName(), [], checkPackageInCache, p, scheduler)
     scheduler.log("Dependencies for %s: %s" % (pkgName, buildActionDependencies))
     actions = []
     for action in packaging_steps:
         actions.append("build-%s-%s" % (action, pkgName))
     for idx in range(len(actions)):
-        scheduler.parallel(actions[idx], buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
-    scheduler.serial("install-%s" % pkgName, actions, installPackage, pkg, scheduler)
+        scheduler.parallel(actions[idx], priority, buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
+    scheduler.serial("install-%s" % pkgName, priority, [actions[-1]], installPackage, pkg, scheduler)
     # Install sub-packages too if any
     subinstallActionDependencies = ["install-%s" % pkgName]
     for subpkg in pkg.subpackages:
-        scheduler.serial("install-%s" % subpkg.pkgName(), subinstallActionDependencies, installPackage, subpkg,
+        scheduler.serial("install-%s" % subpkg.pkgName(), priority, subinstallActionDependencies, installPackage, subpkg,
                          scheduler)
     if isPackageStoreUploadEnabled(pkg):
         s3credentials = []
         if pkg.options.uploadPackageCacheS3:
             s3credentials += ["download-s3-credentials"]
-            scheduler.parallel("download-s3-credentials", [], downloadS3Credentials, scheduler)
+            scheduler.parallel("download-s3-credentials", priority, [], downloadS3Credentials, scheduler)
         for p in pkg.subpackages + [pkg]:
             uploadDependencies = s3credentials + ["install-%s" % p.pkgName()]
             if pkg.options.uploadPackageCacheS3:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), priority, uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
             else:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
-    scheduler.reschedule()
+                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), priority, uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
     return
 
 
@@ -4404,7 +4416,7 @@ def buildSpecs(topLevelPackages):
     scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log, build_stats)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
-            scheduler.serial("check-%s" % pkg.pkgName(), [], checkPackageInCache, pkg, scheduler)
+            scheduler.serial("check-%s" % pkg.pkgName(), 0, [], checkPackageInCache, pkg, scheduler)
 
     # We create before hand since we know they are going to be needed. This
     # is to avoid having parallel threads creating them at the same time with
