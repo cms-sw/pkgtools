@@ -54,6 +54,7 @@ rpm_db_cache = {}
 cmspkg_upload_cache = {"": []}
 rpm_upload_cache = {}
 cms_debug_packages = {}
+cms_cxx_standard_override = {}
 removeInitialSpace = re.compile(r"^[ ]*", re.M)
 cmsBuildFilename = abspath(__file__)
 pkgtools_dir = dirname (cmsBuildFilename)
@@ -2665,6 +2666,8 @@ class Package(object):
 
         if self.name in cms_debug_packages:
             checksumCalculator.addString("cms_debug_packages=%s" % ",".join(sorted(cms_debug_packages[self.name])))
+        if self.name in cms_cxx_standard_override:
+            checksumCalculator.addString("cms_cxx_standard_override=%s" % cms_cxx_standard_override[self.name])
 
         if self.buildWithRunPath:
             checksumCalculator.addString(DEFAULT_RPATH_PREAMBLE_INSTALL)
@@ -5234,6 +5237,10 @@ if __name__ == "__main__":
                     else:
                         archFirst = True
                     continue
+                if macro.startswith("cms_override_standard"):
+                   for item in macro.split(" ",1)[-1].strip().split(","):
+                        pkg, stdcxx = item.split("@")
+                        cms_cxx_standard_override[pkg] = stdcxx
                 if macro.startswith("cms_debug_packages "):
                     for dbg in macro.split(" ",1)[-1].strip().split(","):
                         pkg = dbg.split("/")[0]
