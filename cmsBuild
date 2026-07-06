@@ -170,7 +170,7 @@ def isDefaultRevision(rev):
 def patchSpecContents(sectionContents):
     found_EOF_INIT_SH = False
     found_lib64 = False
-    new_Cont = []
+    new_Cont = ["%{?install_package_license:%install_package_license}"]
     for l in sectionContents.split("\n"):
         new_Cont.append(l)
         if found_lib64:
@@ -2838,7 +2838,7 @@ class Package(object):
     def updateDependentCount(self):
         for dep in getPackages(self.fullDependencies): dep.dependentCounter += 1
 
-    def dumpSpec(self, saveScripts=False, forPackahing=False):
+    def dumpSpec(self, saveScripts=False, forPackaging=False):
         spec_heaader = "\n".join([l + " < %(rpmVersion)s" if l.startswith("Obsoletes: ") else l for l in SPEC_HEADER.split("\n")])
         self.spec = "\n".join([self.specPreHeader,
                                spec_heaader % self.__dict__,
@@ -2853,7 +2853,7 @@ class Package(object):
             if xtext:
                 self.spec += "\n"+xtext
         for section in self.sections.keys():
-            if forPackahing and section in ["%prep", "%build", "%install"]:
+            if forPackaging and section in ["%prep", "%build", "%install"]:
                 continue
             for subsection in self.sections[section].keys():
                 xpatchRE = re.compile(r"^(.*%patch)([0-9]+)(\s+.+)$")
@@ -3008,7 +3008,7 @@ class Package(object):
         return self.spec
 
     def getFinalSpecForPackaging(self):
-        self.dumpSpec(saveScripts=True, forPackahing=True)
+        self.dumpSpec(saveScripts=True, forPackaging=True)
         return self.spec
 
     def __hash__(self):
