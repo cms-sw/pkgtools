@@ -170,7 +170,7 @@ def isDefaultRevision(rev):
 def patchSpecContents(sectionContents):
     found_EOF_INIT_SH = False
     found_lib64 = False
-    new_Cont = ["%{?install_package_license:%install_package_license}"]
+    new_Cont = ["%{?install_package_license_init:%install_package_license_init}"]
     for l in sectionContents.split("\n"):
         new_Cont.append(l)
         if found_lib64:
@@ -187,6 +187,7 @@ def patchSpecContents(sectionContents):
             new_Cont[-1] = '[ ! -d %i/lib64 ] || export %{dynamic_path_var}="%i/lib64${%{dynamic_path_var}:+:$%{dynamic_path_var}}";'
             new_Cont.append(l)
             found_lib64 = True
+    new_Cont.append("%{?install_package_license:%install_package_license}")
     return "\n".join(new_Cont)
 
 
