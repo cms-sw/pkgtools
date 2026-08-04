@@ -3903,8 +3903,6 @@ def buildPackage(pkg, scheduler, index, actions):
         missingDirs = [d for d in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir]
                    if not exists(d)]
         scheduler.log("Creating directory %s if not existing." % pkg.builddir)
-        if not exists(pkg.builddir):
-            makedirs(pkg.builddir)
         for directory in missingDirs:
             makedirs(directory)
 
@@ -3979,8 +3977,7 @@ def buildPackage(pkg, scheduler, index, actions):
                        " %(pkg_macros)s" \
                        " %(spec)s >>%(logfile)s 2>&1" % optionsDict
     if index == 0:
-        pre_cmd = "rm -rf %(builddir)s/pkgtools-pkg-src-move2git %(xtmpdir)s; " \
-                  "mkdir -p %(xtmpdir)s; " % optionsDict
+        pre_cmd = "rm -rf %(builddir)s; mkdir -p %(builddir)s %(xtmpdir)s; " % optionsDict
         rpmbuildCommand = pre_cmd + rpmbuildCommand
     if last_action:
         rpmbuildCommand += " && rm -rf %(buildRoot)s" % optionsDict
