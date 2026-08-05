@@ -3977,7 +3977,7 @@ def buildPackage(pkg, scheduler, index, actions):
                        " %(pkg_macros)s" \
                        " %(spec)s >>%(logfile)s 2>&1" % optionsDict
     if index == 0:
-        pre_cmd = "rm -rf %(builddir)s; mkdir -p %(builddir)s %(xtmpdir)s; " % optionsDict
+        pre_cmd = "[ -d %(builddir)s ] && chmod -R u+w %(builddir)s ; rm -rf %(builddir)s; mkdir -p %(builddir)s %(xtmpdir)s; " % optionsDict
         rpmbuildCommand = pre_cmd + rpmbuildCommand
     if last_action:
         rpmbuildCommand += " && rm -rf %(buildRoot)s" % optionsDict
