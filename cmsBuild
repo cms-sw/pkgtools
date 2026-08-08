@@ -3903,6 +3903,8 @@ def buildPackage(pkg, scheduler, index, actions):
         missingDirs = [d for d in [rpmsCacheDir, finalRpmCacheDir, srpmsCacheDir]
                    if not exists(d)]
         scheduler.log("Creating directory %s if not existing." % pkg.builddir)
+        if not exists(pkg.builddir):
+            makedirs(pkg.builddir)
         for directory in missingDirs:
             makedirs(directory)
 
