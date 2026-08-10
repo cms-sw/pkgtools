@@ -2656,6 +2656,9 @@ class Package(object):
         if self.buildOptions:
             checksumCalculator.addStrings(self.buildOptions)
 
+        if self.versionSuffix and (self.options.tag == "hash"):
+            checksumCalculator.addString("force rebuild test3")
+
         if self.name in self.options.forceBuild:
             checksumCalculator.addStrings("ForceBuild: %s" % time())
 
