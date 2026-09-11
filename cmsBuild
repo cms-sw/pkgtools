@@ -4631,8 +4631,8 @@ def format(s, **kwds):
     return s % kwds
 
 
-def statusAndLog(status, s, **kwds):
-    log(s % kwds)
+def statusAndLog(status, s):
+    log(s)
     return status
 
 
@@ -4793,8 +4793,7 @@ def upload(opts, args, factory):
               deprecatePkgsClds.append(pkg)
             continue
         if not checker.checkIfUploadable():
-            statusAndLog(True, "Nothing needs to be uploaded for %(name)s.",
-                         name=pkg.pkgName())
+            log("Nothing needs to be uploaded for %s." % pkg.pkgName())
             continue
         uploadablePackages.append(pkg)
     if deprecatePkgs:
@@ -4803,13 +4802,12 @@ def upload(opts, args, factory):
             for d in [p.name for p in fullPackageList if pkg.name in p.fullDependencies]:
                 if (d not in pkg2deprecate) and (not [c for c in deprecatePkgsClds if d==c.name]):
                     pkg2deprecate.append(d)
-        statusAndLog(False, "ERROR: Build area not consistent. Not uploading.")
+        log("ERROR: Build area not consistent. Not uploading.")
         depCmd = deprecateLocalCommand(opts, getPackages(pkg2deprecate)+deprecatePkgsClds)
         err, out = executeScript(opts, depCmd)
-        statusAndLog(False, depCmd)
-        statusAndLog(False, "Exit code:%s" % err)
-        statusAndLog(False, out)
-        return False
+        log(depCmd)
+        log("Exit code:%s" % err)
+        return statusAndLog(False, out)
     fullPackageList = uploadablePackages
     if not fullPackageList:
         return statusAndLog(True, "Nothing needs to be uploaded")
