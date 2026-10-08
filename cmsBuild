@@ -101,6 +101,14 @@ def getPriority(package):
     return priorities[package]
 
 
+def get_repositories_list(repo):
+    parts = repo.split(".")
+    srepos = [".".join(parts[:i]) for i in range(len(parts), 0, -1)]
+    for exrepo in ['cms', 'cms.week0', 'cms.week1']:
+        if not exrepo in srepos: srepos.append(exrepo)
+    return srepos
+
+
 def cmsdist_file(name, ext, options, pkgname):
     fname = 'spec' if ext == '.spec' else name + ext
     s = join(pkgname, fname)
@@ -788,6 +796,10 @@ def hasNoCmsdistCacheProperty(s):
     return False
 
 
+def hasCmsdistExpandedGeneratedProperty(s):
+    return 'cmsdist-expanded-source=1' in s and hasCmsdistGeneratedProperty(s)
+
+
 def hasCmsdistGeneratedProperty(s):
     for prop in ['cmdist-generated', 'cmsdist-generated']:
         for x in ["+", "=1"]:
@@ -798,7 +810,7 @@ def hasCmsdistGeneratedProperty(s):
 
 
 def fixUrl(s):
-    for p in ['no-cmssdt-cache', 'cmdist-generated', 'cmsdist-generated']:
+    for p in ['no-cmssdt-cache', 'cmdist-generated', 'cmsdist-generated', 'cmsdist-expanded-source']:
         x = "%s+" % p
         if x in s:
             s = s.replace(x, '')
@@ -978,9 +990,7 @@ def download(source, dest, options, pkg=None):
         if dest and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
         return True
-    srepos = [options.repository]
-    for exrepo in ['cms', 'comp', 'cms.week0', 'cms.week1']:
-        if not exrepo in srepos: srepos.append(exrepo)
+    srepos = get_repositories_list(options.repository)
     success = False
     for mirror in [ options.server ] + options.source_mirror:
       for repo in srepos:
@@ -1428,15 +1438,18 @@ def getSourcesChecksum(pkg, sourcesNumbers):
     for s in sourcesNumbers:
         if hasCmsdistGeneratedProperty(s):
             has_cmsdist_generated = True
-            text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), getUrlChecksum(fixUrl(s)))
     if has_cmsdist_generated:
         for s in sourcesNumbers:
             filename = cmsdist_file(s, '.file', pkg.options, pkg.name)
+            chksum = None
             if exists(filename):
                 f = open(filename, 'rb')
                 m = md5adder(f.read())
                 f.close()
-                text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), m.hexdigest())
+                chksum = m.hexdigest()
+            else:
+                chksum = getUrlChecksum(fixUrl(s))
+            text += "%%define cmsdist_chksum_%s %s\n" % (sourcesNumbers[s].lower(), chksum)
     return text
 
 def calculateHumanReadableVersion(pkg):
@@ -3942,9 +3955,10 @@ def buildPackage(pkg, scheduler, index, actions):
     optionsDict["rpmenv"] = rpmEnvironmentScript
     optionsDict["_builddir"] = pkg.builddir
     optionsDict["spec"] = "%s/spec" % pkg.specdir
+    srepos = get_repositories_list(pkg.options.repository)
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                         "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
-                        "extraRpmDefines": getRpmDefines()})
+                        "extraRpmDefines": " %s --define \"package_repository %s\"" % (getRpmDefines(), " ".join(srepos))})
     if not pkg.options.bootstrap:
         optionsDict["nodeps"] = "--nodeps"
 
@@ -4893,6 +4907,19 @@ def upload(opts, args, factory):
         sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source))
                        for source in pkg.sources
                        if remoteSourceRE.match(source)]
+        for source in pkg.sources:
+            if hasCmsdistExpandedGeneratedProperty(source):
+                file_name = source.rsplit("/", 1)[1]
+                checksum = getUrlChecksum(source)
+                checksum_in = checksum[0:2]
+                txt_file = join(opts.workDir, "SOURCES", "cache", checksum_in, checksum, file_name)
+                with open(txt_file) as ref:
+                    for line in ref.readlines():
+                        sha = line.split(":", 1)[0]
+                        sha2 = sha[0:2]
+                        if exists(join(opts.workDir, "SOURCES", "cache", sha2, sha, sha)):
+                            sourceFiles.append((sha, sha))
+
         for filename, checksum in sourceFiles:
             checksum_in = checksum[0:2]
             if exists(join(opts.workDir, "SOURCES", "cache", checksum_in, checksum, ".no-cmsrep-upload")): continue
