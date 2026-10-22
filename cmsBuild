@@ -172,6 +172,14 @@ def isDefaultRevision(rev):
     return False
 
 
+def getS3SourceFilePath(filename, checksum):
+    return "SOURCES/%s/%s/%s" % (checksum[0:2], checksum, filename)
+
+
+def getLocalSourceFilePath(filename, checksum):
+    return "SOURCES/cache/%s/%s/%s" % (checksum[0:2], checksum, filename)
+
+
 # In order to not change the hash of all packages, we have this function
 # which can re-write the specs. For example adding %i/lib64 in to
 # library path if not already added
@@ -897,22 +905,22 @@ class DownloadOptions(object):
         self.pipPackage = options.pipPackage
 
 
-def getLocalSources(pkg, source_name, downloadDir, filename):
+def getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
     # check if given package's source location is overwritten to local file
     options = pkg.options
     local_source_dict = options.localSources
     pkg_name = pkg.name
     if (not pkg_name in local_source_dict) or (not source_name in local_source_dict[pkg_name]):
-        return
+        return False
 
     local_source_path = local_source_dict[pkg_name][source_name].rstrip("/$")
-    log("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
+    logMsg("Package %s source %s is taken from local path  %s" % (pkg_name, source_name, local_source_path))
     cmd = None
     ls_basename = os.path.basename(local_source_path)
     ls_dirname = os.path.dirname(local_source_path)
     if filename.endswith(".rpm") or filename.endswith("none"):
-        log("WARNING: the filename extension is not overwritable: %s " % filename)
-        return
+        logMsg("WARNING: the filename extension is not overwritable: %s " % filename)
+        return False
     elif os.path.isfile(local_source_path):
         cmd = "cp -f %(local_source_path)s %(downloadDir)s/%(filename)s" % locals()
     elif filename.endswith(".tgz") or filename.endswith(".tar.gz"):
@@ -932,13 +940,13 @@ def getLocalSources(pkg, source_name, downloadDir, filename):
         fatal("Error while packaging and moving local sources: \n\t error: %s \n\t error log: %s"
               "\n\t filename: %s \n\t source: %s \n\t local source path: %s " %
               (error, output, filename, source_name, local_source_path))
-    return
+    return True
 
-
-def download(source, dest, options, pkg=None):
+def download(source, dest, options, pkg=None, scheduler=None):
     source_name = pkg.sourcesNumbers[source] if pkg else None
     noCmssdtCache = hasNoCmsdistCacheProperty(source)
     isCmsdistGenerated = hasCmsdistGeneratedProperty(source)
+    isCmsdistExpandedGenerated = hasCmsdistExpandedGeneratedProperty(source)
     source = fixUrl(source)
     checksum = getUrlChecksum(source)
 
@@ -967,45 +975,60 @@ def download(source, dest, options, pkg=None):
             raise MalformedUrl(source)
         source = "cmstc://?%s%s%s&module=CMSSW&export=src&output=/%s" % (release, baserel, extratags, output)
 
-    cacheDir = abspath(join(options.workDir, "SOURCES/cache"))
+    logMsg = scheduler.log if scheduler else log
     urlTypeRe = re.compile(r"([^:+]*)([^:]*)://.*")
     match = urlTypeRe.match(source)
     if not urlTypeRe.match(source):
         raise MalformedUrl(source)
     downloadHandler = downloadHandlers[match.group(1)]
     filename = source.rsplit("/", 1)[1]
-    downloadDir = join(cacheDir, checksum[0:2], checksum)
+    realFile = abspath(join(options.workDir, getLocalSourceFilePath(filename, checksum)))
+    downloadDir = dirname (realFile)
     try:
         makedirs(downloadDir)
     except OSError as e:
         if not exists(downloadDir):
             raise downloadDir
 
-    realFile = join(downloadDir, filename)
     # This will will use source from local file system if --source for package was passed
     if source_name and options.localSources:
-        getLocalSources(pkg, source_name, downloadDir, filename)
+        if getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
+            r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
+            r.close ()
 
     if exists(realFile):
         if dest and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
         return True
-    srepos = get_repositories_list(options.repository)
-    success = False
-    for mirror in [ options.server ] + options.source_mirror:
-      for repo in srepos:
-        cachedFile = "%s/SOURCES/%s/%s/%s" % (mirror.rstrip("/"), repo, checksum, filename)
-        downloadOptions = DownloadOptions(options)
-        log("Trying to fetch cached file: %s" % cachedFile, DEBUG)
+    def fetchFromCache(url):
+        logMsg("Trying to fetch cached source file: %s" % url)
         getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
-        success = downloadHandlers["http"](cachedFile, downloadDir, downloadOptions, True)
-        if success:
-            noCmssdtCache = options.repository.startswith(repo)
-            break
+        return downloadHandlers["http"](url, downloadDir, downloadOptions, True)
 
-    if not success:
-        log("Trying to fetch source file: %s" % source, DEBUG)
+    success = False
+    downloadOptions = DownloadOptions(options)
+    s3file = getS3SourceFilePath(filename, checksum)
+    cacheUrl = "http://%s.%s/%s" % (opts.s3Bucket, opts.s3Server, s3file)
+    isInS3Cache = fetchFromCache(cacheUrl)
+    if not isInS3Cache:
+        srepos = get_repositories_list(options.repository)
+        for mirror in [ options.server ] + options.source_mirror:
+            for repo in srepos:
+              cacheUrl = "%s/SOURCES/%s/%s/%s" % (mirror.rstrip("/"), repo, checksum, filename)
+              success = fetchFromCache(cacheUrl)
+              if success:
+                  noCmssdtCache = options.repository.startswith(repo)
+                  break
+    else:
+        success = True
+        noCmssdtCache = True
+
+    if success:
+        logMsg("Successfully downloaded source from cache: %s" % cacheUrl)
+    elif (not success) and (not isCmsdistGenerated):
+        logMsg("Trying to fetch source file: %s" % source)
         success = downloadHandler(source, downloadDir, downloadOptions)
+
     if success:
         if noCmssdtCache:
             r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
@@ -1015,6 +1038,10 @@ def download(source, dest, options, pkg=None):
         f.close()
         if dest and exists(realFile) and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
+        if pkg and scheduler and (not isInS3Cache) and options.uploadPackageCacheS3:
+            scheduler.parallel("download-upload-store-src-%s" % checksum, 0, ["download-s3-credentials"], uploadSourceStoreS3, realFile, s3file, pkg, scheduler)
+    elif isCmsdistGenerated:
+        pkg.missingS3Sources.append((filename, checksum, isCmsdistExpandedGenerated))
     return (success or isCmsdistGenerated)
 
 
@@ -2368,6 +2395,7 @@ class Package(object):
         self.imports = []
         self.buildrequires = []
         self.sources = []
+        self.missingS3Sources = []
         self.sourcesNumbers = {}
         self.patches = []
         self.pkgreqs = "%{nil}"
@@ -3214,6 +3242,11 @@ def parseOptions():
                       help="Upload newly built packages to S3 object store",
                       action="store_true",
                       default=False)
+    parser.add_option("--upload-package-store-s3-source-only",
+                      dest="uploadPackageCacheS3SourceOnly",
+                      help="Upload newly built packages sources only to S3 object store",
+                      action="store_true",
+                      default=False)
     parser.add_option("--s3-server",
                       dest="s3Server",
                       help="S3 server for uploading newly built packages",
@@ -3485,6 +3518,8 @@ def parseOptions():
 
     if (not "-J" in opts.sshOptions) and (not "cern.ch" in socket.getfqdn()):
         opts.sshOptions = "%s -J %s@lxplus.cern.ch" % (opts.sshOptions, opts.uploadUser)
+    if opts.uploadPackageCacheS3SourceOnly:
+        opts.uploadPackageCacheS3 = True
     if opts.uploadPackageCacheS3:
         opts.uploadPackageCache=True
     if "gcc" in opts.useSystemTools:
@@ -3649,27 +3684,28 @@ def fetchLocal(pkg, sourceFilename):
 
 
 def fetchSources(pkg, scheduler, url=None):
-    sourcedir = pkg.sourcedir
     downloadables = []
+    local_src = True
     if url:
+      local_src = False
       downloadables = [url]
-      sourcedir = None
     else:
-      downloadables = pkg.sources + pkg.patches
-      scheduler.log("Fetching sources for %s" % pkg.name)
+      downloadables = [u for u in pkg.sources + pkg.patches if not urlRe.match(u)]
       if not downloadables:
           return
+      scheduler.log("Fetching local sources for %s" % pkg.name)
+
     for url in downloadables:
-        if urlRe.match(url):
+        if not local_src:
             try:
-                success = download(url, sourcedir, pkg.options, pkg)
+                success = download(url, pkg.sourcedir, pkg.options, pkg, scheduler)
             except MalformedUrl as e:
                 return str(e)
         else:
             output, success = fetchLocal(pkg, url)
         if not success:
             return "Unable to download %s" % url
-        if sourcedir:
+        if local_src:
             scheduler.log("Done fetching %s" % url)
     return
 
@@ -4079,31 +4115,51 @@ def downloadS3Credentials(scheduler):
         scheduler.log("Done downloading S3Credentials.")
     return
 
-def uploadStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
-   logfile = "%s/log" % pkg.builddir
-   if not exists(logfile):
-     scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
-     return
+def uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
    upload_log = join(opts.tempdir,"s3upload-"+pkg.pkgName()+".log")
-   s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d store/%(rpmfilename)s -c %(cred)s >>%(upload_log)s 2>&1",
+   s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d %(destFile)s -c %(cred)s >>%(upload_log)s 2>&1",
        upload_log=upload_log,
        pkgtools_dir=pkgtools_dir,
        s3Server=opts.s3Server,
        s3Bucket=opts.s3Bucket,
        cred=join(opts.tempdir,"credentials.txt"),
-       rpmfilename=rpmfilename,
-       srcFile=join(abspath("RPMS/cache"), pkg.checksum, rpmfilename))
+       srcFile=srcFile,
+       destFile=destFile)
    while max_try>0:
-       scheduler.log("Uploading to S3 store:%s: store/%s" % (max_try, rpmfilename))
+       scheduler.log("Uploading to S3 (%s): %s" % (max_try, destFile))
        (err, msg) = executeScript(opts, "timeout %s %s" % (timeout, s3_cmd), True)
        if err:
-           scheduler.log("ObjectStore: Warning, unable to upload %s to object store. See log %s" % (rpmfilename, upload_log))
+           scheduler.log("ObjectStore: Warning, unable to upload %s to object store. See log %s" % (destFile, upload_log))
            timeout += timeout_increment
            max_try -= 1
        else:
-           scheduler.log("Done uploading store/%s" % rpmfilename)
+           scheduler.log("Done uploading %s" % destFile)
            break
    return
+
+def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+   for (sname, checksum, expand_src) in pkg.missingS3Sources:
+       realFile = abspath(join(opts.workDir, getLocalSourceFilePath(sname, checksum)))
+       s3file = getS3SourceFilePath(sname, checksum)
+       exDeps = ["download-s3-credentials"]
+       if expand_src:
+           for (exName, exChecksum) in getExpandedGeneratedSources(realFile):
+               exFile = abspath(join(opts.workDir, getLocalSourceFilePath(exName, exChecksum)))
+               exS3file = getS3SourceFilePath(exName, exChecksum)
+               exDeps.append("download-upload-store-src-%s" % exChecksum)
+               scheduler.parallel(exDeps[-1], 0, ["download-s3-credentials"], uploadSourceStoreS3, exFile, exS3file, pkg, scheduler)
+       scheduler.parallel("download-upload-store-src-%s" % checksum, 0, exDeps, uploadSourceStoreS3, realFile, s3file, pkg, scheduler)
+   if opts.uploadPackageCacheS3SourceOnly: return
+   logfile = "%s/log" % pkg.builddir
+   if not exists(logfile):
+       scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
+       return
+   return uploadFileStoreS3(join(abspath("RPMS/cache"), pkg.checksum, filename),
+                            "store/%s" % filename,
+                            pkg, scheduler, timeout, timeout_increment, max_try)
+
+def uploadSourceStoreS3(filename, s3File, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+    return uploadFileStoreS3(filename, s3File, pkg, scheduler, timeout, timeout_increment, max_try)
 
 def uploadStore(rpmfilename, pkg, scheduler):
     logfile = "%s/log" % pkg.builddir
@@ -4749,6 +4805,28 @@ def cleanup_server_upload(opts):
     SERVER_TMP_UPLOAD_DIRECTORY = None
 
 
+def getExpandedGeneratedSources(txt_file):
+    sourceFiles = []
+    with open(txt_file) as ref:
+        for line in ref.readlines():
+            sha = line.split(":", 1)[0]
+            if exists(join(opts.workDir, "SOURCES", "cache", sha[0:2], sha, sha)):
+                sourceFiles.append((sha, sha))
+    return sourceFiles
+
+def getPackageGeneratedSources(pkg):
+    sourceFiles = []
+    for source in pkg.sources:
+        if hasCmsdistGeneratedProperty(source):
+            file_name = source.rsplit("/", 1)[1]
+            checksum = getUrlChecksum(source)
+            sourceFiles.append((file_name, checksum))
+            if hasCmsdistExpandedGeneratedProperty(source):
+                txt_file = join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, file_name)
+                sourceFiles += getExpandedGeneratedSources(txt_file)
+    return sourceFiles
+
+
 def upload(opts, args, factory):
     global SERVER_TMP_UPLOAD_DIRECTORY
     """New upload method. It uses the upload.sh server-side script for uploading
@@ -4906,23 +4984,11 @@ def upload(opts, args, factory):
         #        /some-file.tar.gz
         sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source))
                        for source in pkg.sources
-                       if remoteSourceRE.match(source)]
-        for source in pkg.sources:
-            if hasCmsdistExpandedGeneratedProperty(source):
-                file_name = source.rsplit("/", 1)[1]
-                checksum = getUrlChecksum(source)
-                checksum_in = checksum[0:2]
-                txt_file = join(opts.workDir, "SOURCES", "cache", checksum_in, checksum, file_name)
-                with open(txt_file) as ref:
-                    for line in ref.readlines():
-                        sha = line.split(":", 1)[0]
-                        sha2 = sha[0:2]
-                        if exists(join(opts.workDir, "SOURCES", "cache", sha2, sha, sha)):
-                            sourceFiles.append((sha, sha))
+                       if remoteSourceRE.match(source) and not hasCmsdistGeneratedProperty(source)]
+        sourceFiles += getPackageGeneratedSources(pkg)
 
         for filename, checksum in sourceFiles:
-            checksum_in = checksum[0:2]
-            if exists(join(opts.workDir, "SOURCES", "cache", checksum_in, checksum, ".no-cmsrep-upload")): continue
+            if exists(join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, ".no-cmsrep-upload")): continue
             sources += format(
                 "SRC_DIR=%(tmpdir)s/%(uploadSum)s/SOURCES\n"
                 "mkdir -p $SRC_DIR/cache/%(checksum_in)s/%(checksum)s\n"
@@ -4938,7 +5004,7 @@ def upload(opts, args, factory):
                 filename=filename,
                 uploadSum=uploadSum,
                 checksum=checksum,
-                checksum_in=checksum_in)
+                checksum_in=checksum[0:2])
 
     (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, sources]))
     logAndDieOnError(err, "Error while creating the local repository.\n"+out)
