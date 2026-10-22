@@ -4063,7 +4063,7 @@ def buildPackage(pkg, scheduler, index, actions):
     if error:
         if not exists(logfile):
             return "Error happened before any log output.\n%s" % output
-        logLines = open(logfile).readlines()
+        logLines = open(logfile, errors="ignore").readlines()
         return "Failed to build %s. Log file in %s. Final lines of the log file:\n%s" % (
             pkg.name, logfile, "".join(logLines[-20:]))
     if opts.deleteBuildDirectory and last_action:
