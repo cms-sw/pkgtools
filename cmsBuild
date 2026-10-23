@@ -172,11 +172,7 @@ def isDefaultRevision(rev):
     return False
 
 
-def getS3SourceFilePath(filename, checksum):
-    return "SOURCES/%s/%s/%s" % (checksum[0:2], checksum, filename)
-
-
-def getLocalSourceFilePath(filename, checksum):
+def getSourceFilePath(filename, checksum):
     return "SOURCES/cache/%s/%s/%s" % (checksum[0:2], checksum, filename)
 
 
@@ -982,7 +978,7 @@ def download(source, dest, options, pkg=None, scheduler=None):
         raise MalformedUrl(source)
     downloadHandler = downloadHandlers[match.group(1)]
     filename = source.rsplit("/", 1)[1]
-    realFile = abspath(join(options.workDir, getLocalSourceFilePath(filename, checksum)))
+    realFile = abspath(join(options.workDir, getSourceFilePath(filename, checksum)))
     downloadDir = dirname (realFile)
     try:
         makedirs(downloadDir)
@@ -1007,7 +1003,7 @@ def download(source, dest, options, pkg=None, scheduler=None):
 
     success = False
     downloadOptions = DownloadOptions(options)
-    s3file = getS3SourceFilePath(filename, checksum)
+    s3file = getSourceFilePath(filename, checksum)
     cacheUrl = "http://%s.%s/%s" % (opts.s3Bucket, opts.s3Server, s3file)
     isInS3Cache = fetchFromCache(cacheUrl)
     if not isInS3Cache:
@@ -4139,13 +4135,13 @@ def uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_in
 
 def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
    for (sname, checksum, expand_src) in pkg.missingS3Sources:
-       realFile = abspath(join(opts.workDir, getLocalSourceFilePath(sname, checksum)))
-       s3file = getS3SourceFilePath(sname, checksum)
+       realFile = abspath(join(opts.workDir, getSourceFilePath(sname, checksum)))
+       s3file = getSourceFilePath(sname, checksum)
        exDeps = ["download-s3-credentials"]
        if expand_src:
            for (exName, exChecksum) in getExpandedGeneratedSources(realFile):
-               exFile = abspath(join(opts.workDir, getLocalSourceFilePath(exName, exChecksum)))
-               exS3file = getS3SourceFilePath(exName, exChecksum)
+               exFile = abspath(join(opts.workDir, getSourceFilePath(exName, exChecksum)))
+               exS3file = getSourceFilePath(exName, exChecksum)
                exDeps.append("download-upload-store-src-%s" % exChecksum)
                scheduler.parallel(exDeps[-1], 0, ["download-s3-credentials"], uploadSourceStoreS3, exFile, exS3file, pkg, scheduler)
        scheduler.parallel("download-upload-store-src-%s" % checksum, 0, exDeps, uploadSourceStoreS3, realFile, s3file, pkg, scheduler)
