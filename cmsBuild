@@ -996,6 +996,7 @@ def download(source, dest, options, pkg=None, scheduler=None):
         if dest and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
         return True
+
     def fetchFromCache(url):
         logMsg("Trying to fetch cached source file: %s" % url)
         getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
@@ -3678,6 +3679,16 @@ def fetchLocal(pkg, sourceFilename):
     except Exception as e:
         return (sourceFilename, False)
 
+def packageSources(pkg, scheduler, url, checksum):
+    filename = fixUrl(url).rsplit("/", 1)[1]
+    linkFile = join(pkg.sourcedir, filename)
+    realFile = abspath(join(opts.workDir, getSourceFilePath(filename, checksum)))
+    if not exists(realFile):
+        return "Error: Unable to create symlink %s. Realfile %s does not exist" % (linkFile, realFile)
+    if not exists(linkFile):
+        symlink(realFile, linkFile)
+        scheduler.log("Symlink created: %s" % linkFile)
+    return
 
 def fetchSources(pkg, scheduler, url=None):
     downloadables = []
@@ -4447,8 +4458,11 @@ def checkPackageInCache(pkg, scheduler):
         if urls:
             srcDeps = []
             for url in urls:
-                srcDeps.append("download-%s" % getUrlChecksum(url))
-                scheduler.parallel(srcDeps[-1], priority, fetchDependencies, fetchSources, pkg, scheduler, url)
+                urlCheckSum = getUrlChecksum(url)
+                fetchTask = "download-%s" % urlCheckSum
+                scheduler.parallel(fetchTask, priority, fetchDependencies, fetchSources, pkg, scheduler, url)
+                srcDeps.append("download-%s-%s" % (pkg.name, urlCheckSum))
+                scheduler.parallel(srcDeps[-1], priority, [fetchTask], packageSources, pkg, scheduler, url, urlCheckSum)
         scheduler.parallel("fetch-%s" % pkgName, priority, srcDeps, fetchSources, pkg, scheduler)
         buildActionDependencies.append("fetch-%s" % pkgName)
     for p in getPackages(list(set(pkg.origDependencies+pkg.origBuildDependencies+pkg.installDependencies+pkg.uploadDependencies))):
