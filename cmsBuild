@@ -3988,9 +3988,12 @@ def buildPackage(pkg, scheduler, index, actions):
     optionsDict["_builddir"] = pkg.builddir
     optionsDict["spec"] = "%s/spec" % pkg.specdir
     srepos = get_repositories_list(pkg.options.repository)
+    extraMacros =  "--define \"package_repository %s\"" % " ".join(srepos)
+    extraMacros += " --define \"source_mirrors https://%s.%s\"" % (opts.s3Bucket, opts.s3Server)
+    extraMacros += " --define \"repository_server %s\"" % opts.server
     optionsDict.update({"prefix": getCommandPrefix(pkg.options),
                         "buildRoot": join(optionsDict["tmpdir"], "BUILDROOT", pkg.checksum),
-                        "extraRpmDefines": " %s --define \"package_repository %s\"" % (getRpmDefines(), " ".join(srepos))})
+                        "extraRpmDefines": " %s %s" % (getRpmDefines(), extraMacros)})
     if not pkg.options.bootstrap:
         optionsDict["nodeps"] = "--nodeps"
 
