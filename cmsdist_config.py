@@ -9,4 +9,9 @@ DISABLE_AUTO_PROVIDE_REQUIRES = [
   compile("^data-[A-Z][A-Za-z0-9]+-[A-Za-z][A-Za-z0-9]+$"),
   compile("^geant4-G4[a-zA-Z0-9]+$")
 ]
+NO_STORE_CACHE_SOURCES = [
+  compile("cmssw"), compile("cmssw-patch"), compile("cmssw-ib"),
+  compile("fwlite"), compile("fwlite-patch"),
+  compile("^data-[A-Z][A-Za-z0-9]+-[A-Za-z][A-Za-z0-9]+$")
+]
 NO_AUTO_RUNPATH = []
