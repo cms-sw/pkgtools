@@ -3860,7 +3860,7 @@ def isPackageStoreUploadEnabled(pkg):
 def downloadFromStore(pkg, scheduler):
     for p in pkg.subpackages + [pkg]:
         download_ok = False
-        for store in ["http://%s.%s/store" % (opts.s3Bucket, opts.s3Server), "http://%s/cmssw/store" % opts.uploadServer]:
+        for store in ["http://%s.%s/store" % (opts.s3Bucket, opts.s3Server)]:
             cache_url = "%s/%s" % (store, p.rpmfilename)
             if downloadUrllib2(cache_url, pkg.builddir, opts, cmscache=False):
                 download_ok = True
@@ -3939,6 +3939,13 @@ def buildPackage(pkg, scheduler, index, actions):
         if downloadFromStore(pkg, scheduler):
             scheduler.log("ObjectStore: Reused package %s from store." % pkg.pkgName())
             create_rpm_links()
+            s3cred = "download-s3-credentials"
+            scheduler.parallel(s3cred, 0, [], downloadS3Credentials, scheduler)
+            for p in pkg.subpackages + [pkg]:
+                touchTask = "download-upload-store-touch-%s" % basename(p.rpmfilename)
+                dwnTask   = "download-upload-store-%s" % basename(p.rpmfilename)
+                scheduler.parallel(touchTask, 0, [s3cred, dwnTask], touchStoreS3, p.rpmfilename, p, scheduler)
+                scheduler.forceDone(dwnTask)
             scheduler.log("Build successful %s." % pkg.pkgName())
             for idx in range(len(actions)-1, 0, -1):
                 scheduler.forceDone(actions[idx])
@@ -4079,31 +4086,43 @@ def downloadS3Credentials(scheduler):
         scheduler.log("Done downloading S3Credentials.")
     return
 
-def uploadStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
-   logfile = "%s/log" % pkg.builddir
-   if not exists(logfile):
-     scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
-     return
+def _uploadStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
    upload_log = join(opts.tempdir,"s3upload-"+pkg.pkgName()+".log")
-   s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d store/%(rpmfilename)s -c %(cred)s >>%(upload_log)s 2>&1",
+   s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d %(destFile)s -c %(cred)s >>%(upload_log)s 2>&1",
        upload_log=upload_log,
        pkgtools_dir=pkgtools_dir,
        s3Server=opts.s3Server,
        s3Bucket=opts.s3Bucket,
        cred=join(opts.tempdir,"credentials.txt"),
-       rpmfilename=rpmfilename,
-       srcFile=join(abspath("RPMS/cache"), pkg.checksum, rpmfilename))
+       destFile=destFile,
+       srcFile=srcFile)
    while max_try>0:
-       scheduler.log("Uploading to S3 store:%s: store/%s" % (max_try, rpmfilename))
+       scheduler.log("Uploading to S3 store:%s: %s" % (max_try,  destFile))
        (err, msg) = executeScript(opts, "timeout %s %s" % (timeout, s3_cmd), True)
        if err:
-           scheduler.log("ObjectStore: Warning, unable to upload %s to object store. See log %s" % (rpmfilename, upload_log))
+           scheduler.log("ObjectStore: Warning, unable to upload %s to object store. See log %s" % (destFile, upload_log))
            timeout += timeout_increment
            max_try -= 1
        else:
-           scheduler.log("Done uploading store/%s" % rpmfilename)
+           scheduler.log("Done uploading %s" % destFile)
            break
    return
+
+def touchStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+   srcFile = join(opts.tempdir, "empty_file")
+   destFile = ".meta_data/store/%s" % rpmfilename
+   getstatusoutput("touch %s" % srcFile)
+   _uploadStoreS3(srcFile, destFile, pkg, scheduler, timeout, timeout_increment, max_try)
+
+def uploadStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+   logfile = "%s/log" % pkg.builddir
+   if not exists(logfile):
+     scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
+     return
+   touchStoreS3(rpmfilename, pkg, scheduler, timeout, timeout_increment, max_try)
+   srcFile = join(abspath("RPMS/cache"), pkg.checksum, rpmfilename)
+   destFile = "store/%s" % rpmfilename
+   _uploadStoreS3(srcFile, destFile,  pkg, scheduler, timeout, timeout_increment, max_try)
 
 def uploadStore(rpmfilename, pkg, scheduler):
     logfile = "%s/log" % pkg.builddir
