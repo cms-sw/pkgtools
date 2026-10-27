@@ -69,7 +69,7 @@ class Scheduler(object):
   counts so that packages which unlock the largest portion
   of the dependency graph are scheduled first.
   """
-  def __init__(self, parallelThreads, logDelegate=None, buildStats=None, parallelDownloads=2, checkCycles=False):
+  def __init__(self, parallelThreads, logDelegate=None, buildStats=None, parallelDownloads=4, checkCycles=False):
     self.cv = threading.Condition()
     self.checkCycles = checkCycles
 
