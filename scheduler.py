@@ -195,14 +195,14 @@ class Scheduler(object):
       return
     self.__addJob(TaskTypes.SERIAL, taskId, priority, deps, True, self.__doSerial, taskId, *spec)
 
-  def forceDone(self, taskId):
+  def forceDone(self, taskId, error=""):
     if threading.current_thread() is not self.masterThread:
-      self.notifyMaster(self.forceDone, taskId)
+      self.notifyMaster(self.forceDone, taskId, error)
       return
     self.__addJob(TaskTypes.SERIAL, taskId, 1, [], False, [])
     if self.jobs[taskId]["state"] != State.PENDING: return
     self.__setState(taskId, State.RUNNING)
-    self.__updateJobStatus(taskId, "")
+    self.__updateJobStatus(taskId, error)
 
   def notifyMaster(self, *commandSpec):
     self.notifyQueue.put((threading.currentThread(), commandSpec))
@@ -237,6 +237,9 @@ class Scheduler(object):
           break
         if self.__isQuiescent():
           break
+        if self.__isStalled():
+            self.log("WARNING: Scheduler appears stalled", 0)
+            self.__checkPendingTasks()
     return
 
   # Valid transitions:
@@ -325,6 +328,28 @@ class Scheduler(object):
         self.notifyQueue.empty() and
         self.resultsQueue.empty()
     )
+
+  def __isStalled(self):
+    assert(self.masterThread == threading.current_thread())
+    return (
+        self.stateCounter[State.PENDING] > 0 and
+        self.stateCounter[State.RUNNING] == 0 and
+        self.executingTasks == 0 and
+        self.readyQueue.empty() and
+        not self.parallelReady and
+        self.notifyQueue.empty() and
+        self.resultsQueue.empty()
+    )
+
+  def __checkPendingTasks(self):
+    assert(self.masterThread == threading.current_thread())
+    for taskId, job in self.jobs.items():
+      if job["state"] != State.PENDING:
+        continue
+      missing = [dep for dep in job["deps"] if dep not in self.jobs]
+      if missing:
+        self.forceDone(taskId, "  Task %s is pending with unregistered dependencies: %s" % (taskId, ", ".join(missing)))
+    return
 
   def __doNotifications(self):
     assert(self.masterThread == threading.current_thread())
@@ -601,7 +626,8 @@ def run_test(scheduler, skip_run=False):
         if scheduler.jobs[j]["state"] == State.PENDING:
           print("JOB  %s %s %s" % (j , scheduler.jobs[j]["scheduler"], scheduler.jobs[j]["state"]))
           for dep in scheduler.jobs[j]["deps"]:
-            print("  DEP: %s %s %s" % (dep, scheduler.jobs[j]["scheduler"], scheduler.jobs[dep]["state"]))
+            if dep in scheduler.jobs:
+              print("  DEP: %s %s %s" % (dep, scheduler.jobs[j]["scheduler"], scheduler.jobs[dep]["state"]))
     assert(scheduler.stateCounter[state]==0)
   for item in scheduler.reservedJobsCount.keys():
     if item.startswith("max_"):
@@ -609,11 +635,14 @@ def run_test(scheduler, skip_run=False):
     assert(scheduler.reservedJobsCount[item]==0)
   for task_id, job in scheduler.jobs.items():
     for dep in job.get("deps", []):
+        if not dep in scheduler.jobs: continue
         if scheduler.jobs[dep]["state"] == State.DONE:
             assert(dep in scheduler.doneJobs)
             assert(dep in scheduler.doneOrdered)
   for task_id in scheduler.doneJobs:
     for dep in scheduler.jobs[task_id]["deps"]:
+        if scheduler.jobs[dep]["state"] == State.PENDING: continue
+        if not dep in scheduler.jobs: continue
         assert(dep in scheduler.doneJobs)
         assert(dep in scheduler.doneOrdered)
   all_jobs = set(scheduler.jobs.keys())
@@ -719,6 +748,35 @@ if __name__ == "__main__":
   # it is always broken if something else is brokend.
   assert(scheduler.stateCounter[State.BROKEN] == 2)
   assert(scheduler.stateCounter[State.DONE] == 0)
+
+  # Detect a stalled task with a missing dependency.
+  scheduler = Scheduler(2)
+  scheduler.parallel("upload-source",1, ["download-s3-credentials"],dummyTask)
+  assert(scheduler.stateCounter[State.PENDING] == 1)
+  assert(scheduler.stateCounter[State.RUNNING] == 0)
+
+  # Check that missing dependencies are reported.
+  scheduler = Scheduler(2)
+  scheduler.parallel("upload-source",1, ["download-s3-credentials"],dummyTask)
+  assert(scheduler.stateCounter[State.PENDING] == 1)
+  assert(scheduler.stateCounter[State.RUNNING] == 0)
+
+  # A runnable task must not be reported as stalled.
+  scheduler = Scheduler(2)
+  scheduler.parallel("build-test", 1, [], dummyTask)
+  assert(scheduler.stateCounter[State.PENDING] == 1)
+  run_test(scheduler)
+
+  # Report a task which has a missing dep
+  scheduler = Scheduler(2)
+  scheduler.parallel("build-test1", 1, [], dummyTask)
+  scheduler.parallel("build-test2", 1, ["unknow"], dummyTask)
+  run_test(scheduler)
+  assert(scheduler.errors["build-test2"])
+  err = scheduler.errors["build-test2"]
+  assert('build-test2 is pending' in err)
+  assert('unregistered dependencies' in err)
+  assert('unknow' in err)
 
   # Check dependency actually works.
   scheduler = Scheduler(10)
