@@ -309,3 +309,9 @@ DEFAULT_BUILD_POSTAMBLE="""
 touch %_builddir/files
 """
 
+ADDITIONAL_PRE_SECTIONS_DATA = {
+  "%prep" : ['%define builddir %{override_builddir}', '%define _builddir %{override_builddir}'],
+}
+
+ADDITIONAL_POST_SECTIONS_DATA = {
+}
