@@ -2921,9 +2921,11 @@ class Package(object):
                                 patchedContents += l + "\n"
                             sectionContents = patchedContents + "\n%{package_final_source}"
                         if (section in ["%build", "%install", "%prep"]) and (subsection == ""):
+                            pre_contents = '\n'.join(ADDITIONAL_PRE_SECTIONS_DATA.get(section, []))
+                            post_contents = '\n'.join(ADDITIONAL_POST_SECTIONS_DATA.get(section, []))
                             secScript = "cmsdist-%s.sh" % section[1:]
-                            sectionContents = "cat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s" % (
-                                secScript, secScript, sectionContents)
+                            sectionContents = "%s\ncat $0 | grep -v '%%_builddir/%s' > %%_builddir/%s\n%s\n%s" % (
+                                pre_contents, secScript, secScript, sectionContents, post_contents)
                         if section in ["%install"]:
                             sectionContents = patchSpecContents(sectionContents)
                         if self.options.reference and (section in ["%install"]):
@@ -4051,7 +4053,7 @@ def buildPackage(pkg, scheduler, index, actions):
                        " rpmbuild %(nodeps)s --noclean --buildroot %(buildRoot)s %(rpmbuild_stage)s" \
                        " --define '_smp_build_nthreads %(compiling_processes)s'" \
                        " --define '_topdir %(topdir)s' %(makeprocesses)s %(ignoreCompileErrors)s" \
-                       " --define '_builddir %(_builddir)s' %(extraRpmDefines)s" \
+                       " --define '_builddir %(_builddir)s' --define 'override_builddir %(_builddir)s' %(extraRpmDefines)s" \
                        " %(pkg_macros)s" \
                        " %(spec)s >>%(logfile)s 2>&1" % optionsDict
     if index == 0:
