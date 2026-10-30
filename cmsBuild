@@ -3695,7 +3695,9 @@ def packageSources(pkg, scheduler, url, checksum):
     linkFile = join(pkg.sourcedir, filename)
     realFile = abspath(join(opts.workDir, getSourceFilePath(filename, checksum)))
     if not exists(realFile):
-        return "Error: Unable to create symlink %s. Realfile %s does not exist" % (linkFile, realFile)
+        if not hasCmsdistGeneratedProperty(url):
+            return "Error: Unable to create symlink %s. Realfile %s does not exist" % (linkFile, realFile)
+        return
     if not exists(linkFile):
         symlink(realFile, linkFile)
         scheduler.log("Symlink created: %s" % linkFile)
