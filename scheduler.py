@@ -279,7 +279,6 @@ class Scheduler(object):
     while True:
       pri, seq, taskId, item = self.workersQueue.get()
       if taskId == "__QUIT__":
-        self.log("Requested to quit. %s" % threading.current_thread())
         return
       with self.cv:
         self.executingTasks += 1
