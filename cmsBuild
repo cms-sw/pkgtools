@@ -1013,19 +1013,21 @@ def download(source, dest, options, pkg=None, scheduler=None):
     downloadOptions = DownloadOptions(options)
     s3file = getSourceFilePath(filename, checksum)
     cacheUrl = "http://%s.%s/%s" % (opts.s3Bucket, opts.s3Server, s3file)
-    isInS3Cache = fetchFromCache(cacheUrl)
-    if not isInS3Cache:
-        srepos = get_repositories_list(options.repository)
-        for mirror in [ options.server ] + options.source_mirror:
-            for repo in srepos:
-              cacheUrl = "%s/SOURCES/%s/%s/%s" % (mirror.rstrip("/"), repo, checksum, filename)
-              success = fetchFromCache(cacheUrl)
-              if success:
-                  noCmssdtCache = options.repository.startswith(repo)
-                  break
-    else:
-        success = True
-        noCmssdtCache = True
+    isInS3Cache = False
+    if not noCmssdtCache:
+        isInS3Cache = fetchFromCache(cacheUrl)
+        if not isInS3Cache:
+            srepos = get_repositories_list(options.repository)
+            for mirror in [ options.server ] + options.source_mirror:
+                for repo in srepos:
+                    cacheUrl = "%s/SOURCES/%s/%s/%s" % (mirror.rstrip("/"), repo, checksum, filename)
+                    success = fetchFromCache(cacheUrl)
+                    if success:
+                        noCmssdtCache = options.repository.startswith(repo)
+                        break
+        else:
+            success = True
+            noCmssdtCache = True
 
     if success:
         logMsg("Successfully downloaded source from cache: %s" % cacheUrl)
