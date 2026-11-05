@@ -4969,7 +4969,7 @@ def upload(opts, args, factory):
         tmpdir=tmpdir,
         uploadSum=uploadSum)
     # Hard-link packages.
-    md5sum = "md5sum $r | awk '{print $1}'"
+    chksum = "sha256sum $r | awk '{print \"sha256:\"$1}'"
     if sys.platform == 'darwin': md5sum = "md5 -q $r"
     hardLinkPackages = format(
         "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
@@ -4982,7 +4982,7 @@ def upload(opts, args, factory):
         "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/${rn}.rpm\n"
         "    dep=%(workdir)s/%(tempDirPrefix)s/${rn}.dep\n"
         "    if [ -e $dep ] ; then cp -f $dep %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/; fi\n"
-        "    echo $(basename $r)\" \"$(%(md5sum)s) >> $MD5CACHE\n"
+        "    echo $(basename $r)\" \"$(%(chksum)s) >> $MD5CACHE\n"
         "  done\n"
         "done\n"
         "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
@@ -4997,7 +4997,7 @@ def upload(opts, args, factory):
         includes=" ".join(pkgChecksums),
         architecture=opts.architecture,
         uploadSum=uploadSum,
-        md5sum=md5sum)
+        chksum=chksum)
     # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
     # there is no risk of screwing up the repository by copying some unwanted
     # driver / cmsos.
