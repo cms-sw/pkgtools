@@ -4978,8 +4978,6 @@ def upload(opts, args, factory):
     if sys.platform == 'darwin': md5sum = "md5 -q $r"
     hardLinkPackages = format(
         "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
-        "GPG_FILE=%(tmpdir)s/%(uploadSum)s/gpg.txt\n"
-        "%(gpg_request)s $GPG_FILE\n"
         "touch $MD5CACHE\n"
         "for h in %(includes)s ; do\n"
         "  hi=$(echo $h | sed 's|^\\(..\\).*|\\1|')\n"
@@ -5072,12 +5070,13 @@ def upload(opts, args, factory):
     if err: logAndDieOnError(err, "Error while uploading to remote repository.\n"+msg)
 
     upload = format(
-        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s'\n",
+        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s' '%(gpg)s'\n",
         tmpdir=tmpdir,
         tmpUploadDir=basename(uploadDir),
         architecture=opts.architecture,
         cmspkg_upload_repo=cmspkg_upload_repo,
         useDev=useDev,
+        gpg="true" if opts.gpgSignature else "false",
         inc="true" if opts.linkParentRepository else "false",
         **repoInfo)
     (err, msg) = executeScript(opts, upload, False)
