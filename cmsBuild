@@ -3485,6 +3485,11 @@ def parseOptions():
                           action="store_true",
                           help="When upload without sync-back then do not copy parents repository packages but just create a link. tag=hash will be used if this is set.",
                           default=False)
+    uploadGroup.add_option("--gpg-signature",
+                          dest="gpgSignature",
+                          action="store_true",
+                          help="Request the server to sign the uploaded transaction.",
+                          default=False)
 
 
     uploadGroup.add_option("--server-apt-env",
@@ -4973,6 +4978,8 @@ def upload(opts, args, factory):
     if sys.platform == 'darwin': md5sum = "md5 -q $r"
     hardLinkPackages = format(
         "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
+        "GPG_FILE=%(tmpdir)s/%(uploadSum)s/gpg.txt\n"
+        "%(gpg_request)s $GPG_FILE\n"
         "touch $MD5CACHE\n"
         "for h in %(includes)s ; do\n"
         "  hi=$(echo $h | sed 's|^\\(..\\).*|\\1|')\n"
@@ -4997,6 +5004,7 @@ def upload(opts, args, factory):
         includes=" ".join(pkgChecksums),
         architecture=opts.architecture,
         uploadSum=uploadSum,
+        gpg_request="touch" if opts.gpgSignature else "rm -f",
         chksum=chksum)
     # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
     # there is no risk of screwing up the repository by copying some unwanted
