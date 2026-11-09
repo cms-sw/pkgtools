@@ -69,6 +69,8 @@ scriptdir = ""
 archFirst = True
 packaging_steps = ("prep", "build", "install", "srpm", "rpms")
 priorities = {}
+ReSha256 = r'^[0-9a-f]{64}$'
+S3Prefix=""
 
 def fatal(message):
     print ("ERROR: " + message)
@@ -945,9 +947,55 @@ def getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
               (error, output, filename, source_name, local_source_path))
     return True
 
+def gpgVerify(srcFile):
+    CMS_GPG_FINGERPRINT = '691D763181AC4F2D478859E2DBF691DEF8BF6386'
+    CMS_GPG_SIGN = 'CMSPKG-METADATA-SIGNATURE-V1'
+    err, out  = getstatusoutput("sha256sum %s | cut -d' ' -f1 " % srcFile)
+    if err:
+        return  (False , "GPG: Failed to get sha256 checksum.\n%s" % out)
+    msg = "%s %s" % (CMS_GPG_SIGN, out)
+    sigfile = srcFile + ".sig"
+    err, out = getstatusoutput("echo -n '%s' | gpg --batch --status-fd 1 --verify %s -"  % (msg, sigfile))
+    if err:
+        return (False, "GPG: Failed to run gpg verify cmd\n%s" % out)
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[0] == '[GNUPG:]' and fields[1] == 'VALIDSIG':
+            fingerprint = fields[2].upper()
+            primary_fingerprint = fields[-1].upper()
+            if CMS_GPG_FINGERPRINT in (fingerprint, primary_fingerprint):
+                return (True, "")
+    return (False, "GPG: Failed to verify the signatures.")
+
+def fetchFromCache(url, downloadDir, downloadOptions, logMsg, gpg_verify=0):
+    # gpg_verify: On succeassfull download
+    #  0:  do not verify
+    #  1:  verify if gpg signature file exists
+    #  2:  success on verify otherwise fail
+    try:
+        makedirs(downloadDir)
+    except OSError as e:
+        if not exists(downloadDir):
+            raise downloadDir
+    logMsg("Trying to fetch cached source file: %s" % url)
+    getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
+    success = downloadHandlers["http"](url, downloadDir, downloadOptions, True)
+    if success and gpg_verify>0:
+        verify = downloadHandlers["http"](url+".sig", downloadDir, downloadOptions, True)
+        if verify:
+            success, msg = gpgVerify (join(downloadDir, url.split("/")[-1]))
+            if not success:
+                logMsg("%s: %s" % (msg, url))
+            else:
+                logMsg("GPG signatures varified %s" % url)
+        else:
+            logMsg("GPG: Could not find GPG signature file. %s.sig" % url)
+            success = gpg_verify==1
+    return success
+
 def download(source, dest, options, pkg=None, scheduler=None):
     source_name = pkg.sourcesNumbers[source] if pkg else None
-    noCmssdtCache = hasNoCmsdistCacheProperty(source)
+    cmssdtCache = not hasNoCmsdistCacheProperty(source)
     isCmsdistGenerated = hasCmsdistGeneratedProperty(source)
     isCmsdistExpandedGenerated = hasCmsdistExpandedGeneratedProperty(source)
     source = fixUrl(source)
@@ -987,14 +1035,10 @@ def download(source, dest, options, pkg=None, scheduler=None):
     filename = source.rsplit("/", 1)[1]
     realFile = abspath(join(options.workDir, getSourceFilePath(filename, checksum)))
     downloadDir = dirname (realFile)
-    try:
-        makedirs(downloadDir)
-    except OSError as e:
-        if not exists(downloadDir):
-            raise downloadDir
 
     # This will will use source from local file system if --source for package was passed
     if source_name and options.localSources:
+        makedirs(downloadDir)
         if getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
             r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
             r.close ()
@@ -1004,34 +1048,54 @@ def download(source, dest, options, pkg=None, scheduler=None):
             symlink(realFile, join(dest, filename))
         return True
 
-    def fetchFromCache(url):
-        logMsg("Trying to fetch cached source file: %s" % url)
-        getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
-        return downloadHandlers["http"](url, downloadDir, downloadOptions, True)
-
     success = False
-    downloadOptions = DownloadOptions(options)
-    s3file = getSourceFilePath(filename, checksum)
-    cacheUrl = "http://%s.%s/%s" % (opts.s3Bucket, opts.s3Server, s3file)
     isInS3Cache = False
-    if not noCmssdtCache:
-        isInS3Cache = fetchFromCache(cacheUrl)
-        if not isInS3Cache:
-            srepos = get_repositories_list(options.repository)
-            for mirror in [ options.server ] + options.source_mirror:
-                for repo in srepos:
-                    cacheUrl = "%s/SOURCES/%s/%s/%s" % (mirror.rstrip("/"), repo, checksum, filename)
-                    success = fetchFromCache(cacheUrl)
-                    if success:
-                        noCmssdtCache = options.repository.startswith(repo)
+    downloadOptions = DownloadOptions(options)
+    origCmssdtCache = cmssdtCache
+    if cmssdtCache:
+        filesToDownlaod = [(filename, checksum, realFile)]
+        fetchRes = []
+        while len(filesToDownlaod):
+            fetchRes.append({"success": False, "cmssdtCache": True})
+            fname, chksum, destFile = filesToDownlaod.pop()
+            rfile = getSourceFilePath(fname, chksum)
+            sfile = abspath(join(options.workDir, rfile))
+            sDir = dirname (sfile)
+            url = "http://%s.%s/%s%s" % (opts.s3Bucket, opts.s3Server, S3Prefix, rfile)
+            fetchRes[-1]['isInS3Cache'] = fetchFromCache(url, sDir, downloadOptions, logMsg, gpg_verify=2)
+            if not fetchRes[-1]['isInS3Cache']:
+                for base_url in ["%s/SOURCES/%s" % (mirror.rstrip("/"), repo)
+                                 for mirror in [ options.server ] + options.source_mirror
+                                 for repo in get_repositories_list(options.repository)]:
+                    url = "%s/%s/%s" % (base_url, chksum, fname)
+                    if fetchFromCache(url, sDir, downloadOptions, logMsg, gpg_verify=2):
+                        fetchRes[-1]["cmssdtCache"] = not options.repository.startswith(base_url.split("/")[-1])
+                        fetchRes[-1]["success"] = True
                         break
-        else:
-            success = True
-            noCmssdtCache = True
+            else:
+                fetchRes[-1]["success"] = True
+                fetchRes[-1]["cmssdtCache"] = False
+            if not fetchRes[-1]["success"]: break
+            logMsg("Successfully downloaded source from cache: %s" % url)
+            if isCmsdistExpandedGenerated:
+                dfile = abspath(join(options.workDir, destFile))
+                if (len(fetchRes)==1):
+                    with open(realFile) as ref:
+                        for line in ref.readlines():
+                            data = line.split(":")
+                            filesToDownlaod.append([data[0], data[0], data[-1].lstrip("/")])
+                elif not exists(dfile):
+                    err, out = getstatusoutput("install -D %s %s" % (sfile, dfile))
+                    if err:
+                        logMsg("Failed to copy generated file %s\n%s" % (dfile, out))
+                        getstatusoutput("rm -f %s" % realFile)
+                        return False
 
-    if success:
-        logMsg("Successfully downloaded source from cache: %s" % cacheUrl)
-    elif (not success) and (not isCmsdistGenerated):
+        success = fetchRes[0]["success"]
+        cmssdtCache = fetchRes[0]["cmssdtCache"]
+        isInS3Cache = fetchRes[0]['isInS3Cache']
+
+    if (not success) and (not isCmsdistGenerated):
         logMsg("Trying to fetch source file: %s" % source)
         success = downloadHandler(source, downloadDir, downloadOptions)
 
@@ -1041,15 +1105,23 @@ def download(source, dest, options, pkg=None, scheduler=None):
         f.close()
         if dest and exists(realFile) and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
-        if noCmssdtCache:
+        if not cmssdtCache:
             r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
             r.close ()
-        elif pkg and scheduler and (not isInS3Cache) and options.uploadPackageCacheS3:
-            if not [True for reg in NO_STORE_CACHE_SOURCES if reg.match(pkg.name)]:
-                deps = ["install-%s" % pkg.pkgName()] + [ addS3CredentialsTask(scheduler) ]
-                scheduler.parallel("download-upload-store-src-%s" % checksum, 0, deps, uploadSourceStoreS3, realFile, s3file, pkg, scheduler)
+        else:
+            err, out = getstatusoutput("sha256sum %s | cut -d' ' -f1" % realFile)
+            if not err and re.match(ReSha256, out):
+                with open("%s.sha256" % realFile, 'w') as ref:
+                    ref.write("%s\n" % out)
+        if origCmssdtCache and (not isInS3Cache) and options.uploadPackageCacheS3 and pkg and scheduler:
+            if not isCmsdistGenerated and not [True for reg in NO_STORE_CACHE_SOURCES if reg.match(pkg.name)]:
+                deps = ["install-%s" % pkg.pkgName()] + [ addS3CredentialsTask(scheduler)]
+                sfile =  getSourceFilePath(filename, checksum)
+                scheduler.parallel("download-upload-store-src-%s" % checksum, 0, deps, uploadSourceStoreS3, realFile, sfile, pkg, scheduler)
+            if isCmsdistGenerated:
+                pkg.generatedSources.append((filename, checksum, isCmsdistExpandedGenerated))
     elif isCmsdistGenerated:
-        pkg.missingS3Sources.append((filename, checksum, isCmsdistExpandedGenerated))
+        pkg.generatedSources.append((filename, checksum, isCmsdistExpandedGenerated))
     return (success or isCmsdistGenerated)
 
 
@@ -2403,7 +2475,7 @@ class Package(object):
         self.imports = []
         self.buildrequires = []
         self.sources = []
-        self.missingS3Sources = []
+        self.generatedSources = []
         self.sourcesNumbers = {}
         self.patches = []
         self.pkgreqs = "%{nil}"
@@ -3242,19 +3314,9 @@ def parseOptions():
                       help="Do not check/download already built packages from object store on server",
                       action="store_false",
                       default=True)
-    parser.add_option("--upload-package-store",
-                      dest="uploadPackageCache",
-                      help="Upload newly built packages to object store on server",
-                      action="store_true",
-                      default=False)
     parser.add_option("--upload-package-store-s3",
                       dest="uploadPackageCacheS3",
                       help="Upload newly built packages to S3 object store",
-                      action="store_true",
-                      default=False)
-    parser.add_option("--upload-package-store-s3-source-only",
-                      dest="uploadPackageCacheS3SourceOnly",
-                      help="Upload newly built packages sources only to S3 object store",
                       action="store_true",
                       default=False)
     parser.add_option("--s3-server",
@@ -3485,12 +3547,6 @@ def parseOptions():
                           action="store_true",
                           help="When upload without sync-back then do not copy parents repository packages but just create a link. tag=hash will be used if this is set.",
                           default=False)
-    uploadGroup.add_option("--gpg-signature",
-                          dest="gpgSignature",
-                          action="store_true",
-                          help="Request the server to sign the uploaded transaction.",
-                          default=False)
-
 
     uploadGroup.add_option("--server-apt-env",
                            dest="serverAptEnv",
@@ -3533,10 +3589,6 @@ def parseOptions():
 
     if (not "-J" in opts.sshOptions) and (not "cern.ch" in socket.getfqdn()):
         opts.sshOptions = "%s -J %s@lxplus.cern.ch" % (opts.sshOptions, opts.uploadUser)
-    if opts.uploadPackageCacheS3SourceOnly:
-        opts.uploadPackageCacheS3 = True
-    if opts.uploadPackageCacheS3:
-        opts.uploadPackageCache=True
     if "gcc" in opts.useSystemTools:
         opts.systemCompiler = True
         opts.useSystemTools.remove("gcc")
@@ -3917,15 +3969,16 @@ def isPackageStoreEnabled(pkg):
 
 
 def isPackageStoreUploadEnabled(pkg):
-    return pkg.versionSuffix and (opts.tag == "hash") and opts.uploadPackageCache
+    return pkg.versionSuffix and (opts.tag == "hash") and opts.uploadPackageCacheS3
 
 
 def downloadFromStore(pkg, scheduler):
+    downloadOptions = DownloadOptions(opts)
     for p in pkg.subpackages + [pkg]:
         download_ok = False
-        for store in ["http://%s.%s/store" % (opts.s3Bucket, opts.s3Server)]:
-            cache_url = "%s/%s" % (store, p.rpmfilename)
-            if downloadUrllib2(cache_url, pkg.builddir, opts, cmscache=False):
+        for store in ["http://%s.%s/%sstore" % (opts.s3Bucket, opts.s3Server, S3Prefix)]:
+            url = "%s/%s" % (store, p.rpmfilename)
+            if fetchFromCache(url, pkg.builddir, downloadOptions, scheduler.log, gpg_verify=1):
                 download_ok = True
                 break
         if not download_ok: return False
@@ -4152,8 +4205,62 @@ def downloadS3Credentials(scheduler):
         scheduler.log("Done downloading S3Credentials.")
     return
 
-def uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
+def gpgSetup(scheduler):
+   err, out = getstatusoutput("gpg --batch --import %s" % (join(pkgtools_dir, "etc", "gpg-public-key.txt")))
+   if err:
+       return "Error: Unable to import GPG key.\n%s" % out
+   return
+
+def gpgSignature(srcFile):
+    pgp_file = srcFile+".sig"
+    if exists(pgp_file): return (True, "")
+    cmd = format("([ -e %(src)s.sha256 ] || (sha256sum %(src)s | cut -d' ' -f1 > %(src)s.sha256)) && cat %(src)s.sha256", src=srcFile)
+    err, sha = getstatusoutput(cmd)
+    if err or not re.match(ReSha256, sha):
+        return (False, "Failed to get sha256 checksum for file %s\n%s" % (srcFile, sha))
+    cmd = format(
+        "/data/scripts%(useDev)s/gpg-signature.py %(sha)s\n",
+        sha=sha,
+        useDev="-dev" if opts.useDev else "")
+    (err, out) = executeScript(opts, cmd, False, forceNoDebug=True)
+    if err:
+        return (False, "Failed to get GPG signatures for file %s\n%s" % (srcFile, out))
+    with open(pgp_file, "w") as ref:
+        ref.write(out)
+    return True, ""
+
+def fetctCmspkgFile(srcFile, destFile, useNonDev=False):
+    useDev = ""
+    if not useNonDev and opts.useDev: useDev = "-dev"
+    fileUrl = "%s%s/file/%s/%s/%s" % (opts.server, useDev, opts.repository, opts.architecture, srcFile)
+    log("fetching %s" % fileUrl, DEBUG)
+    try:
+        f = urlopen(fileUrl)
+        contents = f.read()
+    except:
+        log("Unable to fetch file %s. Mispelled architecture/repository name?" % filrUrl)
+        return False
+    with open(destFile, "wb") as ref:
+      ref.write(contents)
+    return True
+
+def fetchAndVerifyCmspkgFile(srcFile, destFile, useNonDev=False):
+    if not fetctCmspkgFile(srcFile, destFile): return False
+    if not fetctCmspkgFile(srcFile+".sig", destFile+".sig"): return False
+    (ok, msg) = gpgVerify(destFile)
+    getstatusoutput("rm -f %s.sig" % destFile)
+    if not ok:
+        log(msg)
+    return ok
+
+def uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5, pgp=True):
+   if pgp:
+       ok, res = gpgSignature(srcFile)
+       if not ok: return res
+       res = uploadFileStoreS3(srcFile+".sig", destFile+".sig", pkg, scheduler, timeout, timeout_increment, max_try, pgp=False)
+       if res: return res
    upload_log = join(opts.tempdir,"s3upload-"+pkg.pkgName()+".log")
+   destFile = "%s%s" % (S3Prefix, destFile)
    s3_cmd = format("%(pkgtools_dir)s/s3utils -S %(s3Server)s -b %(s3Bucket)s -s %(srcFile)s -d %(destFile)s -c %(cred)s >>%(upload_log)s 2>&1",
        upload_log=upload_log,
        pkgtools_dir=pkgtools_dir,
@@ -4171,89 +4278,41 @@ def uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout=300, timeout_in
            max_try -= 1
        else:
            scheduler.log("Done uploading %s" % destFile)
-           break
-   return
+           return ""
+   return "S3 upload failed for "+srcFile
 
 def touchStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
-   srcFile = join(opts.tempdir, "empty_file")
-   destFile = ".meta_data/store/%s" % rpmfilename
-   getstatusoutput("touch %s" % srcFile)
-   uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout, timeout_increment, max_try)
+     srcFile = join(opts.tempdir, "empty_file")
+     destFile = ".meta_data/store/%s" % rpmfilename
+     if not exists(srcFile):
+         getstatusoutput("touch %s" % srcFile)
+     uploadFileStoreS3(srcFile, destFile, pkg, scheduler, timeout, timeout_increment, max_try, pgp=False)
+     return
 
 def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
-   for (sname, checksum, expand_src) in pkg.missingS3Sources:
-       realFile = abspath(join(opts.workDir, getSourceFilePath(sname, checksum)))
-       s3file = getSourceFilePath(sname, checksum)
-       exDeps = ["download-upload-store-%s" % basename(pkg.rpmfilename)] + [ addS3CredentialsTask(scheduler) ]
-       if expand_src:
-           for (exName, exChecksum) in getExpandedGeneratedSources(realFile):
-               exFile = abspath(join(opts.workDir, getSourceFilePath(exName, exChecksum)))
-               exS3file = getSourceFilePath(exName, exChecksum)
-               exDeps.append("download-upload-store-src-%s" % exChecksum)
-               scheduler.parallel(exDeps[-1], 0, exDeps[0:2], uploadSourceStoreS3, exFile, exS3file, pkg, scheduler)
-       scheduler.parallel("download-upload-store-src-%s" % checksum, 0, exDeps, uploadSourceStoreS3, realFile, s3file, pkg, scheduler)
-   if opts.uploadPackageCacheS3SourceOnly: return
-   logfile = "%s/log" % pkg.builddir
-   if not exists(logfile):
-       scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
-       return
-   touchStoreS3(filename, pkg, scheduler, timeout, timeout_increment, max_try)
-   uploadFileStoreS3(join(abspath("RPMS/cache"), pkg.checksum, filename),
-                     "store/%s" % filename,
-                     pkg, scheduler, timeout, timeout_increment, max_try)
+    for (sname, checksum, expand_src) in pkg.generatedSources:
+        s3file = getSourceFilePath(sname, checksum)
+        realFile = abspath(join(opts.workDir, s3file))
+        if expand_src:
+            for (exName, exChecksum) in getExpandedGeneratedSources(realFile):
+                sfile = getSourceFilePath(exName, exChecksum)
+                res = uploadFileStoreS3(abspath(join(opts.workDir, sfile)),
+                          sfile, pkg, scheduler, timeout, timeout_increment, max_try)
+                if res: return res
+        res = uploadFileStoreS3(realFile, s3file, pkg, scheduler, timeout, timeout_increment, max_try)
+        if res: return res
+    logfile = "%s/log" % pkg.builddir
+    if not exists(logfile):
+        scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
+        return
+    touchStoreS3(filename, pkg, scheduler, timeout, timeout_increment, max_try)
+    return uploadFileStoreS3(
+               join(abspath("RPMS/cache"), pkg.checksum, filename),
+               "store/%s" % filename,
+               pkg, scheduler, timeout, timeout_increment, max_try)
 
 def uploadSourceStoreS3(filename, s3File, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
     return uploadFileStoreS3(filename, s3File, pkg, scheduler, timeout, timeout_increment, max_try)
-
-def uploadStore(rpmfilename, pkg, scheduler):
-    logfile = "%s/log" % pkg.builddir
-    if not exists(logfile):
-      scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
-      return
-    from socket import gethostname
-    uploadFile=basename(rpmfilename)
-    tmpStr = "%s-%s-%s" % (gethostname(), getpid(), getuser())
-    tmpFileName = join(opts.uploadRootDirectory, "store", "tmp", "%s.%s.tmp" % (uploadFile, sha256(tmpStr.encode()).hexdigest()))
-    upload = format(
-        "%(rsync)s %(srcFile)s %(user)s@%(server)s:%(tmpFileName)s",
-        rsync=remoteRsync(opts),
-        srcFile = join(abspath("RPMS/cache"), pkg.checksum, rpmfilename),
-        user = opts.uploadUser,
-        server = opts.uploadServer,
-        tmpFileName = tmpFileName)
-    (err, msg) = executeScript(opts, upload, True)
-    if err:
-        scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
-        return
-    uploadDir=join(opts.uploadRootDirectory, "store", dirname(rpmfilename))
-    runScript = format(
-                "mkdir -p %(uploadDir)s\n"
-                "for x in 1 2 3 4 5 ; do\n"
-                "  if [ ! -e  %(storeFile)s ] ; then\n"
-                "    mv %(tmpFileName)s %(storeFile)s || sleep 0.$((RANDOM %% 100 + 1))\n"
-                "  else\n"
-                "    break\n"
-                "  fi\n"
-                "done\n"
-                "rm -f %(tmpFileName)s",
-                uploadDir = uploadDir,
-                storeFile = join(uploadDir,uploadFile),
-                tmpFileName = tmpFileName)
-    (err, out) = executeScript(opts, runScript, False)
-    if err:
-        scheduler.log("ObjectStore: Warning, unable to upload %s to object store: %s" % (uploadFile, msg))
-    else:
-         scheduler.log("ObjectStore: Successfully uploaded %s to objectstore." % uploadFile)
-    return
-
-
-def updateStoreUsage(pkg, rpmfilename, scheduler):
-    #touch the files downloaded from store so that unused files can be deleted
-    uploadFile=join(opts.uploadRootDirectory, "store", rpmfilename)
-    runScript = format("[ -e %(uploadFile)s ] && touch %(uploadFile)s",uploadFile = uploadFile)
-    (err, out) = executeScript(opts, runScript, False)
-    scheduler.log("ObjctStore: Successfully updated usage of store file %s" % basename(rpmfilename))
-    return
 
 def checkDeps(pkg, requires, scheduler):
     scheduler.log("Checking package dependencies: %s" % pkg.pkgName())
@@ -4516,15 +4575,11 @@ def checkPackageInCache(pkg, scheduler):
         scheduler.serial("install-%s" % subpkg.pkgName(), priority, subinstallActionDependencies, installPackage, subpkg,
                          scheduler)
     if isPackageStoreUploadEnabled(pkg):
-        s3credentials = []
-        if pkg.options.uploadPackageCacheS3:
-            s3credentials.append(addS3CredentialsTask(scheduler))
+        s3task = [addS3CredentialsTask(scheduler)]
         for p in pkg.subpackages + [pkg]:
-            uploadDependencies = s3credentials + ["install-%s" % p.pkgName()]
-            if pkg.options.uploadPackageCacheS3:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), priority, uploadDependencies, uploadStoreS3, p.rpmfilename, p, scheduler)
-            else:
-                scheduler.parallel("download-upload-store-%s" % basename(p.rpmfilename), priority, uploadDependencies, uploadStore, p.rpmfilename, p, scheduler)
+            pname = p.pkgName()
+            deps = ["install-%s" % pname] + s3task
+            scheduler.parallel("download-upload-store-%s" % pname, priority, deps, uploadStoreS3, p.rpmfilename, p, scheduler)
     return
 
 
@@ -4533,9 +4588,10 @@ def buildSpecs(topLevelPackages):
     from scheduler import Scheduler
     global scheduler
     scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log, build_stats)
+    scheduler.parallel("gpg_setup", 0, [], gpgSetup, scheduler)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
-            scheduler.serial("check-%s" % pkg.pkgName(), 0, [], checkPackageInCache, pkg, scheduler)
+            scheduler.serial("check-%s" % pkg.pkgName(), 0, ["gpg_setup"], checkPackageInCache, pkg, scheduler)
 
     # We create before hand since we know they are going to be needed. This
     # is to avoid having parallel threads creating them at the same time with
@@ -4665,19 +4721,17 @@ class PlatformDetectionError(Exception):
 def bootstrap(opts):
     useDev = ""
     if opts.useDev: useDev = "-dev"
-    bootstrapUrl = "%s%s/file/%s/%s/%s" % (opts.server, useDev, opts.repository, opts.architecture, "bootstrap.sh")
-    log("fetching %s" % bootstrapUrl, DEBUG)
-    try:
-        f = urlopen(bootstrapUrl)
-        bootstrapContents = f.read()
-    except:
-        log(
-            "Unable to fetch file %s. Mispelled architecture/repository name?\nNothing changed, aborting bootstrap." % bootstrapUrl)
-        sys.exit(1)
     bootstrapFilename = join(opts.tempdir, "bootstrap.sh")
-    bootstrapFile = open(bootstrapFilename, "wb")
-    bootstrapFile.write(bootstrapContents)
-    bootstrapFile.close()
+    if not fetchAndVerifyCmspkgFile("bootstrap.sh", bootstrapFilename):
+        log("Nothing changed, aborting bootstrap.")
+        sys.exit(1)
+    cmspkgFile = join(opts.tempdir, "cache", "cmspkg.py")
+    if not fetchAndVerifyCmspkgFile("cmspkg.py", cmspkgFile):
+        log("Nothing changed, aborting bootstrap.")
+        sys.exit(1)
+    if not fetchAndVerifyCmspkgFile("cmsos", join(opts.tempdir, "cache", "cmsos"), useNonDev=True):
+        log("Nothing changed, aborting bootstrap.")
+        sys.exit(1)
 
     log("Bootstrapping from server %s" % opts.server, DEBUG)
     bootstrapServer = opts.server.replace("http://", "").replace("https://", "").split("/", 1)[0]
@@ -4687,9 +4741,9 @@ def bootstrap(opts):
                "-arch", opts.architecture,
                "-path", opts.workDir,
                "-repository", opts.repository,
+               "-cmspkg" , cmspkgFile,
+               "-seed-type", "build",
                "-assume-yes", "-only-once", useDev, "setup"]
-    if '-seed-type' in bootstrapContents.decode("ascii", "ignore"):
-        options += ['-seed-type', "build"]
 
     if logLevel is DEBUG:
         options.append("-debug")
@@ -4752,7 +4806,9 @@ def statusAndLog(status, s):
     return status
 
 
-def executeScript(opts, dumpedScript, local=True):
+def executeScript(opts, dumpedScript, local=True, forceNoDebug=False):
+    debug = opts.debug
+    if forceNoDebug: debug=False
     if local:
         executionCmd = "sh -e %(debug)s %(filename)s"
     else:
@@ -4767,7 +4823,7 @@ def executeScript(opts, dumpedScript, local=True):
     f.close()
     if not opts.pretend:
         script = format(executionCmd,
-                        debug=opts.debug and "-x" or "",
+                        debug=debug and "-x" or "",
                         filename=filename,
                         cmdServer=opts.uploadServer,
                         cmdUser=opts.uploadUser,
@@ -4855,9 +4911,12 @@ def getExpandedGeneratedSources(txt_file):
     sourceFiles = []
     with open(txt_file) as ref:
         for line in ref.readlines():
-            sha = line.split(":", 1)[0]
-            if exists(join(opts.workDir, "SOURCES", "cache", sha[0:2], sha, sha)):
-                sourceFiles.append((sha, sha))
+            data = line.split(":")
+            sha = data[0]
+            cacheSource = join(opts.workDir, "SOURCES", "cache", sha[0:2], sha, sha)
+            if not exists(cacheSource):
+                getstatusoutput("install -D %s %s" % (join(opts.workDir, data[-1]), cacheSource))
+            sourceFiles.append((sha, sha))
     return sourceFiles
 
 def getPackageGeneratedSources(pkg):
@@ -4974,8 +5033,6 @@ def upload(opts, args, factory):
         tmpdir=tmpdir,
         uploadSum=uploadSum)
     # Hard-link packages.
-    chksum = "sha256sum $r | awk '{print \"sha256:\"$1}'"
-    if sys.platform == 'darwin': md5sum = "md5 -q $r"
     hardLinkPackages = format(
         "MD5CACHE=%(tmpdir)s/%(uploadSum)s/rpms.md5cache\n"
         "touch $MD5CACHE\n"
@@ -4983,11 +5040,17 @@ def upload(opts, args, factory):
         "  hi=$(echo $h | sed 's|^\\(..\\).*|\\1|')\n"
         "  mkdir -p %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h\n"
         "  for r in $(find %(workdir)s/RPMS/cache/$h/%(architecture)s -name '*.rpm' -type f) ; do\n"
-        "    rn=$(echo $r | sed 's|.*/||;s|.rpm$||')\n"
+        "    bn=$(basename $r)\n"
+        "    rn=$(echo $bn | sed 's|.rpm$||')\n"
         "    ln $r %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/${rn}.rpm\n"
         "    dep=%(workdir)s/%(tempDirPrefix)s/${rn}.dep\n"
         "    if [ -e $dep ] ; then cp -f $dep %(tmpdir)s/%(uploadSum)s/RPMS/$hi/$h/; fi\n"
-        "    echo $(basename $r)\" \"$(%(chksum)s) >> $MD5CACHE\n"
+        "    if [ -e  ${r}.sha256 ] ; then\n"
+        "      chksum=$(cat ${r}.sha256)\n"
+        "    else\n"
+        "      chksum=$(sha256sum $r | cut -d' ' -f1)\n"
+        "    fi\n"
+        "    echo \"${bn} sha256:${chksum}\" >> $MD5CACHE\n"
         "  done\n"
         "done\n"
         "WEB_FILES=$(find %(workdir)s/WEB -type f | wc -l)\n"
@@ -5001,9 +5064,7 @@ def upload(opts, args, factory):
         tmpdir=tmpdir,
         includes=" ".join(pkgChecksums),
         architecture=opts.architecture,
-        uploadSum=uploadSum,
-        gpg_request="touch" if opts.gpgSignature else "rm -f",
-        chksum=chksum)
+        uploadSum=uploadSum)
     # Copy bootstrap-driver.txt, cmsos. Given we can rollback now
     # there is no risk of screwing up the repository by copying some unwanted
     # driver / cmsos.
@@ -5038,9 +5099,14 @@ def upload(opts, args, factory):
             if exists(join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, ".no-cmsrep-upload")): continue
             sources += format(
                 "SRC_DIR=%(tmpdir)s/%(uploadSum)s/SOURCES\n"
+                "src=%(workdir)s/SOURCES/cache/%(checksum_in)s/%(checksum)s/%(filename)s\n"
                 "mkdir -p $SRC_DIR/cache/%(checksum_in)s/%(checksum)s\n"
                 "mkdir -p $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s\n"
-                "ln -f %(workdir)s/SOURCES/cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/cache/%(checksum_in)s/%(checksum)s/%(filename)s\n"
+                "ln -f $src $SRC_DIR/cache/%(checksum_in)s/%(checksum)s/%(filename)s\n"
+                "if [ ! -e ${src}.sha256 ] ; then\n"
+                "  sha256sum ${src} | cut -d' ' -f1 > ${src}.sha256\n"
+                "fi\n"
+                "ln -f ${src}.sha256 $SRC_DIR/cache/%(checksum_in)s/%(checksum)s/%(filename)s.sha256\n"
                 "ln -sf ../../../../cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
                 workdir=opts.workDir,
                 tmpdir=tmpdir,
@@ -5070,13 +5136,12 @@ def upload(opts, args, factory):
     if err: logAndDieOnError(err, "Error while uploading to remote repository.\n"+msg)
 
     upload = format(
-        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s' '%(gpg)s'\n",
+        "/data/scripts%(useDev)s/upload.sh CLONE '%(architecture)s' '%(repository)s' '%(cmspkg_upload_repo)s' '%(tmpUploadDir)s' '%(inc)s'\n",
         tmpdir=tmpdir,
         tmpUploadDir=basename(uploadDir),
         architecture=opts.architecture,
         cmspkg_upload_repo=cmspkg_upload_repo,
         useDev=useDev,
-        gpg="true" if opts.gpgSignature else "false",
         inc="true" if opts.linkParentRepository else "false",
         **repoInfo)
     (err, msg) = executeScript(opts, upload, False)
