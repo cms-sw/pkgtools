@@ -5232,6 +5232,7 @@ if __name__ == "__main__":
     environ["LANG"] = "C"
     environ["LC_CTYPE"] = "C"
     environ["LC_ALL"] = "C"
+    environ["PKG_GPGHOME"] = join(pkgtools_dir, "gpg")
     # --- Fixed reproducible build environment ---
     # Set SOURCE_DATE_EPOCH to a fixed value (today) for reproducible timestamps in RPMs
     os.environ["SOURCE_DATE_EPOCH"] = str(int(mktime(strptime("2026-02-21", "%Y-%m-%d"))))
