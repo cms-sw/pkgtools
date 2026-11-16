@@ -948,24 +948,16 @@ def getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
     return True
 
 def gpgVerify(srcFile):
-    CMS_GPG_FINGERPRINT = '691D763181AC4F2D478859E2DBF691DEF8BF6386'
     CMS_GPG_SIGN = 'CMSPKG-METADATA-SIGNATURE-V1'
     err, out  = getstatusoutput("sha256sum %s | cut -d' ' -f1 " % srcFile)
     if err:
         return  (False , "GPG: Failed to get sha256 checksum.\n%s" % out)
     msg = "%s %s" % (CMS_GPG_SIGN, out)
     sigfile = srcFile + ".sig"
-    err, out = getstatusoutput("echo -n '%s' | gpg --batch --status-fd 1 --verify %s -"  % (msg, sigfile))
+    err, out = getstatusoutput("echo -n '%s' | gpgv --keyring %s/gpg/cms-trustedkeys.gpg %s -"  % (msg, pkgtools_dir, sigfile))
     if err:
         return (False, "GPG: Failed to run gpg verify cmd\n%s" % out)
-    for line in out.splitlines():
-        fields = line.split()
-        if len(fields) >= 3 and fields[0] == '[GNUPG:]' and fields[1] == 'VALIDSIG':
-            fingerprint = fields[2].upper()
-            primary_fingerprint = fields[-1].upper()
-            if CMS_GPG_FINGERPRINT in (fingerprint, primary_fingerprint):
-                return (True, "")
-    return (False, "GPG: Failed to verify the signatures.")
+    return (True, "")
 
 def fetchFromCache(url, downloadDir, downloadOptions, logMsg, gpg_verify=0):
     # gpg_verify: On succeassfull download
@@ -987,7 +979,7 @@ def fetchFromCache(url, downloadDir, downloadOptions, logMsg, gpg_verify=0):
             if not success:
                 logMsg("%s: %s" % (msg, url))
             else:
-                logMsg("GPG signatures varified %s" % url)
+                logMsg("GPG signatures verified %s" % url)
         else:
             logMsg("GPG: Could not find GPG signature file. %s.sig" % url)
             success = gpg_verify==1
@@ -1046,6 +1038,8 @@ def download(source, dest, options, pkg=None, scheduler=None):
     if exists(realFile):
         if dest and not exists(join(dest, filename)):
             symlink(realFile, join(dest, filename))
+        if isCmsdistGenerated and pkg:
+            pkg.generatedSources.append((filename, checksum, isCmsdistExpandedGenerated))
         return True
 
     success = False
@@ -1078,16 +1072,16 @@ def download(source, dest, options, pkg=None, scheduler=None):
             if not fetchRes[-1]["success"]: break
             logMsg("Successfully downloaded source from cache: %s" % url)
             if isCmsdistExpandedGenerated:
-                dfile = abspath(join(options.workDir, destFile))
                 if (len(fetchRes)==1):
-                    with open(realFile) as ref:
+                    with open(destFile) as ref:
                         for line in ref.readlines():
-                            data = line.split(":")
-                            filesToDownlaod.append([data[0], data[0], data[-1].lstrip("/")])
-                elif not exists(dfile):
-                    err, out = getstatusoutput("install -D %s %s" % (sfile, dfile))
+                            line = line.strip()
+                            sha = getUrlChecksum(line)
+                            filesToDownlaod.append([line.rsplit("/", 1)[-1], sha, abspath(join(options.workDir, line))])
+                elif not exists(destFile):
+                    err, out = getstatusoutput("install -D %s %s" % (sfile, destFile))
                     if err:
-                        logMsg("Failed to copy generated file %s\n%s" % (dfile, out))
+                        logMsg("Failed to copy generated file %s\n%s" % (destFile, out))
                         getstatusoutput("rm -f %s" % realFile)
                         return False
 
@@ -3762,6 +3756,27 @@ def packageSources(pkg, scheduler, url, checksum):
         scheduler.log("Symlink created: %s" % linkFile)
     return
 
+def copyGeneratedSource(pkg, scheduler, checksum, url):
+    filename = url.rsplit("/", 1)[1]
+    realFile = abspath(join(opts.workDir, getSourceFilePath(filename, checksum)))
+    if not exists(realFile):
+        genFile = join(pkg.builddir, filename)
+        if not exists(genFile):
+            return "Error: Unable to find generated %s file for %s" % (genFile, pkg.name)
+        err, out = getstatusoutput("cp -f %s %s" % (genFile, realFile))
+        if err:
+            return "Error: Fail to copy %s file to %s" % (genFile, realFile)
+        scheduler.log("Generated file copied: %s" % realFile, DEBUG)
+    else:
+        scheduler.log("Generated file already exists: %s" % realFile, DEBUG)
+    linkFile = join(pkg.sourcedir, filename)
+    if not exists(linkFile):
+        symlink(realFile, linkFile)
+        scheduler.log("Symlink created: %s" % linkFile, DEBUG)
+    else:
+        scheduler.log("Generated link already exists: %s" % linkFile, DEBUG)
+    return
+
 def fetchSources(pkg, scheduler, url=None):
     downloadables = []
     local_src = True
@@ -4205,12 +4220,6 @@ def downloadS3Credentials(scheduler):
         scheduler.log("Done downloading S3Credentials.")
     return
 
-def gpgSetup(scheduler):
-   err, out = getstatusoutput("gpg --batch --import %s" % (join(pkgtools_dir, "etc", "gpg-public-key.txt")))
-   if err:
-       return "Error: Unable to import GPG key.\n%s" % out
-   return
-
 def gpgSignature(srcFile):
     pgp_file = srcFile+".sig"
     if exists(pgp_file): return (True, "")
@@ -4294,7 +4303,7 @@ def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, m
         s3file = getSourceFilePath(sname, checksum)
         realFile = abspath(join(opts.workDir, s3file))
         if expand_src:
-            for (exName, exChecksum) in getExpandedGeneratedSources(realFile):
+            for (exName, exChecksum, exp) in getExpandedGeneratedSources(realFile):
                 sfile = getSourceFilePath(exName, exChecksum)
                 res = uploadFileStoreS3(abspath(join(opts.workDir, sfile)),
                           sfile, pkg, scheduler, timeout, timeout_increment, max_try)
@@ -4545,6 +4554,10 @@ def checkPackageInCache(pkg, scheduler):
         scheduler.serial(check_rpm_task, -1, [], checkRPMBuild)
     pkgSources = pkg.sources + pkg.patches
     priority = getPriority(pkg.name)
+    srpmAcrtionIndex = packaging_steps.index("srpm")
+    bldSrpmTask = "build-srpm-%s" % pkgName
+    preSrpmTask = "build-%s-%s" % (packaging_steps[srpmAcrtionIndex-1],  pkgName)
+    genSourcesTasks = {bldSrpmTask: []}
     if pkgSources:
         urls = [url for url in pkgSources if urlRe.match(url)]
         srcDeps = fetchDependencies
@@ -4552,6 +4565,10 @@ def checkPackageInCache(pkg, scheduler):
             srcDeps = []
             for url in urls:
                 urlCheckSum = getUrlChecksum(url)
+                if hasCmsdistGeneratedProperty(url):
+                    genTask = "download-generated-%s" % urlCheckSum
+                    genSourcesTasks[bldSrpmTask].append(genTask)
+                    scheduler.parallel(genTask, 0, [preSrpmTask], copyGeneratedSource, pkg, scheduler, urlCheckSum, url)
                 fetchTask = "download-%s" % urlCheckSum
                 scheduler.parallel(fetchTask, priority, fetchDependencies, fetchSources, pkg, scheduler, url)
                 srcDeps.append("download-%s-%s" % (pkg.name, urlCheckSum))
@@ -4567,7 +4584,9 @@ def checkPackageInCache(pkg, scheduler):
     for action in packaging_steps:
         actions.append("build-%s-%s" % (action, pkgName))
     for idx in range(len(actions)):
-        scheduler.parallel(actions[idx], priority, buildActionDependencies if idx==0 else [actions[idx-1]], buildPackage, pkg, scheduler, idx, actions)
+        exDeps = [] if (not actions[idx] in genSourcesTasks) else genSourcesTasks[actions[idx]]
+        exDeps.extend(buildActionDependencies if idx==0 else [actions[idx-1]])
+        scheduler.parallel(actions[idx], priority, exDeps, buildPackage, pkg, scheduler, idx, actions)
     scheduler.serial("install-%s" % pkgName, priority, [actions[-1]], installPackage, pkg, scheduler)
     # Install sub-packages too if any
     subinstallActionDependencies = ["install-%s" % pkgName]
@@ -4588,10 +4607,9 @@ def buildSpecs(topLevelPackages):
     from scheduler import Scheduler
     global scheduler
     scheduler = Scheduler(topLevelPackages[0].options.workersPoolSize, log, build_stats)
-    scheduler.parallel("gpg_setup", 0, [], gpgSetup, scheduler)
     for pkg in topLevelPackages:
         if not isPackageInstalled(pkg):
-            scheduler.serial("check-%s" % pkg.pkgName(), 0, ["gpg_setup"], checkPackageInCache, pkg, scheduler)
+            scheduler.serial("check-%s" % pkg.pkgName(), 0, [], checkPackageInCache, pkg, scheduler)
 
     # We create before hand since we know they are going to be needed. This
     # is to avoid having parallel threads creating them at the same time with
@@ -4725,11 +4743,8 @@ def bootstrap(opts):
     if not fetchAndVerifyCmspkgFile("bootstrap.sh", bootstrapFilename):
         log("Nothing changed, aborting bootstrap.")
         sys.exit(1)
-    cmspkgFile = join(opts.tempdir, "cache", "cmspkg.py")
+    cmspkgFile = join(opts.tempdir, "cmspkg.py")
     if not fetchAndVerifyCmspkgFile("cmspkg.py", cmspkgFile):
-        log("Nothing changed, aborting bootstrap.")
-        sys.exit(1)
-    if not fetchAndVerifyCmspkgFile("cmsos", join(opts.tempdir, "cache", "cmsos"), useNonDev=True):
         log("Nothing changed, aborting bootstrap.")
         sys.exit(1)
 
@@ -4911,12 +4926,13 @@ def getExpandedGeneratedSources(txt_file):
     sourceFiles = []
     with open(txt_file) as ref:
         for line in ref.readlines():
-            data = line.split(":")
-            sha = data[0]
-            cacheSource = join(opts.workDir, "SOURCES", "cache", sha[0:2], sha, sha)
+            line = line.strip()
+            filename = line.rsplit("/",1)[-1]
+            sha = getUrlChecksum(line)
+            cacheSource = join(opts.workDir, "SOURCES", "cache", sha[0:2], sha, filename)
             if not exists(cacheSource):
-                getstatusoutput("install -D %s %s" % (join(opts.workDir, data[-1]), cacheSource))
-            sourceFiles.append((sha, sha))
+                getstatusoutput("install -D %s %s" % (join(opts.workDir, line), cacheSource))
+            sourceFiles.append((filename, sha, 1))
     return sourceFiles
 
 def getPackageGeneratedSources(pkg):
@@ -4925,7 +4941,9 @@ def getPackageGeneratedSources(pkg):
         if hasCmsdistGeneratedProperty(source):
             file_name = source.rsplit("/", 1)[1]
             checksum = getUrlChecksum(source)
-            sourceFiles.append((file_name, checksum))
+            if exists(join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, ".no-cmsrep-upload")):
+                continue
+            sourceFiles.append((file_name, checksum, 0))
             if hasCmsdistExpandedGeneratedProperty(source):
                 txt_file = join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, file_name)
                 sourceFiles += getExpandedGeneratedSources(txt_file)
@@ -5090,12 +5108,12 @@ def upload(opts, args, factory):
         # FIXME: this should really parse the url to determine the output filename
         #        rather than relying on the fact we always end up urls with
         #        /some-file.tar.gz
-        sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source))
+        sourceFiles = [(source.rsplit("/", 1)[1], getUrlChecksum(source), 0)
                        for source in pkg.sources
                        if remoteSourceRE.match(source) and not hasCmsdistGeneratedProperty(source)]
         sourceFiles += getPackageGeneratedSources(pkg)
 
-        for filename, checksum in sourceFiles:
+        for filename, checksum, expanded_src in sourceFiles:
             if exists(join(opts.workDir, "SOURCES", "cache", checksum[0:2], checksum, ".no-cmsrep-upload")): continue
             sources += format(
                 "SRC_DIR=%(tmpdir)s/%(uploadSum)s/SOURCES\n"
@@ -5107,7 +5125,9 @@ def upload(opts, args, factory):
                 "  sha256sum ${src} | cut -d' ' -f1 > ${src}.sha256\n"
                 "fi\n"
                 "ln -f ${src}.sha256 $SRC_DIR/cache/%(checksum_in)s/%(checksum)s/%(filename)s.sha256\n"
-                "ln -sf ../../../../cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n",
+                "if [ '%(expanded_src)s' == '0' ] ; then\n"
+                "  ln -sf ../../../../cache/%(checksum_in)s/%(checksum)s/%(filename)s $SRC_DIR/%(architecture)s/%(group)s/%(name)s/%(version)s/%(filename)s\n"
+                "fi\n",
                 workdir=opts.workDir,
                 tmpdir=tmpdir,
                 architecture=opts.architecture,
@@ -5117,6 +5137,7 @@ def upload(opts, args, factory):
                 filename=filename,
                 uploadSum=uploadSum,
                 checksum=checksum,
+                expanded_src=expanded_src,
                 checksum_in=checksum[0:2])
 
     (err, out) = executeScript(opts, "\n".join([createEmptyRepository, hardLinkPackages, copyByProducts, sources]))
