@@ -33,7 +33,12 @@ Usage: $0 -s src-file [-e] [-d des-file] [-S server] [-b bucket] [-a acl] [-m mi
 }
 
 function upload_file(){
-  sha256=$(sha256sum ${SRC_FILE} | cut -d' ' -f1)
+  sha256=""
+  if [ -e ${SRC_FILE}.sha256 ] ; then
+    sha256=$(cat ${SRC_FILE}.sha256)
+  else
+    sha256=$(sha256sum ${SRC_FILE} | cut -d' ' -f1)
+  fi
   date=$(date +"%a, %d %b %Y %T %z")
   xdate=$(date +%s)
   str="PUT\n\n${MIME}\n${date}\nx-amz-acl:${ACL}\nx-amz-meta-sha256:${sha256}\nx-amz-meta-xdate:${xdate}\n/${BUCKET}/${DES_FILE}"
