@@ -964,6 +964,11 @@ def fetchFromCache(url, downloadDir, downloadOptions, logMsg, gpg_verify=0):
     #  0:  do not verify
     #  1:  verify if gpg signature file exists
     #  2:  success on verify otherwise fail
+    try:
+        makedirs(downloadDir)
+    except OSError as e:
+        if not exists(downloadDir):
+            raise downloadDir
     logMsg("Trying to fetch cached source file: %s" % url)
     getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
     success = downloadHandlers["http"](url, downloadDir, downloadOptions, True)
