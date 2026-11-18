@@ -4221,8 +4221,7 @@ def downloadS3Credentials(scheduler):
 
 def gpgSignature(srcFile):
     pgp_file = srcFile+".sig"
-    if exists(pgp_file): return (True, "")
-    cmd = format("([ -e %(src)s.sha256 ] || (sha256sum %(src)s | cut -d' ' -f1 > %(src)s.sha256)) && cat %(src)s.sha256", src=srcFile)
+    cmd = format("(sha256sum %(src)s | cut -d' ' -f1 > %(src)s.sha256) && cat %(src)s.sha256", src=srcFile)
     err, sha = getstatusoutput(cmd)
     if err or not re.match(ReSha256, sha):
         return (False, "Failed to get sha256 checksum for file %s\n%s" % (srcFile, sha))
