@@ -964,11 +964,6 @@ def fetchFromCache(url, downloadDir, downloadOptions, logMsg, gpg_verify=0):
     #  0:  do not verify
     #  1:  verify if gpg signature file exists
     #  2:  success on verify otherwise fail
-    try:
-        makedirs(downloadDir)
-    except OSError as e:
-        if not exists(downloadDir):
-            raise downloadDir
     logMsg("Trying to fetch cached source file: %s" % url)
     getstatusoutput("rm -f %s" % join(downloadDir, ".no-cmsrep-upload"))
     success = downloadHandlers["http"](url, downloadDir, downloadOptions, True)
@@ -1029,8 +1024,12 @@ def download(source, dest, options, pkg=None, scheduler=None):
     downloadDir = dirname (realFile)
 
     # This will will use source from local file system if --source for package was passed
-    if source_name and options.localSources:
+    try:
         makedirs(downloadDir)
+    except OSError as e:
+        if not exists(downloadDir):
+            raise downloadDir
+    if source_name and options.localSources:
         if getLocalSources(pkg, source_name, downloadDir, filename, logMsg):
             r=open (join (downloadDir, ".no-cmsrep-upload"), 'w')
             r.close ()
