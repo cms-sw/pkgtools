@@ -4312,6 +4312,8 @@ def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, m
 def uploadGeneratedSourcesStoreS3(sname, checksum, expand_src, pkg, scheduler):
     s3file = getSourceFilePath(sname, checksum)
     realFile = abspath(join(opts.workDir, s3file))
+    if exists(join(basename(realfile), ".no-cmsrep-upload")):
+        return
     if expand_src:
         for (exName, exChecksum, exp) in getExpandedGeneratedSources(realFile):
             sfile = getSourceFilePath(exName, exChecksum)
