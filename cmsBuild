@@ -4302,17 +4302,6 @@ def touchStoreS3(rpmfilename, pkg, scheduler, timeout=300, timeout_increment=60,
      return
 
 def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
-    for (sname, checksum, expand_src) in pkg.generatedSources:
-        s3file = getSourceFilePath(sname, checksum)
-        realFile = abspath(join(opts.workDir, s3file))
-        if expand_src:
-            for (exName, exChecksum, exp) in getExpandedGeneratedSources(realFile):
-                sfile = getSourceFilePath(exName, exChecksum)
-                res = uploadFileStoreS3(abspath(join(opts.workDir, sfile)),
-                          sfile, pkg, scheduler, timeout, timeout_increment, max_try)
-                if res: return res
-        res = uploadFileStoreS3(realFile, s3file, pkg, scheduler, timeout, timeout_increment, max_try)
-        if res: return res
     logfile = "%s/log" % pkg.builddir
     if not exists(logfile):
         scheduler.log("S3 uploaded skipped as package was already downloaded from S3: %s" % pkg.pkgName())
@@ -4322,6 +4311,18 @@ def uploadStoreS3(filename, pkg, scheduler, timeout=300, timeout_increment=60, m
                join(abspath("RPMS/cache"), pkg.checksum, filename),
                "store/%s" % filename,
                pkg, scheduler, timeout, timeout_increment, max_try)
+
+def uploadGeneratedSourcesStoreS3(sname, checksum, expand_src, pkg, scheduler):
+    s3file = getSourceFilePath(sname, checksum)
+    realFile = abspath(join(opts.workDir, s3file))
+    if exists(join(basename(realfile), ".no-cmsrep-upload")):
+        return
+    if expand_src:
+        for (exName, exChecksum, exp) in getExpandedGeneratedSources(realFile):
+            sfile = getSourceFilePath(exName, exChecksum)
+            res = uploadFileStoreS3(abspath(join(opts.workDir, sfile)), sfile, pkg, scheduler)
+            if res: return res
+    return uploadFileStoreS3(realFile, s3file, pkg, scheduler)
 
 def uploadSourceStoreS3(filename, s3File, pkg, scheduler, timeout=300, timeout_increment=60, max_try=5):
     return uploadFileStoreS3(filename, s3File, pkg, scheduler, timeout, timeout_increment, max_try)
@@ -4598,6 +4599,11 @@ def checkPackageInCache(pkg, scheduler):
                          scheduler)
     if isPackageStoreUploadEnabled(pkg):
         s3task = [addS3CredentialsTask(scheduler)]
+        genSrcDeps = []
+        for (sname, checksum, expand_src) in pkg.generatedSources:
+            genSrcDeps.append("download-upload-generated-%s" % checksum)
+            scheduler.parallel(genSrcDeps[-1], 0, s3task + ["install-%s" % pkg.pkgName()], uploadGeneratedSourcesStoreS3, sname, checksum, expand_src, pkg, scheduler)
+        s3task += genSrcDeps
         for p in pkg.subpackages + [pkg]:
             pname = p.pkgName()
             deps = ["install-%s" % pname] + s3task
