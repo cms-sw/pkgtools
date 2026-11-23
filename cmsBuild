@@ -4590,6 +4590,7 @@ def checkPackageInCache(pkg, scheduler):
     for idx in range(len(actions)):
         exDeps = [] if (not actions[idx] in genSourcesTasks) else genSourcesTasks[actions[idx]]
         exDeps.extend(buildActionDependencies if idx==0 else [actions[idx-1]])
+        action_priority = priority if idx==0 else 0
         scheduler.parallel(actions[idx], priority, exDeps, buildPackage, pkg, scheduler, idx, actions)
     scheduler.serial("install-%s" % pkgName, priority, [actions[-1]], installPackage, pkg, scheduler)
     # Install sub-packages too if any
